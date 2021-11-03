@@ -1,0 +1,89 @@
+
+######## SGXSan App Settings ########
+
+SGXSanRTApp_Cpp_Files := $(wildcard SGXSanRTApp/*.cpp)
+SGXSanRTApp_Include_Paths := -ISGXSanRTApp -I../SGXSanManifest -I$(SGX_SDK)/include
+
+SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths)
+
+# Three configuration modes - Debug, prerelease, release
+#   Debug - Macro DEBUG enabled.
+#   Prerelease - Macro NDEBUG and EDEBUG enabled.
+#   Release - Macro NDEBUG enabled.
+ifeq ($(SGX_DEBUG), 1)
+        SGXSanRTApp_C_Flags += -DDEBUG -UNDEBUG -UEDEBUG
+else ifeq ($(SGX_PRERELEASE), 1)
+        SGXSanRTApp_C_Flags += -DNDEBUG -DEDEBUG -UDEBUG
+else
+        SGXSanRTApp_C_Flags += -DNDEBUG -UEDEBUG -UDEBUG
+endif
+
+SGXSanRTApp_Cpp_Flags := $(SGXSanRTApp_C_Flags)
+
+SGXSanRTApp_Cpp_Objects := $(SGXSanRTApp_Cpp_Files:.cpp=.o)
+
+LibSGXSanRTApp := libSGXSanRTApp.a
+
+######## SGXSan Enclave Settings ########
+
+SGXSanRTEnclave_Cpp_Files := $(wildcard SGXSanRTEnclave/*.cpp)
+SGXSanRTEnclave_Include_Paths := -ISGXSanRTEnclave -I../SGXSanManifest -I$(SGX_SDK)/include  -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
+
+SGXSanRTEnclave_C_Flags := $(SGXSanRTEnclave_Include_Paths) -nostdinc -fvisibility=hidden -fpie -ffunction-sections -fdata-sections $(MITIGATION_CFLAGS)
+CC_BELOW_4_9 := $(shell expr "`$(CC) -dumpversion`" \< "4.9")
+ifeq ($(CC_BELOW_4_9), 1)
+	SGXSanRTEnclave_C_Flags += -fstack-protector
+else
+	SGXSanRTEnclave_C_Flags += -fstack-protector-strong
+endif
+
+SGXSanRTEnclave_Cpp_Flags := $(SGXSanRTEnclave_C_Flags) -nostdinc++
+
+SGXSanRTEnclave_Cpp_Objects := $(sort $(SGXSanRTEnclave_Cpp_Files:.cpp=.o))
+
+LibSGXSanRTEnclave := libSGXSanRTEnclave.a
+
+.PHONY: all
+all: $(LibSGXSanRTApp) $(LibSGXSanRTEnclave)
+
+######## SGXSan App Objects ########
+
+# SGXSanRTApp/SGXSanRTEnclave_u.h: $(SGX_EDGER8R) SGXSanRTEnclave/SGXSanRTEnclave.edl
+# 	cd SGXSanRTApp && $(SGX_EDGER8R) --untrusted ../SGXSanRTEnclave/SGXSanRTEnclave.edl --search-path ../SGXSanRTEnclave --search-path $(SGX_SDK)/include
+# 	@echo "GEN  =>  $@"
+
+# SGXSanRTApp/SGXSanRTEnclave_u.c: SGXSanRTApp/SGXSanRTEnclave_u.h
+
+# SGXSanRTApp/SGXSanRTEnclave_u.o: SGXSanRTApp/SGXSanRTEnclave_u.c
+# 	@$(CC) $(SGX_COMMON_CFLAGS) $(SGXSanRTApp_C_Flags) -c $< -o $@
+# 	@echo "CC   <=  $<"
+
+SGXSanRTApp/%.o: SGXSanRTApp/%.cpp
+	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(SGXSanRTApp_Cpp_Flags) -c $< -o $@
+	@echo "CXX  <=  $<"
+
+$(LibSGXSanRTApp): $(SGXSanRTApp_Cpp_Objects)
+	@$(AR) rcs $@ $^
+
+######## SGXSan Enclave Objects ########
+
+# SGXSanRTEnclave/SGXSanRTEnclave_t.h: $(SGX_EDGER8R) SGXSanRTEnclave/SGXSanRTEnclave.edl
+# 	@cd SGXSanRTEnclave && $(SGX_EDGER8R) --trusted SGXSanRTEnclave.edl --search-path ../SGXSanRTEnclave --search-path $(SGX_SDK)/include
+# 	@echo "GEN  =>  $@"
+
+# SGXSanRTEnclave/SGXSanRTEnclave_t.c: SGXSanRTEnclave/SGXSanRTEnclave_t.h
+
+# SGXSanRTEnclave/SGXSanRTEnclave_t.o: SGXSanRTEnclave/SGXSanRTEnclave_t.c
+# 	@$(CC) $(SGX_COMMON_CFLAGS) $(SGXSanRTEnclave_C_Flags) -c $< -o $@
+# 	@echo "CC   <=  $<"
+
+SGXSanRTEnclave/%.o: SGXSanRTEnclave/%.cpp
+	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(SGXSanRTEnclave_Cpp_Flags) -c $< -o $@
+	@echo "CXX  <=  $<"
+
+$(LibSGXSanRTEnclave): $(SGXSanRTEnclave_Cpp_Objects)
+	@$(AR) rcs $@ $^
+
+.PHONY: clean
+clean:
+	@rm -f $(LibSGXSanRTApp) $(SGXSanRTApp_Cpp_Objects) $(LibSGXSanRTEnclave) $(SGXSanRTEnclave_Cpp_Objects)

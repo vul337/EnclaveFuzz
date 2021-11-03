@@ -1,0 +1,9 @@
+enclave {
+    
+    include "stdint.h"
+
+    untrusted {
+        void ocall_init_shadow_memory(uint64_t enclave_base, uint64_t enclave_size, [out] uint64_t *shadow_beg_ptr, [out] uint64_t *shadow_end_ptr);
+    };
+
+};
