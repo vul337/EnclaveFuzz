@@ -25,9 +25,6 @@ void PrintAddressSpaceLayout()
               (void *)kShadowBeg, (void *)kShadowEnd);
        printf("|| `[%p, %p]` || Elrange ||\n",
               (void *)kEnclaveBase, (void *)(kEnclaveBase + kEnclaveSize - 1));
-
-       printf("SHADOW_SCALE: %d\n", (int)3);
-       printf("SHADOW_GRANULARITY: %d\n", (int)8);
 }
 
 // create shadow memory outside enclave for elrange

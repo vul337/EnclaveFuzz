@@ -57,9 +57,16 @@ static cl::opt<bool> ClSkipPromotableAllocas(
 // but due to http://llvm.org/bugs/show_bug.cgi?id=12652 we temporary
 // set it to 10000.
 static cl::opt<int> ClMaxInsnsToInstrumentPerBB(
-    "sgxsan-max-ins-per-bb", cl::init(10000),
+    "sgxsan-max-ins-per-bb",
+    cl::init(10000),
     cl::desc("maximal number of instructions to instrument in any given BB"),
     cl::Hidden);
+
+static cl::opt<bool> ClCheckAddrOverflow(
+    "sgxsan-check-addr-overflow",
+    cl::desc("Whether check address overflow, default value is false, as in detection work, we can use 0-address unmap to find problem"),
+    cl::Hidden,
+    cl::init(false));
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
@@ -301,20 +308,22 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     assert(TypeSize > 0 && TypeSize % 8 == 0);
     Value *EndAddrLong = IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1));
 
-    // if (start > end) //when start == end, only visit one byte
-    // {
-    //     crash; // unreachable                <= IntegerOverFlowTerm
-    // }
-    // continue check;                          <= InsertBefore
-    // (this check maybe unnecessarily, this could tested by kernel 0 addr SIGSEG)
-    // Value *CmpStartAddrUGTEndAddr = IRB.CreateICmpUGT(AddrLong, EndAddrLong);
-    // Instruction *IntegerOverFlowTerm = SplitBlockAndInsertIfThen(CmpStartAddrUGTEndAddr, InsertBefore, true);
-    // Instruction *RangeCrash = generateCrashCode(IntegerOverFlowTerm, AddrLong, IsWrite, AccessSizeIndex, SizeArgument);
-    // RangeCrash->setDebugLoc(OrigIns->getDebugLoc());
+    if (ClCheckAddrOverflow)
+    {
+        // if (start > end) //when start == end, only visit one byte
+        // {
+        //     crash; // unreachable                <= IntegerOverFlowTerm
+        // }
+        // continue check;                          <= InsertBefore
+        // (this check maybe unnecessarily, this could tested by kernel 0 addr SIGSEG)
+        Value *CmpStartAddrUGTEndAddr = IRB.CreateICmpUGT(AddrLong, EndAddrLong);
+        Instruction *IntegerOverFlowTerm = SplitBlockAndInsertIfThen(CmpStartAddrUGTEndAddr, InsertBefore, true);
+        Instruction *RangeCrash = generateCrashCode(IntegerOverFlowTerm, AddrLong, IsWrite, AccessSizeIndex, SizeArgument);
+        RangeCrash->setDebugLoc(OrigIns->getDebugLoc());
 
-    // update insert point
-    // IRB.SetInsertPoint(InsertBefore);
-
+        // update insert point
+        IRB.SetInsertPoint(InsertBefore);
+    }
     // now start <= end
     // sgxsdk should ensure SGXSanEnclaveSize > 0 and SGXSanEnclaveEnd do not overflow
     Value *SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr);

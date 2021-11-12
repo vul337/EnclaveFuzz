@@ -29,4 +29,7 @@
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal);
+
+void ReportErrorInfo(const char *str);
+
 #endif //ERROR_REPORT_HPP

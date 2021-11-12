@@ -16,6 +16,7 @@ static void init_shadow_memory_out_enclave()
 
 static void AsanInitInternal()
 {
+    assert(asan_inited == 0);
     if (LIKELY(asan_inited))
         return;
 

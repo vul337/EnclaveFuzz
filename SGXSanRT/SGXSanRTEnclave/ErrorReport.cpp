@@ -100,3 +100,9 @@ extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_storeN(uptr addr, uptr size)
 {
     SGXSAN_MEMORY_ACCESS_CALLBACK_SIZED_BODY(addr, size, true);
 }
+
+void ReportErrorInfo(const char *str)
+{
+    printf("[%s] %s\n", "ReportErrorInfo", str);
+    abort();
+}

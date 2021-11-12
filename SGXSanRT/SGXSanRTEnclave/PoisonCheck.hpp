@@ -4,22 +4,7 @@
 #include "SGXSanInt.h"
 #include "SGXSanCheck.h"
 #include "ShadowMap.hpp"
-
-static inline bool IsPowerOfTwo(uptr x)
-{
-    return (x & (x - 1)) == 0;
-}
-
-static inline uptr RoundUpTo(uptr size, uptr boundary)
-{
-    CHECK(IsPowerOfTwo(boundary));
-    return (size + boundary - 1) & ~(boundary - 1);
-}
-
-static inline uptr RoundDownTo(uptr x, uptr boundary)
-{
-    return x & ~(boundary - 1);
-}
+#include "SGXSanAlignment.h"
 
 static inline bool mem_is_zero(const char *beg, uptr size)
 {
