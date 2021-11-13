@@ -6,10 +6,11 @@
 #include "SGXSanAlignment.h"
 #include "SGXSanManifest.h"
 #include "ShadowMap.hpp"
+#include "SGXSanDefs.h"
 
 // These magic values are written to shadow for better error reporting.
 const int kAsanHeapLeftRedzoneMagic = 0xfa;
-const int kAsanHeapRightRedzoneMagic = 0xfa;
+const int kAsanHeapRightRedzoneMagic = 0xfb;
 const int kAsanHeapFreeMagic = 0xfd;
 const int kAsanStackLeftRedzoneMagic = 0xf1;
 const int kAsanStackMidRedzoneMagic = 0xf2;
@@ -39,6 +40,7 @@ static inline void FastPoisonShadow(uptr addr, uptr size, u8 value)
     CHECK(IsAligned(addr, SHADOW_GRANULARITY));
     CHECK(!(size % SHADOW_GRANULARITY));
     size_t poison_size = size / SHADOW_GRANULARITY;
+    // printf("[0x%lx,0x%lx]: 0x%x\n", addr, addr + size - 1, value);
     memset(reinterpret_cast<void *>(MEM_TO_SHADOW(addr)), value, poison_size);
 }
 

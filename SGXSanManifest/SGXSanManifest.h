@@ -11,4 +11,10 @@
 // current may only support granularity 8
 #define SHADOW_GRANULARITY 8
 
+#define CHECK_MALLOC_FREE_MATCH 0
+
+// Consistent with Enclave.config.xml automatically by SyncHeapSize.py
+#define ENCLAVE_HEAP_SIZE 0x100000
+#define SGXSAN_QUARANTINE_SIZE ((ENCLAVE_HEAP_SIZE) / 1024)
+
 #endif

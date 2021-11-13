@@ -25,8 +25,8 @@ public:
 private:
     // Use SGXSan::Allocator avoid malloc-new-malloc's like infinitive loop
     std::queue<QuarantineElement, std::deque<QuarantineElement, SGXSan::ContainerAllocator<QuarantineElement>>> m_queue;
-    size_t quarantine_cache_used_size = 0;
-    size_t quarantine_cache_max_size = 0;
+    size_t m_quarantine_cache_used_size = 0;
+    size_t m_quarantine_cache_max_size = 0;
 };
 
 extern QuarantineCache *g_quarantine_cache;
