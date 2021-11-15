@@ -30,4 +30,16 @@ static inline uptr ComputeRZSize(uptr size)
     return 16 << ComputeRZLog(size);
 }
 
+#if defined(__cplusplus)
+extern "C"
+{
+#endif
+    void *sgxsan_malloc(size_t size);
+    void sgxsan_free(void *ptr);
+    void *sgxsan_calloc(size_t n_elements, size_t elem_size);
+    void *sgxsan_realloc(void *oldmem, size_t bytes);
+#if defined(__cplusplus)
+}
+#endif
+
 #endif

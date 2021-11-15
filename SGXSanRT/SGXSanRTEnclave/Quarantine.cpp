@@ -21,7 +21,7 @@ void QuarantineCache::put(QuarantineElement qe)
 {
     uptr alignment = SHADOW_GRANULARITY;
 
-#if 0
+#if 1
     // Consistency check
     pthread_rwlock_rdlock(&rwlock_quarantine_cache);
     if (m_queue.empty())

@@ -1,5 +1,5 @@
 #include "llvm/Pass.h"
-#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
@@ -10,27 +10,61 @@ using namespace llvm;
 
 namespace
 {
-    struct SGXSanPass : public FunctionPass
+    struct SGXSanPass : public ModulePass
     {
         static char ID;
-        SGXSanPass() : FunctionPass(ID) {}
+        SGXSanPass() : ModulePass(ID) {}
 
-        bool runOnFunction(Function &F) override
+        bool runOnModule(Module &M) override
         {
-            AddressSanitizer ASan(*F.getParent());
+            bool Changed = false;
+            AddressSanitizer ASan(M);
+            for (Function &F : M)
+            {
+                // errs() << "Hello: " << F.getName() << '\n';
+                // (https://stackoverflow.com/questions/30990032/change-name-of-llvm-function)
+                StringRef func_name = F.getName();
+                if (func_name == "malloc")
+                {
+                    F.setName("sgxsan_malloc");
+                }
+                else if (func_name == "free")
+                {
+                    F.setName("sgxsan_free");
+                }
+                else if (func_name == "realloc")
+                {
+                    F.setName("sgxsan_realloc");
+                }
+                else if (func_name == "calloc")
+                {
+                    F.setName("sgxsan_calloc");
+                }
 
-            return ASan.instrumentFunction(F);
+                if (not F.isDeclaration())
+                {
+                    Changed |= ASan.instrumentFunction(F);
+                }
+            }
+            return Changed;
         }
+
+        // bool runOnFunction(Function &F) override
+        // {
+        //     AddressSanitizer ASan(*F.getParent());
+
+        //     return ASan.instrumentFunction(F);
+        // }
     }; // end of struct SGXSanPass
 } // end of anonymous namespace
 
-char SGXSanPass::ID = 0;
+char SGXSanPass::ID = 1;
 static RegisterPass<SGXSanPass> X("SGXSanPass", "SGXSanPass",
-                                false /* Only looks at CFG */,
-                                false /* Analysis Pass */);
+                                  false /* Only looks at CFG */,
+                                  false /* Analysis Pass */);
 
 static RegisterStandardPasses Y(
-    PassManagerBuilder::EP_EarlyAsPossible,
+    PassManagerBuilder::EP_EnabledOnOptLevel0, // EP_EarlyAsPossible can only be used in FunctionPass(https://lists.llvm.org/pipermail/llvm-dev/2018-June/123987.html)
     [](const PassManagerBuilder &Builder,
        legacy::PassManagerBase &PM)
     { PM.add(new SGXSanPass()); });

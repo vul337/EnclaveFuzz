@@ -24,7 +24,7 @@ struct chunk
   size_t user_size;
 };
 
-void *malloc(size_t size)
+void *sgxsan_malloc(size_t size)
 {
   if (not asan_inited)
   {
@@ -111,7 +111,7 @@ void *malloc(size_t size)
   return reinterpret_cast<void *>(user_beg);
 }
 
-void free(void *ptr)
+void sgxsan_free(void *ptr)
 {
   if (not asan_inited)
   {
@@ -163,7 +163,7 @@ void free(void *ptr)
   // printf(" %s", "\n");
 }
 
-void *calloc(size_t n_elements, size_t elem_size)
+void *sgxsan_calloc(size_t n_elements, size_t elem_size)
 {
   if (not asan_inited)
   {
@@ -188,7 +188,7 @@ void *calloc(size_t n_elements, size_t elem_size)
   return mem;
 }
 
-void *realloc(void *oldmem, size_t bytes)
+void *sgxsan_realloc(void *oldmem, size_t bytes)
 {
   if (not asan_inited)
   {
