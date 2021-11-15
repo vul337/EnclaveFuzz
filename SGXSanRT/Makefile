@@ -58,7 +58,7 @@ all: $(LibSGXSanRTApp) $(LibSGXSanRTEnclave)
 # 	@$(CC) $(SGX_COMMON_CFLAGS) $(SGXSanRTApp_C_Flags) -c $< -o $@
 # 	@echo "CC   <=  $<"
 
-SGXSanRTApp/%.o: SGXSanRTApp/%.cpp
+SGXSanRTApp/%.o: SGXSanRTApp/%.cpp ../SGXSanManifest/SGXSanManifest.h
 	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(SGXSanRTApp_Cpp_Flags) -c $< -o $@
 	@echo "CXX  <=  $<"
 
@@ -77,7 +77,7 @@ $(LibSGXSanRTApp): $(SGXSanRTApp_Cpp_Objects)
 # 	@$(CC) $(SGX_COMMON_CFLAGS) $(SGXSanRTEnclave_C_Flags) -c $< -o $@
 # 	@echo "CC   <=  $<"
 
-SGXSanRTEnclave/%.o: SGXSanRTEnclave/%.cpp
+SGXSanRTEnclave/%.o: SGXSanRTEnclave/%.cpp ../SGXSanManifest/SGXSanManifest.h
 	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(SGXSanRTEnclave_Cpp_Flags) -c $< -o $@
 	@echo "CXX  <=  $<"
 

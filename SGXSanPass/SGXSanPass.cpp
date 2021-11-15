@@ -5,6 +5,7 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
 #include "AddressSanitizer.hpp"
+#include "SGXSanManifest.h"
 
 using namespace llvm;
 
@@ -21,6 +22,7 @@ namespace
             AddressSanitizer ASan(M);
             for (Function &F : M)
             {
+#if (USE_SGXSAN_MALLOC)
                 // errs() << "Hello: " << F.getName() << '\n';
                 // (https://stackoverflow.com/questions/30990032/change-name-of-llvm-function)
                 StringRef func_name = F.getName();
@@ -40,7 +42,7 @@ namespace
                 {
                     F.setName("sgxsan_calloc");
                 }
-
+#endif
                 if (not F.isDeclaration())
                 {
                     Changed |= ASan.instrumentFunction(F);

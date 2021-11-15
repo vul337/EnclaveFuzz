@@ -10,12 +10,37 @@
 #include "Quarantine.hpp"
 #include "InternDlmalloc.hpp"
 
+#if (USE_SGXSAN_MALLOC)
+#define MALLOC sgxsan_malloc
+#define BACKEND_MALLOC malloc
+#define FREE sgxsan_free
+#define BACKEND_FREE free
+#define CALLOC sgxsan_calloc
+#define BACKEND_CALLOC calloc
+#define REALLOC sgxsan_realloc
+#define BACKEND_REALLOC realloc
+#else
+#define MALLOC malloc
+#define BACKEND_MALLOC dlmalloc
+#define FREE free
+#define BACKEND_FREE dlfree
+#define CALLOC calloc
+#define BACKEND_CALLOC dlcalloc
+#define REALLOC realloc
+#define BACKEND_REALLOC dlrealloc
+#endif
+
 #if (CHECK_MALLOC_FREE_MATCH)
 static pthread_rwlock_t rwlock_heap_obj_user_beg_set = PTHREAD_RWLOCK_INITIALIZER;
 
+#if (!USE_SGXSAN_MALLOC)
 // Use SGXSan::DLAllocator avoid malloc-new-malloc's like infinitive loop
 // there are two mempool never free, dwarf_reg_state_pool and dwarf_cie_info_pool
 static std::unordered_set<uptr, std::hash<uptr>, std::equal_to<uptr>, SGXSan::ContainerAllocator<uptr>> heap_obj_user_beg_set;
+#else
+static std::unordered_set<uptr> heap_obj_user_beg_set;
+#endif
+
 #endif
 
 struct chunk
@@ -24,11 +49,11 @@ struct chunk
   size_t user_size;
 };
 
-void *sgxsan_malloc(size_t size)
+void *MALLOC(size_t size)
 {
   if (not asan_inited)
   {
-    return dlmalloc(size);
+    return BACKEND_MALLOC(size);
   }
 
   uptr alignment = SHADOW_GRANULARITY;
@@ -42,7 +67,8 @@ void *sgxsan_malloc(size_t size)
   uptr rounded_size = RoundUpTo(size, alignment);
   uptr needed_size = rounded_size + 2 * rz_size;
 
-  void *allocated = dlmalloc(needed_size);
+  void *allocated = BACKEND_MALLOC(needed_size);
+
   if (allocated == nullptr)
   {
     return nullptr;
@@ -111,11 +137,11 @@ void *sgxsan_malloc(size_t size)
   return reinterpret_cast<void *>(user_beg);
 }
 
-void sgxsan_free(void *ptr)
+void FREE(void *ptr)
 {
   if (not asan_inited)
   {
-    dlfree(ptr);
+    BACKEND_FREE(ptr);
     return;
   }
 
@@ -163,11 +189,11 @@ void sgxsan_free(void *ptr)
   // printf(" %s", "\n");
 }
 
-void *sgxsan_calloc(size_t n_elements, size_t elem_size)
+void *CALLOC(size_t n_elements, size_t elem_size)
 {
   if (not asan_inited)
   {
-    return dlcalloc(n_elements, elem_size);
+    return BACKEND_CALLOC(n_elements, elem_size);
   }
 
   if (n_elements == 0 || elem_size == 0)
@@ -179,8 +205,7 @@ void *sgxsan_calloc(size_t n_elements, size_t elem_size)
   {
     return nullptr;
   }
-
-  void *mem = malloc(req);
+  void *mem = MALLOC(req);
   if (mem != nullptr)
   {
     memset(mem, 0, req);
@@ -188,25 +213,26 @@ void *sgxsan_calloc(size_t n_elements, size_t elem_size)
   return mem;
 }
 
-void *sgxsan_realloc(void *oldmem, size_t bytes)
+void *REALLOC(void *oldmem, size_t bytes)
 {
   if (not asan_inited)
   {
-    return dlrealloc(oldmem, bytes);
+    return BACKEND_REALLOC(oldmem, bytes);
   }
 
   void *mem = 0;
   if (oldmem == nullptr)
   {
-    return malloc(bytes);
+    return MALLOC(bytes);
   }
   if (bytes == 0)
   {
-    free(oldmem);
+    FREE(oldmem);
     return nullptr;
   }
 
-  mem = malloc(bytes);
+  mem = MALLOC(bytes);
+
   if (mem != 0)
   {
     uptr chunk_beg = reinterpret_cast<uptr>(oldmem) - sizeof(chunk);
@@ -214,7 +240,7 @@ void *sgxsan_realloc(void *oldmem, size_t bytes)
     size_t old_size = m->user_size;
 
     memcpy(mem, oldmem, bytes > old_size ? old_size : bytes);
-    free(oldmem);
+    FREE(oldmem);
   }
 
   return mem;

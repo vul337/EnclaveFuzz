@@ -1,7 +1,14 @@
 #include <pthread.h>
+#include <stdlib.h>
 #include "Quarantine.hpp"
 #include "SGXSanDefs.h"
 #include "SGXSanManifest.h"
+
+#if (USE_SGXSAN_MALLOC)
+#define BACKEND_FREE free
+#else
+#define BACKEND_FREE dlfree
+#endif
 
 static pthread_rwlock_t rwlock_quarantine_cache = PTHREAD_RWLOCK_INITIALIZER;
 
@@ -33,7 +40,7 @@ void QuarantineCache::put(QuarantineElement qe)
     // if cache can not hold this element, directly free it
     if (qe.alloc_size > m_quarantine_cache_max_size)
     {
-        dlfree(reinterpret_cast<void *>(qe.alloc_beg));
+        BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
         // printf("[free] alloc_beg=0x%lx user_beg=0x%lx \n", qe.alloc_beg, qe.user_beg);
         FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, alignment), kAsanHeapLeftRedzoneMagic);
         return;
@@ -45,7 +52,7 @@ void QuarantineCache::put(QuarantineElement qe)
     {
         QuarantineElement front_qe = m_queue.front();
         // free and poison
-        dlfree(reinterpret_cast<void *>(front_qe.alloc_beg));
+        BACKEND_FREE(reinterpret_cast<void *>(front_qe.alloc_beg));
         // printf("[free for quarantine] alloc_beg=0x%lx user_beg=0x%lx \n", front_qe.alloc_beg, front_qe.user_beg);
         FastPoisonShadow(front_qe.user_beg, RoundUpTo(front_qe.user_size, alignment), kAsanHeapLeftRedzoneMagic);
         // update quarantine cache
