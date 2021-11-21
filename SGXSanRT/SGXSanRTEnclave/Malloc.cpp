@@ -2,13 +2,14 @@
 #include <unordered_set>
 #include <pthread.h>
 #include "SGXSanManifest.h"
-#include "PoisonCheck.hpp"
+#include "SGXSanCommonPoisonCheck.hpp"
 #include "Malloc.hpp"
-#include "Poison.hpp"
+#include "SGXSanCommonPoison.hpp"
 #include "ErrorReport.hpp"
-#include "SGXSanRT.hpp"
+#include "SGXSanRTEnclave.hpp"
 #include "Quarantine.hpp"
 #include "InternDlmalloc.hpp"
+#include "Printf.h"
 
 #if (USE_SGXSAN_MALLOC)
 #define MALLOC sgxsan_malloc
@@ -124,7 +125,7 @@ void *MALLOC(size_t size)
   else
   {
     pthread_rwlock_unlock(&rwlock_heap_obj_user_beg_set);
-    ReportErrorInfo("malloc an already allocated memory");
+    PrintErrorAndAbort("malloc an already allocated memory");
   }
 #endif
   // printf("[heap_obj_user_beg_set] [after malloc] ");
@@ -160,7 +161,7 @@ void FREE(void *ptr)
   if (heap_obj_user_beg_set.find(user_beg) == heap_obj_user_beg_set.end())
   {
     pthread_rwlock_unlock(&rwlock_heap_obj_user_beg_set);
-    ReportErrorInfo("free an non-recorded address"); // abort();
+    PrintErrorAndAbort("free an non-recorded address"); // abort();
   }
   else
   {

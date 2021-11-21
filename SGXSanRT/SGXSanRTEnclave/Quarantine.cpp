@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "Quarantine.hpp"
 #include "SGXSanDefs.h"
+#include "Printf.h"
 #include "SGXSanManifest.h"
 
 #if (USE_SGXSAN_MALLOC)

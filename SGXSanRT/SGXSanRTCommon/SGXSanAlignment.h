@@ -1,5 +1,5 @@
-#ifndef ALIGNMENT_H
-#define ALIGNMENT_H
+#ifndef SGXSAN_ALIGNMENT_H
+#define SGXSAN_ALIGNMENT_H
 
 #include "SGXSanInt.h"
 #include "SGXSanCheck.h"

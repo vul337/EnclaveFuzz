@@ -1,10 +1,10 @@
-
-######## SGXSan App Settings ########
+######## SGXSanRT App Settings ########
 
 SGXSanRTApp_Cpp_Files := $(wildcard SGXSanRTApp/*.cpp)
-SGXSanRTApp_Include_Paths := -ISGXSanRTApp -I../SGXSanManifest -I$(SGX_SDK)/include
+SGXSanRTApp_Include_Paths := -ISGXSanRTApp -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include
 
-SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths)
+Enclave_File_Name ?= "enclave.signed.so"
+SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${Enclave_File_Name}"
 
 # Three configuration modes - Debug, prerelease, release
 #   Debug - Macro DEBUG enabled.
@@ -24,10 +24,10 @@ SGXSanRTApp_Cpp_Objects := $(SGXSanRTApp_Cpp_Files:.cpp=.o)
 
 LibSGXSanRTApp := libSGXSanRTApp.a
 
-######## SGXSan Enclave Settings ########
+######## SGXSanRT Enclave Settings ########
 
 SGXSanRTEnclave_Cpp_Files := $(wildcard SGXSanRTEnclave/*.cpp)
-SGXSanRTEnclave_Include_Paths := -ISGXSanRTEnclave -I../SGXSanManifest -I$(SGX_SDK)/include  -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
+SGXSanRTEnclave_Include_Paths := -ISGXSanRTEnclave -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include  -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
 
 SGXSanRTEnclave_C_Flags := $(SGXSanRTEnclave_Include_Paths) -nostdinc -fvisibility=hidden -fpie -ffunction-sections -fdata-sections $(MITIGATION_CFLAGS)
 CC_BELOW_4_9 := $(shell expr "`$(CC) -dumpversion`" \< "4.9")
@@ -46,7 +46,7 @@ LibSGXSanRTEnclave := libSGXSanRTEnclave.a
 .PHONY: all
 all: $(LibSGXSanRTApp) $(LibSGXSanRTEnclave)
 
-######## SGXSan App Objects ########
+######## SGXSanRT App Objects ########
 
 # SGXSanRTApp/SGXSanRTEnclave_u.h: $(SGX_EDGER8R) SGXSanRTEnclave/SGXSanRTEnclave.edl
 # 	cd SGXSanRTApp && $(SGX_EDGER8R) --untrusted ../SGXSanRTEnclave/SGXSanRTEnclave.edl --search-path ../SGXSanRTEnclave --search-path $(SGX_SDK)/include
@@ -65,7 +65,7 @@ SGXSanRTApp/%.o: SGXSanRTApp/%.cpp ../SGXSanManifest/SGXSanManifest.h
 $(LibSGXSanRTApp): $(SGXSanRTApp_Cpp_Objects)
 	@$(AR) rcs $@ $^
 
-######## SGXSan Enclave Objects ########
+######## SGXSanRT Enclave Objects ########
 
 # SGXSanRTEnclave/SGXSanRTEnclave_t.h: $(SGX_EDGER8R) SGXSanRTEnclave/SGXSanRTEnclave.edl
 # 	@cd SGXSanRTEnclave && $(SGX_EDGER8R) --trusted SGXSanRTEnclave.edl --search-path ../SGXSanRTEnclave --search-path $(SGX_SDK)/include

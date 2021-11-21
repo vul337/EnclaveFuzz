@@ -5,7 +5,7 @@
 #include <cstddef>
 #include "SGXSanInt.h"
 #include "ContainerAllocator.hpp"
-#include "Poison.hpp"
+#include "SGXSanCommonPoison.hpp"
 
 struct QuarantineElement
 {

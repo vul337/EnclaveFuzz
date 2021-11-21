@@ -1,11 +1,12 @@
-#ifndef SHADOW_MAP_HPP
-#define SHADOW_MAP_HPP
+#ifndef SGXSAN_COMMON_SHADOW_MAP_HPP
+#define SGXSAN_COMMON_SHADOW_MAP_HPP
 
 #include <stdint.h>
 #include "SGXSanManifest.h"
 #include "SGXSanInt.h"
 #include "SGXSanCheck.h"
 
+// there are definition on both of inside and outside enclave
 extern uint64_t g_enclave_base;
 extern uint64_t g_enclave_size;
 
@@ -68,4 +69,4 @@ static inline uptr MemToShadow(uptr p)
     return MEM_TO_SHADOW(p);
 }
 
-#endif //SHADOW_MAP_HPP
+#endif //SGXSAN_COMMON_SHADOW_MAP_HPP

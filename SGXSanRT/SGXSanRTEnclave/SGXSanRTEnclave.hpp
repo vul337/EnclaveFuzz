@@ -1,5 +1,5 @@
-#ifndef SGXSAN_RT_HPP
-#define SGXSAN_RT_HPP
+#ifndef SGXSAN_RT_ENCLAVE_HPP
+#define SGXSAN_RT_ENCLAVE_HPP
 
 extern int asan_inited;
 
@@ -16,4 +16,4 @@ void AsanInitFromRtl();
     } while (0)
 #endif
 
-#endif //SGXSAN_RT_HPP
+#endif //SGXSAN_RT_ENCLAVE_HPP

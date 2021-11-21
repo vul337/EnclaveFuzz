@@ -30,6 +30,6 @@
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal);
 
-void ReportErrorInfo(const char *str);
+void PrintErrorAndAbort(const char *format, ...);
 
 #endif //ERROR_REPORT_HPP

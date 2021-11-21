@@ -16,16 +16,4 @@
     uptr sp = (uptr)&local_stack
 #endif
 
-#if defined(__cplusplus)
-extern "C"
-{
-#endif
-
-    //defined in Enclave.cpp
-    int printf(const char *fmt, ...);
-
-#if defined(__cplusplus)
-}
-#endif
-
 #endif //SGXSAN_DEFS_H

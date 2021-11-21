@@ -1,8 +1,11 @@
 #include <cstdlib>
+#include <stdio.h>
+#include <stdarg.h>
 #include "SGXSanDefs.h"
+#include "Printf.h"
 #include "ErrorReport.hpp"
-#include "ShadowMap.hpp"
-#include "PoisonCheck.hpp"
+#include "SGXSanCommonShadowMap.hpp"
+#include "SGXSanCommonPoisonCheck.hpp"
 
 // -------------------------- Run-time entry ------------------- {{{1
 // exported functions
@@ -101,8 +104,13 @@ extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_storeN(uptr addr, uptr size)
     SGXSAN_MEMORY_ACCESS_CALLBACK_SIZED_BODY(addr, size, true);
 }
 
-void ReportErrorInfo(const char *str)
+void PrintErrorAndAbort(const char *format, ...)
 {
-    printf("[%s] %s\n", "ReportErrorInfo", str);
+    char buf[BUFSIZ] = {'\0'};
+    va_list argptr;
+    va_start(argptr, format);
+    vsnprintf(buf, BUFSIZ, format, argptr);
+    va_end(argptr);
+    printf("[PrintErrorAndAbort] %s\n", buf);
     abort();
 }
