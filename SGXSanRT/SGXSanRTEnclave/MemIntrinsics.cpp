@@ -1,7 +1,11 @@
 #include <string.h>
-#include <errno.h>
 #include <assert.h>
 #include <mbusafecrt.h>
+#include <cstdlib>
+#include "SGXSanDefs.h"
+#include "SGXSanRTEnclave.hpp"
+#include "SGXSanCommonErrorReport.hpp"
+#include "SGXSanCommonPoisonCheck.hpp"
 #include "MemIntrinsics.hpp"
 
 // In order to check safe memory operations:
@@ -9,7 +13,7 @@
 // (Current) Or replace memcpy_s with sgxsan_memcpy_s
 // If we need to instrument sgxsdk, we needn't extra check, as memcpy will be replaced with __asan_memcpy by llvm pass
 
-#define ASAN_MEMCPY_IMPL(to, from, size)                                                                     \
+/* #define ASAN_MEMCPY_IMPL(to, from, size)                                                                     \
     do                                                                                                       \
     {                                                                                                        \
         if (LIKELY(asan_inited))                                                                             \
@@ -30,9 +34,9 @@
             SGXSAN_ELRANGE_CHECK_END;                                                                        \
         }                                                                                                    \
         return memcpy(to, from, size);                                                                       \
-    } while (0)
+    } while (0) */
 
-#define ASAN_MEMSET_IMPL(block, c, size)             \
+/* #define ASAN_MEMSET_IMPL(block, c, size)             \
     do                                               \
     {                                                \
         if (LIKELY(asan_inited))                     \
@@ -43,9 +47,9 @@
             SGXSAN_ELRANGE_CHECK_END;                \
         }                                            \
         return memset(block, c, size);               \
-    } while (0)
+    } while (0) */
 
-#define ASAN_MEMMOVE_IMPL(to, from, size)           \
+/* #define ASAN_MEMMOVE_IMPL(to, from, size)           \
     do                                              \
     {                                               \
         if (LIKELY(asan_inited))                    \
@@ -59,9 +63,9 @@
             SGXSAN_ELRANGE_CHECK_END;               \
         }                                           \
         return memmove(to, from, size);             \
-    } while (0)
+    } while (0) */
 
-#define _VALIDATE_RETURN_ERRCODE(expr, errorcode) \
+/* #define _VALIDATE_RETURN_ERRCODE(expr, errorcode) \
     {                                             \
         int _Expr_val = !!(expr);                 \
         assert((_Expr_val) && (#expr));           \
@@ -71,21 +75,55 @@
             assert(0 && (#expr));                 \
             return (errorcode);                   \
         }                                         \
-    }
+    } */
 
 void *__asan_memcpy(void *to, const void *from, uptr size)
 {
-    ASAN_MEMCPY_IMPL(to, from, size);
+    if (LIKELY(asan_inited))
+    {
+        ENSURE_ASAN_INITED();
+        if (to != from)
+        {
+            if (RangesOverlap((const char *)to, size, (const char *)from, size))
+            {
+                PrintErrorAndAbort("[%s] %p:%lu overlap with %p:%lu\n", "memcpy", to, size, from, size);
+            }
+        }
+        SGXSAN_ELRANGE_CHECK_BEG(from, 0, size)
+        ASAN_READ_RANGE(from, size);
+        SGXSAN_ELRANGE_CHECK_END;
+        SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)
+        ASAN_WRITE_RANGE(to, size);
+        SGXSAN_ELRANGE_CHECK_END;
+    }
+    return memcpy(to, from, size);
 }
 
 void *__asan_memset(void *block, int c, uptr size)
 {
-    ASAN_MEMSET_IMPL(block, c, size);
+    if (LIKELY(asan_inited))
+    {
+        ENSURE_ASAN_INITED();
+        SGXSAN_ELRANGE_CHECK_BEG(block, 1, size)
+        ASAN_WRITE_RANGE(block, size);
+        SGXSAN_ELRANGE_CHECK_END;
+    }
+    return memset(block, c, size);
 }
 
 void *__asan_memmove(void *to, const void *from, uptr size)
 {
-    ASAN_MEMMOVE_IMPL(to, from, size);
+    if (LIKELY(asan_inited))
+    {
+        ENSURE_ASAN_INITED();
+        SGXSAN_ELRANGE_CHECK_BEG(from, 0, size)
+        ASAN_READ_RANGE(from, size);
+        SGXSAN_ELRANGE_CHECK_END;
+        SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)
+        ASAN_WRITE_RANGE(to, size);
+        SGXSAN_ELRANGE_CHECK_END;
+    }
+    return memmove(to, from, size);
 }
 
 errno_t sgxsan_memcpy_s(void *dst, size_t sizeInBytes, const void *src, size_t count)

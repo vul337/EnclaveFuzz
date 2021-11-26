@@ -1,0 +1,4 @@
+[submodule "edger8r"]
+	path = edger8r
+	url = git@github.com:LeoneChen/edger8r.git
+	branch = sgxsan_edger8r

@@ -148,19 +148,29 @@ fail2:
 
 bool SGXSanEnclaveConfigReader::shallow_poison_senitive()
 {
+    SGXSAN_TRACE("[Guard list]\n");
     for (auto guard : m_sgxsan_guard_list)
     {
         // sensitive area should be well aligned
+        SGXSAN_TRACE("\t\t[%lx,%lx]=>[%lx,%lx]\n", guard.first + m_enclave_load_addr, guard.first + m_enclave_load_addr + (guard.second << 12) - 1,
+                     MEM_TO_SHADOW(guard.first + m_enclave_load_addr), MEM_TO_SHADOW(guard.first + m_enclave_load_addr + (guard.second << 12) - 1));
         FastPoisonShadow(guard.first + m_enclave_load_addr, guard.second << 12, kSGXSanShadowSensitive);
     }
+    SGXSAN_TRACE("\n[TCS list]\n");
     for (auto tcs : m_sgxsan_tcs_list)
     {
+        SGXSAN_TRACE("\t\t[%lx,%lx]=>[%lx,%lx]\n", tcs.first + m_enclave_load_addr, tcs.first + m_enclave_load_addr + (tcs.second << 12) - 1,
+                     MEM_TO_SHADOW(tcs.first + m_enclave_load_addr), MEM_TO_SHADOW(tcs.first + m_enclave_load_addr + (tcs.second << 12) - 1));
         FastPoisonShadow(tcs.first + m_enclave_load_addr, tcs.second << 12, kSGXSanShadowSensitive);
     }
+    SGXSAN_TRACE("\n[SSA list]\n");
     for (auto ssa : m_sgxsan_ssa_list)
     {
+        SGXSAN_TRACE("\t\t[%lx,%lx]=>[%lx,%lx]\n", ssa.first + m_enclave_load_addr, ssa.first + m_enclave_load_addr + (ssa.second << 12) - 1,
+                     MEM_TO_SHADOW(ssa.first + m_enclave_load_addr), MEM_TO_SHADOW(ssa.first + m_enclave_load_addr + (ssa.second << 12) - 1));
         FastPoisonShadow(ssa.first + m_enclave_load_addr, ssa.second << 12, kSGXSanShadowSensitive);
     }
+    SGXSAN_TRACE("\n");
     return true;
 }
 
@@ -299,6 +309,36 @@ bool SGXSanEnclaveConfigReader::get_layout_infos(layout_t *layout_start, layout_
     return true;
 }
 
+static inline void cpuid(int *eax, int *ebx, int *ecx, int *edx)
+{
+    asm("cpuid"
+        : "=a"(*eax),
+          "=b"(*ebx),
+          "=c"(*ecx),
+          "=d"(*edx)
+        : "0"(*eax), "2"(*ecx));
+}
+
+extern "C" bool is_cpu_support_edmm()
+{
+    int a[4] = {0, 0, 0, 0};
+
+    //Check CPU EDMM capability by CPUID
+    // eax=0
+    cpuid(&a[0], &a[1], &a[2], &a[3]);
+    if (a[0] < 0x12)
+        return false;
+
+    // eax=0 ecx=0x12
+    a[0] = 0x12;
+    a[2] = 0;
+    cpuid(&a[0], &a[1], &a[2], &a[3]);
+    if (!(a[0] & 1))
+        return false;
+
+    return ((a[0] & 2) != 0);
+}
+
 bool SGXSanEnclaveConfigReader::get_metadata(void *file_map_addr, metadata_t **metadata)
 {
     uint64_t metadata_offset = 0, metadata_block_size = 0;
@@ -308,7 +348,14 @@ bool SGXSanEnclaveConfigReader::get_metadata(void *file_map_addr, metadata_t **m
         return false;
     }
     // cannot support EDMM, adjust the possibly highest metadata version supported
-    uint64_t urts_version = META_DATA_MAKE_VERSION(1, 4);
+
+    uint64_t urts_version = 0;
+    // assume sgx driver up-to-date and support sgx2
+    if (!is_cpu_support_edmm())
+    {
+        // cannot support EDMM, adjust the possibly highest metadata version supported
+        urts_version = META_DATA_MAKE_VERSION(1 /* SGX_1_9_MAJOR_VERSION */, 4 /* SGX_1_9_MINOR_VERSION */);
+    }
     do
     {
         *metadata = GET_PTR(metadata_t, file_map_addr, metadata_offset);
