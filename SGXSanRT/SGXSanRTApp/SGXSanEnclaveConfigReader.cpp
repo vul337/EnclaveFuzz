@@ -9,6 +9,7 @@
 #include "SGXSanEnclaveConfigReader.hpp"
 #include "SGXSanManifest.h"
 #include "SGXSanCommonPoison.hpp"
+#include "SGXSanDefs.h"
 
 #ifndef ROUND_UP_TO
 #define ROUND_UP_TO(x, align) (((x) + (align - 1)) & ~(align - 1))
@@ -16,14 +17,6 @@
 
 #ifndef GET_PTR
 #define GET_PTR(t, p, offset) reinterpret_cast<t *>(reinterpret_cast<size_t>(p) + static_cast<size_t>(offset))
-#endif
-
-#ifndef SGXSAN_TRACE
-#if (SGXSAN_DEBUG)
-#define SGXSAN_TRACE printf
-#else
-#define SGXSAN_TRACE
-#endif
 #endif
 
 // layout id

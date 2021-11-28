@@ -31,6 +31,7 @@ const int kAsanAllocaRightMagic = 0xcb;
 const int kAsanShadowGap = 0xcc;
 // mark sensitive area
 const int kSGXSanShadowSensitive = 0x10;
+const int kSGXSanElrangeLeftGuard = 0xe0;
 
 #ifndef SHADOW_GRANULARITY
 #define SHADOW_GRANULARITY 8

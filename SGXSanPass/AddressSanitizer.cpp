@@ -64,9 +64,15 @@ static cl::opt<int> ClMaxInsnsToInstrumentPerBB(
 
 static cl::opt<bool> ClCheckAddrOverflow(
     "sgxsan-check-addr-overflow",
-    cl::desc("Whether check address overflow, default value is false, as in detection work, we can use 0-address unmap to find problem"),
+    cl::desc("Whether check address overflow, default value is false, as in detection work, we can use page fault of 0-address to find problem"),
     cl::Hidden,
     cl::init(false));
+
+static cl::opt<bool> ClUseElrangeGuard(
+    "sgxsan-use-elrange-guard",
+    cl::desc("Whether use elrange guard, default value is true, as in detection work, we can use page fault of elrange guard to find problem"),
+    cl::Hidden,
+    cl::init(true));
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
@@ -331,32 +337,56 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     Value *SGXSanEnclaveEnd = IRB.CreateAdd(SGXSanEnclaveBase,
                                             IRB.CreateSub(SGXSanEnclaveSize, ConstantInt::get(IntptrTy, 1)));
 
-    // if (not(end < EnclaveBase or start > EnclaveEnd)) // equal to if (end >= EnclaveBase and start <= EnclaveEnd))
-    // {
-    //     if (not(start >= EnclaveBase and end <= EnclaveEnd)) // equal to if (start < EnclaveBase or end > EnclaveEnd)
-    //     {
-    //         cross-boundary; // unreachable                                                       <= CrossBoundaryTerm
-    //     }
-    //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
-    //                                                                                              <= NotTotallyOutEnclaveTerm
-    // }
-    // totally outside enclave (end < EnclaveBase or start > EnclaveEnd), needn't check             <= InsertBefore
-    Value *CmpEndAddrUGEEnclaveBase = IRB.CreateICmpUGE(EndAddrLong, SGXSanEnclaveBase);
-    Value *CmpStartAddrULEEnclaveEnd = IRB.CreateICmpULE(AddrLong, SGXSanEnclaveEnd);
-    Instruction *NotTotallyOutEnclaveTerm = SplitBlockAndInsertIfThen(
-        IRB.CreateAnd(CmpEndAddrUGEEnclaveBase, CmpStartAddrULEEnclaveEnd), InsertBefore, false);
+    Instruction *ShadowCheckInsertPoint = nullptr;
+    // now can use elrange guard page to detect cross boundary
+    if (!ClUseElrangeGuard)
+    {
+        // if (not(end < EnclaveBase or start > EnclaveEnd)) // equal to if (end >= EnclaveBase and start <= EnclaveEnd))
+        // {
+        //     if (not(start >= EnclaveBase and end <= EnclaveEnd)) // equal to if (start < EnclaveBase or end > EnclaveEnd)
+        //     {
+        //         cross-boundary; // unreachable                                                       <= CrossBoundaryTerm
+        //     }
+        //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
+        //                                                                                              <= NotTotallyOutEnclaveTerm
+        // }
+        // totally outside enclave (end < EnclaveBase or start > EnclaveEnd), needn't check
+        // access start address                                                                         <= InsertBefore
+        Value *CmpEndAddrUGEEnclaveBase = IRB.CreateICmpUGE(EndAddrLong, SGXSanEnclaveBase);
+        Value *CmpStartAddrULEEnclaveEnd = IRB.CreateICmpULE(AddrLong, SGXSanEnclaveEnd);
+        Instruction *NotTotallyOutEnclaveTerm = SplitBlockAndInsertIfThen(
+            IRB.CreateAnd(CmpEndAddrUGEEnclaveBase, CmpStartAddrULEEnclaveEnd), InsertBefore, false);
 
-    // second-step check
-    IRB.SetInsertPoint(NotTotallyOutEnclaveTerm);
-    Value *CmpStartAddrULTEnclaveBase = IRB.CreateICmpULT(AddrLong, SGXSanEnclaveBase);
-    Value *CmpEndAddrUGTEnclaveEnd = IRB.CreateICmpUGT(EndAddrLong, SGXSanEnclaveEnd);
-    Instruction *CrossBoundaryTerm = SplitBlockAndInsertIfThen(
-        IRB.CreateOr(CmpStartAddrULTEnclaveBase, CmpEndAddrUGTEnclaveEnd), NotTotallyOutEnclaveTerm, true);
-    Instruction *CrossBoundaryCrash = generateCrashCode(CrossBoundaryTerm, AddrLong, IsWrite, AccessSizeIndex, SizeArgument);
-    CrossBoundaryCrash->setDebugLoc(OrigIns->getDebugLoc());
+        // second-step check
+        IRB.SetInsertPoint(NotTotallyOutEnclaveTerm);
+        Value *CmpStartAddrULTEnclaveBase = IRB.CreateICmpULT(AddrLong, SGXSanEnclaveBase);
+        Value *CmpEndAddrUGTEnclaveEnd = IRB.CreateICmpUGT(EndAddrLong, SGXSanEnclaveEnd);
+        Instruction *CrossBoundaryTerm = SplitBlockAndInsertIfThen(
+            IRB.CreateOr(CmpStartAddrULTEnclaveBase, CmpEndAddrUGTEnclaveEnd), NotTotallyOutEnclaveTerm, true);
+        Instruction *CrossBoundaryCrash = generateCrashCode(CrossBoundaryTerm, AddrLong, IsWrite, AccessSizeIndex, SizeArgument);
+        CrossBoundaryCrash->setDebugLoc(OrigIns->getDebugLoc());
+
+        ShadowCheckInsertPoint = NotTotallyOutEnclaveTerm;
+    }
+    else
+    {
+        // if (EnclaveBase <= start and end <= EnclaveEnd) // totally in elrange
+        // {
+        //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
+        //                                                                                              <= ShadowCheckInsertPoint
+        // }
+        // situation that totally outside enclave needn't check
+        // situation that cross-bound leave to elrange guard check
+        // access start address                                                                         <= InsertBefore
+
+        Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
+        Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
+        ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(
+            IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd), InsertBefore, false);
+    }
 
     // start instrument shadowbyte check
-    IRB.SetInsertPoint(NotTotallyOutEnclaveTerm);
+    IRB.SetInsertPoint(ShadowCheckInsertPoint);
     if (UseCalls)
     {
         IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][AccessSizeIndex],
@@ -377,7 +407,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     // path is rarely taken. This seems to be the case for SPEC benchmarks.
     // fixme: avoid extra branch
     Instruction *CheckTerm = SplitBlockAndInsertIfThen(
-        Cmp, NotTotallyOutEnclaveTerm, false, MDBuilder(*C).createBranchWeights(1, 100000));
+        Cmp, ShadowCheckInsertPoint, false, MDBuilder(*C).createBranchWeights(1, 100000));
     assert(cast<BranchInst>(CheckTerm)->isUnconditional());
     BasicBlock *NextBB = CheckTerm->getSuccessor(0);
     IRB.SetInsertPoint(CheckTerm);

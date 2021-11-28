@@ -50,17 +50,17 @@ static inline bool mem_is_zero(const char *beg, uptr size, uint8_t mask = ~0)
     uptr all = 0;
     // Prologue.
     for (const char *mem = beg; mem < (char *)aligned_beg && mem < end; mem++)
-        all |= (*mem & mask);
+        all |= *mem;
     // Aligned loop.
     for (; aligned_beg < aligned_end; aligned_beg++)
-        all |= (*aligned_beg & mask);
+        all |= *aligned_beg;
     // Epilogue.
     if ((char *)aligned_end >= beg)
     {
         for (const char *mem = (char *)aligned_end; mem < end; mem++)
-            all |= (*mem & mask);
+            all |= *mem;
     }
-    return all == 0;
+    return (all & mask) == 0;
 }
 
 static inline uptr __asan_region_is_poisoned(uptr beg, uptr size, bool check_shallow_poison = false)
@@ -100,7 +100,21 @@ static inline uptr __asan_region_is_poisoned(uptr beg, uptr size, bool check_sha
 }
 
 // ElrangeCheck start
-#define SGXSAN_ELRANGE_CHECK_BEG(start, is_write, size)                       \
+#define SGXSAN_ELRANGE_CHECK_BEG(start, is_write, size)          \
+    do                                                           \
+    {                                                            \
+        uptr _start = (uptr)start;                               \
+        uptr _end = _start + size - 1;                           \
+        uptr _enclave_end = g_enclave_base + g_enclave_size - 1; \
+        if (g_enclave_base <= _start && _end <= _enclave_end)    \
+        {
+
+#define SGXSAN_ELRANGE_CHECK_END \
+    }                            \
+    }                            \
+    while (0)
+
+#define SGXSAN_ELRANGE_DOUBLE_CHECK_BEG(start, is_write, size)                \
     do                                                                        \
     {                                                                         \
         uptr _start = (uptr)start;                                            \
@@ -119,9 +133,9 @@ static inline uptr __asan_region_is_poisoned(uptr beg, uptr size, bool check_sha
                 ReportGenericError(pc, bp, sp, _start, is_write, size, true); \
             }
 
-#define SGXSAN_ELRANGE_CHECK_END \
-    }                            \
-    }                            \
+#define SGXSAN_ELRANGE_DOUBLE_CHECK_END \
+    }                                   \
+    }                                   \
     while (0)
 // ElrangeCheck end
 
