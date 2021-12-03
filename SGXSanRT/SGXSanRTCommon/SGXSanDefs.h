@@ -19,14 +19,14 @@
 #endif
 
 #ifndef ABORT_ASSERT
-#define ABORT_ASSERT(cond, msg)    \
-    do                             \
-    {                              \
-        if (!(cond))               \
-        {                          \
-            printf("%s\n", (msg)); \
-            abort();               \
-        }                          \
+#define ABORT_ASSERT(cond, msg)     \
+    do                              \
+    {                               \
+        if (!(cond))                \
+        {                           \
+            printf("%s \n", (msg)); \
+            abort();                \
+        }                           \
     } while (0)
 #endif
 

@@ -56,7 +56,7 @@ namespace
                     F.setName("sgxsan_calloc");
                 }
 #endif
-                if (not F.isDeclaration())
+                if ((not F.isDeclaration()) and (func_name != "ocall_init_shadow_memory"))
                 {
                     Changed |= ASan.instrumentFunction(F);
                 }

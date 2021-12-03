@@ -109,6 +109,11 @@ static inline uptr __asan_region_is_poisoned(uptr beg, uptr size, bool check_sha
         if (g_enclave_base <= _start && _end <= _enclave_end)    \
         {
 
+#define SGXSAN_ELRANGE_CHECK_MID                             \
+    }                                                        \
+    else if (_end < g_enclave_base || _enclave_end < _start) \
+    {
+
 #define SGXSAN_ELRANGE_CHECK_END \
     }                            \
     }                            \

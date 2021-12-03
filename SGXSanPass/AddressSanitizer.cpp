@@ -74,6 +74,12 @@ static cl::opt<bool> ClUseElrangeGuard(
     cl::Hidden,
     cl::init(true));
 
+static cl::opt<bool> ClOutAddrWhitelistCheck(
+    "sgxsan-out-addr-whitelist-check",
+    cl::desc("check out-addr whitelist"),
+    cl::Hidden,
+    cl::init(true));
+
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 
@@ -151,6 +157,10 @@ void AddressSanitizer::initializeCallbacks(Module &M)
 
     // declare extern elrange symbol
     declareExternElrangeSymbol(M);
+
+    OutAddrWhitelistCheck = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
+                                                  IRB.getVoidTy(), IRB.getInt64Ty(),
+                                                  IRB.getInt64Ty());
 }
 
 void AddressSanitizer::getInterestingMemoryOperands(
@@ -375,14 +385,31 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
         //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
         //                                                                                              <= ShadowCheckInsertPoint
         // }
-        // situation that totally outside enclave needn't check
+        // else if (end < EnclaveBase or start > EnclaveEnd) // totally outside enclave
+        // {
+        //     Out-Addr Whitelist check(start, size);
+        // }
         // situation that cross-bound leave to elrange guard check
         // access start address                                                                         <= InsertBefore
 
         Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
         Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
-        ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(
-            IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd), InsertBefore, false);
+        Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
+        if (!ClOutAddrWhitelistCheck)
+        {
+            ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(IfCond, InsertBefore, false);
+        }
+        else
+        {
+            Value *CmpEndAddrULTEnclaveBase = IRB.CreateICmpULT(EndAddrLong, SGXSanEnclaveBase);
+            Value *CmpStartAddrUGTEnclaveEnd = IRB.CreateICmpUGT(AddrLong, SGXSanEnclaveEnd);
+            Value *ElseIfCond = IRB.CreateOr(CmpEndAddrULTEnclaveBase, CmpStartAddrUGTEnclaveEnd);
+            Instruction *ElseTI = nullptr;
+            SplitBlockAndInsertIfThenElse(IfCond, InsertBefore, &ShadowCheckInsertPoint, &ElseTI, MDBuilder(*C).createBranchWeights(100000, 1));
+            Instruction *ElseIfTerm = SplitBlockAndInsertIfThen(ElseIfCond, ElseTI, false);
+            IRB.SetInsertPoint(ElseIfTerm);
+            IRB.CreateCall(OutAddrWhitelistCheck, {AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3))});
+        }
     }
 
     // start instrument shadowbyte check

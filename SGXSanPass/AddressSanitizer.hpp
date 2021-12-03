@@ -76,5 +76,7 @@ private:
     llvm::DenseMap<const llvm::AllocaInst *, bool> ProcessedAllocas;
 
     llvm::GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
+
+    llvm::FunctionCallee OutAddrWhitelistCheck;
 };
 #endif //ADDRESS_SANITIZER_HPP
