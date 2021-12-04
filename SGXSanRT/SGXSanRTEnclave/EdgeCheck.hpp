@@ -11,6 +11,7 @@ extern "C"
     void WhitelistOfAddrOutEnclave_destroy();
     void WhitelistOfAddrOutEnclave_add(uint64_t start, uint64_t size);
     void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size);
+    void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr);
 #if defined(__cplusplus)
 }
 #endif

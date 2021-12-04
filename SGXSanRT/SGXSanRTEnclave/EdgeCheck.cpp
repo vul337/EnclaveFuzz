@@ -1,4 +1,5 @@
 #include <map>
+#include <pthread.h>
 #include "EdgeCheck.hpp"
 #include "SGXSanCommonPoisonCheck.hpp"
 #include "SGXSanCommonErrorReport.hpp"
@@ -17,10 +18,11 @@ public:
     {
         delete m_whitelist;
     }
-    static void iter()
+    static void iter(bool is_global = false)
     {
-        SGXSAN_TRACE("[%s] ", "m_whitelist");
-        for (auto it = m_whitelist->begin(); it != m_whitelist->end(); it++)
+        std::map<uint64_t, uint64_t> *whitelist = is_global ? &m_global_whitelist : m_whitelist;
+        SGXSAN_TRACE("[%s] ", is_global ? "m_global_whitelist" : "m_whitelist");
+        for (auto it = whitelist->begin(); it != whitelist->end(); it++)
         {
             SGXSAN_TRACE("0x%lx(0x%lx) ", it->first, it->second);
         }
@@ -30,48 +32,128 @@ public:
     {
         if (start == 0)
         {
-            return std::make_pair(std::map<uint64_t, uint64_t>::iterator(), true);
+            return std::pair<std::map<uint64_t, uint64_t>::iterator, bool>(std::map<uint64_t, uint64_t>::iterator(), true);
         }
         auto ret = m_whitelist->emplace(start, size);
         // SGXSAN_TRACE("[%s] 0x%lx(0x%lx)\n", "add", start, size);
         // iter();
         return ret;
     }
-    static bool query(uint64_t start, uint64_t size)
+    static std::pair<std::map<uint64_t, uint64_t>::iterator, bool> add_global(uint64_t start, uint64_t size)
+    {
+        if (start == 0)
+        {
+            return std::pair<std::map<uint64_t, uint64_t>::iterator, bool>(std::map<uint64_t, uint64_t>::iterator(), true);
+        }
+        pthread_rwlock_wrlock(&m_rwlock_global_whitelist);
+        auto ret = m_global_whitelist.emplace(start, size);
+        // SGXSAN_TRACE("[%s] 0x%lx(0x%lx)\n", "add global", start, size);
+        // iter(true);
+        pthread_rwlock_unlock(&m_rwlock_global_whitelist);
+        return ret;
+    }
+    static std::pair<uint64_t, uint64_t> query(uint64_t start, uint64_t size)
     {
         // SGXSAN_TRACE("[%s] 0x%lx(0x%lx)\n", "query", start, size);
         // iter();
+        std::map<uint64_t, uint64_t>::iterator it;
+        std::pair<uint64_t, uint64_t> ret, false_ret = std::pair<uint64_t, uint64_t>(0, 0);
+
         if (m_whitelist->size() == 0)
         {
-            return false;
+            ret = false_ret;
+            goto exit;
         }
 
-        auto it = m_whitelist->lower_bound(start);
+        it = m_whitelist->lower_bound(start);
 
         if (LIKELY(it != m_whitelist->end() and it->first == start))
         {
-            return it->second < size ? false : true;
+            ret = it->second < size ? false_ret : std::pair<uint64_t, uint64_t>(it->first, it->second);
+            goto exit;
         }
 
         if (it == m_whitelist->begin())
         {
             // there is no <addr,size> pair can contain the query addr
-            return false;
+            ret = false_ret;
+            goto exit;
         }
         else
         {
             // get the element just blow query addr
             --it;
-            return (it->first + it->second < start + size) ? false /* not large enough neither */ : true;
+            ret = it->first + it->second < start + size ? false_ret : std::pair<uint64_t, uint64_t>(it->first, it->second);
+            goto exit;
         }
+    exit:
+        if (ret == false_ret)
+        {
+            ret = query_global(start, size);
+        }
+        return ret;
+    }
+    static std::pair<uint64_t, uint64_t> query_global(uint64_t start, uint64_t size)
+    {
+        pthread_rwlock_rdlock(&m_rwlock_global_whitelist);
+        // SGXSAN_TRACE("[%s] 0x%lx(0x%lx)\n", "query global", start, size);
+        // iter(true);
+        std::map<uint64_t, uint64_t>::iterator it;
+        std::pair<uint64_t, uint64_t> ret, false_ret = std::pair<uint64_t, uint64_t>(0, 0);
+
+        if (m_global_whitelist.size() == 0)
+        {
+            ret = false_ret;
+            goto exit;
+        }
+
+        it = m_global_whitelist.lower_bound(start);
+
+        if (LIKELY(it != m_global_whitelist.end() and it->first == start))
+        {
+            ret = it->second < size ? false_ret : std::pair<uint64_t, uint64_t>(it->first, it->second);
+            goto exit;
+        }
+
+        if (it == m_global_whitelist.begin())
+        {
+            // there is no <addr,size> pair can contain the query addr
+            ret = false_ret;
+            goto exit;
+        }
+        else
+        {
+            // get the element just blow query addr
+            --it;
+            ret = it->first + it->second < start + size ? false_ret : std::pair<uint64_t, uint64_t>(it->first, it->second);
+            goto exit;
+        }
+    exit:
+        pthread_rwlock_unlock(&m_rwlock_global_whitelist);
+        return ret;
+    }
+
+    static bool global_propagate(uint64_t addr)
+    {
+        // SGXSAN_TRACE("[%s] 0x%lx\n", "global propagate", addr);
+        auto ret = query(addr, 1);
+        if (ret.second != 0)
+        {
+            add_global(ret.first, ret.second).second;
+        }
+        return true;
     }
 
 private:
     static __thread std::map<uint64_t, uint64_t> *m_whitelist;
+    static std::map<uint64_t, uint64_t> m_global_whitelist;
+    static pthread_rwlock_t m_rwlock_global_whitelist;
 };
 
 // __thread can not decorate class object, because __thread will not call class object's constructor
 __thread std::map<uint64_t, uint64_t> *WhitelistOfAddrOutEnclave::m_whitelist;
+std::map<uint64_t, uint64_t> WhitelistOfAddrOutEnclave::m_global_whitelist;
+pthread_rwlock_t WhitelistOfAddrOutEnclave::m_rwlock_global_whitelist = PTHREAD_RWLOCK_INITIALIZER;
 
 void sgxsan_user_check(uint64_t ptr, uint64_t len, int cnt)
 {
@@ -113,5 +195,10 @@ void WhitelistOfAddrOutEnclave_add(uint64_t start, uint64_t size)
 
 void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size)
 {
-    ABORT_ASSERT(WhitelistOfAddrOutEnclave::query(start, size), "[SGXSan] Illegal access outside-enclave");
+    ABORT_ASSERT(WhitelistOfAddrOutEnclave::query(start, size).second != 0, "[SGXSan] Illegal access outside-enclave");
+}
+
+void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr)
+{
+    ABORT_ASSERT(WhitelistOfAddrOutEnclave::global_propagate(addr), "Fail to propagate to global whitelist");
 }

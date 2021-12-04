@@ -161,10 +161,12 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     OutAddrWhitelistCheck = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
                                                   IRB.getVoidTy(), IRB.getInt64Ty(),
                                                   IRB.getInt64Ty());
+    GlobalWhitelistPropagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
+                                                     IRB.getVoidTy(), IRB.getInt64Ty());
 }
 
 void AddressSanitizer::getInterestingMemoryOperands(
-    Instruction *I, SmallVectorImpl<InterestingMemoryOperand> &Interesting)
+    Instruction *I, SmallVectorImpl<InterestingMemoryOperand> &Interesting, SmallVector<StoreInst *, 16> &GlobalVariableStoreInsts)
 {
     // Skip memory accesses inserted by another instrumentation.
     if (I->hasMetadata("nosanitize"))
@@ -181,6 +183,10 @@ void AddressSanitizer::getInterestingMemoryOperands(
     {
         if (!ClInstrumentWrites || ignoreAccess(SI->getPointerOperand()))
             return;
+        if (isa<GlobalVariable>(SI->getPointerOperand()))
+        {
+            GlobalVariableStoreInsts.emplace_back(SI);
+        }
         Interesting.emplace_back(I, SI->getPointerOperandIndex(), true,
                                  SI->getValueOperand()->getType(), SI->getAlign());
     }
@@ -533,6 +539,14 @@ void AddressSanitizer::instrumentMemIntrinsic(MemIntrinsic *MI)
     MI->eraseFromParent();
 }
 
+void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
+{
+    IRBuilder<> IRB(SI);
+    Value *val = SI->getValueOperand();
+
+    IRB.CreateCall(GlobalWhitelistPropagate, IRB.CreateCast(Instruction::ZExt, val, IRB.getInt64Ty()));
+}
+
 bool AddressSanitizer::instrumentFunction(Function &F)
 {
     if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
@@ -551,6 +565,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     SmallVector<MemIntrinsic *, 16> IntrinToInstrument;
     SmallVector<Instruction *, 8> NoReturnCalls;
     SmallVector<BasicBlock *, 16> AllBlocks;
+    SmallVector<StoreInst *, 16> GlobalVariableStoreInsts;
     int NumAllocas = 0;
 
     // Fill the set of memory operations to instrument.
@@ -561,7 +576,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
         for (auto &Inst : BB)
         {
             SmallVector<InterestingMemoryOperand, 1> InterestingOperands;
-            getInterestingMemoryOperands(&Inst, InterestingOperands);
+            getInterestingMemoryOperands(&Inst, InterestingOperands, GlobalVariableStoreInsts);
 
             if (!InterestingOperands.empty())
             {
@@ -604,6 +619,11 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     for (auto Inst : IntrinToInstrument)
     {
         instrumentMemIntrinsic(Inst);
+        FunctionModified = true;
+    }
+    for (auto Inst : GlobalVariableStoreInsts)
+    {
+        instrumentGlobalPropageteWhitelist(Inst);
         FunctionModified = true;
     }
 
