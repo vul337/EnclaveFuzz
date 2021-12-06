@@ -195,7 +195,7 @@ void WhitelistOfAddrOutEnclave_add(uint64_t start, uint64_t size)
 
 void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size)
 {
-    ABORT_ASSERT(WhitelistOfAddrOutEnclave::query(start, size).second != 0, "[SGXSan] Illegal access outside-enclave");
+    SGXSAN_WARNING(WhitelistOfAddrOutEnclave::query(start, size).second != 0, "[SGXSan] Illegal access outside-enclave");
 }
 
 void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr)

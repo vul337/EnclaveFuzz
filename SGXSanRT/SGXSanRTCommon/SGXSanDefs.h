@@ -19,14 +19,25 @@
 #endif
 
 #ifndef ABORT_ASSERT
-#define ABORT_ASSERT(cond, msg)     \
-    do                              \
-    {                               \
-        if (!(cond))                \
-        {                           \
-            printf("%s \n", (msg)); \
-            abort();                \
-        }                           \
+#define ABORT_ASSERT(cond, msg)                    \
+    do                                             \
+    {                                              \
+        if (!(cond))                               \
+        {                                          \
+            printf("[SGXSan Error] %s \n", (msg)); \
+            abort();                               \
+        }                                          \
+    } while (0)
+#endif
+
+#ifndef SGXSAN_WARNING
+#define SGXSAN_WARNING(cond, msg)                    \
+    do                                               \
+    {                                                \
+        if (!(cond))                                 \
+        {                                            \
+            printf("[SGXSan Warning] %s \n", (msg)); \
+        }                                            \
     } while (0)
 #endif
 
