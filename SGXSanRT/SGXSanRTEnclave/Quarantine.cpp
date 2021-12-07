@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include "Quarantine.hpp"
 #include "SGXSanDefs.h"
-#include "Printf.h"
+#include "SGXSanPrintf.hpp"
 #include "SGXSanManifest.h"
 
 #if (USE_SGXSAN_MALLOC)
@@ -42,7 +42,7 @@ void QuarantineCache::put(QuarantineElement qe)
     if (qe.alloc_size > m_quarantine_cache_max_size)
     {
         BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
-        // printf("[free] alloc_beg=0x%lx user_beg=0x%lx \n", qe.alloc_beg, qe.user_beg);
+        // PRINTF("[free] alloc_beg=0x%lx user_beg=0x%lx \n", qe.alloc_beg, qe.user_beg);
         FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, alignment), kAsanHeapLeftRedzoneMagic);
         return;
     }
@@ -54,14 +54,14 @@ void QuarantineCache::put(QuarantineElement qe)
         QuarantineElement front_qe = m_queue.front();
         // free and poison
         BACKEND_FREE(reinterpret_cast<void *>(front_qe.alloc_beg));
-        // printf("[free for quarantine] alloc_beg=0x%lx user_beg=0x%lx \n", front_qe.alloc_beg, front_qe.user_beg);
+        // PRINTF("[free for quarantine] alloc_beg=0x%lx user_beg=0x%lx \n", front_qe.alloc_beg, front_qe.user_beg);
         FastPoisonShadow(front_qe.user_beg, RoundUpTo(front_qe.user_size, alignment), kAsanHeapLeftRedzoneMagic);
         // update quarantine cache
         assert(m_quarantine_cache_used_size >= front_qe.alloc_size);
         m_quarantine_cache_used_size -= front_qe.alloc_size;
         m_queue.pop();
     }
-    // printf("[quaratine] alloc_beg=0x%lx user_beg=0x%lx\n", qe.alloc_beg, qe.user_beg);
+    // PRINTF("[quaratine] alloc_beg=0x%lx user_beg=0x%lx\n", qe.alloc_beg, qe.user_beg);
     m_queue.push(qe);
     m_quarantine_cache_used_size += qe.alloc_size;
     pthread_rwlock_unlock(&rwlock_quarantine_cache);

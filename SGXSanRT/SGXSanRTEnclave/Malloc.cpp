@@ -9,7 +9,7 @@
 #include "SGXSanRTEnclave.hpp"
 #include "Quarantine.hpp"
 #include "InternDlmalloc.hpp"
-#include "Printf.h"
+#include "SGXSanPrintf.hpp"
 
 #if (USE_SGXSAN_MALLOC)
 #define MALLOC sgxsan_malloc
@@ -95,7 +95,7 @@ void *MALLOC(size_t size)
   m->alloc_beg = alloc_beg;
   m->user_size = size;
 
-  // printf("\n[malloc] alloc_beg=0x%lx user_beg=0x%lx\n", alloc_beg, user_beg);
+  // PRINTF("\n[malloc] alloc_beg=0x%lx user_beg=0x%lx\n", alloc_beg, user_beg);
 
   // start poisoning
   // if assume alloc_beg is 8-byte aligned, we can use FastPoisonShadow()
@@ -104,12 +104,12 @@ void *MALLOC(size_t size)
   uptr right_redzone_beg = RoundUpTo(user_end, alignment);
   /* Fast */ PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg, kAsanHeapRightRedzoneMagic);
 
-  // printf("[heap_obj_user_beg_set] [before malloc] ");
+  // PRINTF("[heap_obj_user_beg_set] [before malloc] ");
   // for (uptr p : heap_obj_user_beg_set)
   // {
-  //     printf(" %lx", p);
+  //     PRINTF(" %lx", p);
   // }
-  // printf(" %s", "\n");
+  // PRINTF(" %s", "\n");
 
   // record user_beg avoid user passing incorrect addr to free
   // I assume dlmalloc will not alloc an memory that already allocated
@@ -128,12 +128,12 @@ void *MALLOC(size_t size)
     PrintErrorAndAbort("malloc an already allocated memory");
   }
 #endif
-  // printf("[heap_obj_user_beg_set] [after malloc] ");
+  // PRINTF("[heap_obj_user_beg_set] [after malloc] ");
   // for (uptr p : heap_obj_user_beg_set)
   // {
-  //     printf(" %lx", p);
+  //     PRINTF(" %lx", p);
   // }
-  // printf(" %s", "\n");
+  // PRINTF(" %s", "\n");
 
   return reinterpret_cast<void *>(user_beg);
 }
@@ -150,12 +150,12 @@ void FREE(void *ptr)
   uptr alignment = SHADOW_GRANULARITY;
   CHECK(IsAligned(user_beg, alignment));
 
-  // printf("[heap_obj_user_beg_set] [before free] ");
+  // PRINTF("[heap_obj_user_beg_set] [before free] ");
   // for (uptr p : heap_obj_user_beg_set)
   // {
-  //     printf(" %lx", p);
+  //     PRINTF(" %lx", p);
   // }
-  // printf(" %s", "\n");
+  // PRINTF(" %s", "\n");
 #if (CHECK_MALLOC_FREE_MATCH)
   pthread_rwlock_wrlock(&rwlock_heap_obj_user_beg_set);
   if (heap_obj_user_beg_set.find(user_beg) == heap_obj_user_beg_set.end())
@@ -172,7 +172,7 @@ void FREE(void *ptr)
   uptr chunk_beg = user_beg - sizeof(chunk);
   chunk *m = reinterpret_cast<chunk *>(chunk_beg);
   size_t user_size = m->user_size;
-  // printf("\n[recycle] alloc_beg=0x%lx user_beg=0x%lx\n", m->alloc_beg, user_beg);
+  // PRINTF("\n[recycle] alloc_beg=0x%lx user_beg=0x%lx\n", m->alloc_beg, user_beg);
   FastPoisonShadow(user_beg, RoundUpTo(user_size, alignment), kAsanHeapFreeMagic);
 
   QuarantineElement qe = {
@@ -182,12 +182,12 @@ void FREE(void *ptr)
       .user_size = user_size};
   g_quarantine_cache->put(qe);
 
-  // printf("[heap_obj_user_beg_set] [after free] ");
+  // PRINTF("[heap_obj_user_beg_set] [after free] ");
   // for (uptr p : heap_obj_user_beg_set)
   // {
-  //     printf(" %lx", p);
+  //     PRINTF(" %lx", p);
   // }
-  // printf(" %s", "\n");
+  // PRINTF(" %s", "\n");
 }
 
 void *CALLOC(size_t n_elements, size_t elem_size)

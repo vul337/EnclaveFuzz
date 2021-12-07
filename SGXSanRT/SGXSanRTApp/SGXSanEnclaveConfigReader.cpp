@@ -10,6 +10,7 @@
 #include "SGXSanManifest.h"
 #include "SGXSanCommonPoison.hpp"
 #include "SGXSanDefs.h"
+#include "PrintfSpeicification.h"
 
 #ifndef ROUND_UP_TO
 #define ROUND_UP_TO(x, align) (((x) + (align - 1)) & ~(align - 1))

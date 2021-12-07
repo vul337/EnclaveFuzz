@@ -1,9 +1,13 @@
 #include <assert.h>
 #include <stdint.h>
+#include <pthread.h>
 #include "SGXSanManifest.h"
 #include "SGXSanDefs.h"
 #include "SGXSanRTEnclave.hpp"
 #include "SGXSanCommonShadowMap.hpp"
+
+static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t sgxsan_init_once = PTHREAD_ONCE_INIT;
 
 uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
          kLowShadowBeg = 0, kLowShadowEnd = 0,
@@ -37,10 +41,12 @@ static void AsanInitInternal()
 
 void AsanInitFromRtl()
 {
+    pthread_mutex_lock(&sgxsan_init_mutex);
     AsanInitInternal();
+    pthread_mutex_unlock(&sgxsan_init_mutex);
 }
 
-__attribute__((constructor)) void __asan_ctor()
+void __attribute__((constructor)) asan_ctor()
 {
-    AsanInitInternal();
+    pthread_once(&sgxsan_init_once, AsanInitInternal);
 }

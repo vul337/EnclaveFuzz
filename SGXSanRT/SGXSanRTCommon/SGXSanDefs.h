@@ -24,7 +24,7 @@
     {                                              \
         if (!(cond))                               \
         {                                          \
-            printf("[SGXSan Error] %s \n", (msg)); \
+            PRINTF("[SGXSan Error] %s \n", (msg)); \
             abort();                               \
         }                                          \
     } while (0)
@@ -36,14 +36,14 @@
     {                                                \
         if (!(cond))                                 \
         {                                            \
-            printf("[SGXSan Warning] %s \n", (msg)); \
+            PRINTF("[SGXSan Warning] %s \n", (msg)); \
         }                                            \
     } while (0)
 #endif
 
 #ifndef SGXSAN_TRACE
 #if (SGXSAN_DEBUG)
-#define SGXSAN_TRACE printf
+#define SGXSAN_TRACE PRINTF
 #else
 #define SGXSAN_TRACE
 #endif

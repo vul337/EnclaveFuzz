@@ -4,7 +4,7 @@
 #include "SGXSanCommonPoisonCheck.hpp"
 #include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanDefs.h"
-#include "Printf.h"
+#include "SGXSanPrintf.hpp"
 
 class WhitelistOfAddrOutEnclave
 {

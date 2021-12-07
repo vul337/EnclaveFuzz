@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include "SGXSanDefs.h"
-#include "Printf.h"
+#include "SGXSanPrintf.hpp"
 #include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoisonCheck.hpp"
@@ -42,7 +42,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
 {
     if (!fatal)
         return;
-    printf("Error Report:\n"
+    PRINTF("Error Report:\n"
            "pc=0x%lx bp=0x%lx\n"
            "sp=0x%lx addr=0x%lx\n"
            "is_write=%d access_size=0x%lx\n",
@@ -58,6 +58,6 @@ void PrintErrorAndAbort(const char *format, ...)
     va_start(argptr, format);
     vsnprintf(buf, BUFSIZ, format, argptr);
     va_end(argptr);
-    printf("[PrintErrorAndAbort] %s\n", buf);
+    PRINTF("[PrintErrorAndAbort] %s\n", buf);
     abort();
 }

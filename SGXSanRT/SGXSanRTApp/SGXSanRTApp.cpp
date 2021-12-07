@@ -11,6 +11,7 @@
 #include "SGXSanCommonPoison.hpp"
 #include "SGXSanEnclaveConfigReader.hpp"
 #include "SGXSanDefs.h"
+#include "PrintfSpeicification.h"
 
 // read ENCLAVE_FILENAME from -DENCLAVE_FILENAME in makefile
 #ifndef ENCLAVE_FILENAME
@@ -151,15 +152,12 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
 
        ABORT_ASSERT(((kLowMemBeg & 0xfff) == 0) && (((kLowMemEnd + 1) & 0xfff) == 0), "Elrange is not aligned to page");
 
-       g_enclave_low_guard_start = kLowMemBeg - page_size * 8;
-       g_enclave_high_guard_end = kLowMemEnd + page_size * 8;
-       ABORT_ASSERT(__sanitizer::MemoryRangeIsAvailable(g_enclave_low_guard_start, kLowMemBeg - 1) &&
-                        (MAP_FAILED != mmap((void *)g_enclave_low_guard_start, kLowMemBeg - g_enclave_low_guard_start, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)),
-                    "Enclave LowGuard unavailable");
-
-       ABORT_ASSERT(__sanitizer::MemoryRangeIsAvailable(kLowMemEnd + 1, g_enclave_high_guard_end) &&
-                        (MAP_FAILED != mmap((void *)(kLowMemEnd + 1), g_enclave_high_guard_end - kLowMemEnd, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)),
-                    "Enclave HighGuard unavailable");
+       // consistent with modification in psw/enclave_common/sgx_enclave_common.cpp:enclave_create_ex
+       g_enclave_low_guard_start = kLowMemBeg - page_size;
+       g_enclave_high_guard_end = kLowMemEnd + page_size;
+       // ABORT_ASSERT((MAP_FAILED != mmap((void *)g_enclave_low_guard_start, kLowMemBeg - g_enclave_low_guard_start, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) ||
+       //                  (MAP_FAILED != mmap((void *)(kLowMemEnd + 1), g_enclave_high_guard_end - kLowMemEnd, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)),
+       //              "ElrangeGuard unavailable");
 
        PrintAddressSpaceLayout();
 
@@ -175,4 +173,13 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
        // memset((void *)(kLowShadowBeg - page_size), kSGXSanElrangeLeftGuard, page_size);
 
        reg_sgxsan_sigaction();
+}
+
+/* OCall functions */
+extern "C" void sgxsan_ocall_print_string(const char *str)
+{
+    /* Proxy/Bridge will check the length and null-terminate 
+     * the input string to prevent buffer overflow. 
+     */
+    printf("%s", str);
 }
