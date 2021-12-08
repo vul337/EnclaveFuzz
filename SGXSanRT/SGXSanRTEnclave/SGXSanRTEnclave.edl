@@ -1,4 +1,5 @@
 enclave {
+    from "sgx_tstdc.edl" import *;
     
     include "stdint.h"
 
