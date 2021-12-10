@@ -5,7 +5,7 @@
 extern "C"
 {
 #endif
-    void sgxsan_user_check(uint64_t ptr, uint64_t len, int cnt);
+    void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt);
     // a list of c wrapper of WhitelistOfAddrOutEnclave, class member function is inlined defaultly
     void WhitelistOfAddrOutEnclave_init();
     void WhitelistOfAddrOutEnclave_destroy();

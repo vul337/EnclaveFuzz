@@ -1,4 +1,5 @@
 enclave {
+    // it needs to be judged to put edl-import at here or tested-sgxapp
     from "sgx_tstdc.edl" import *;
     
     include "stdint.h"

@@ -37,6 +37,8 @@ public:
     void getInterestingMemoryOperands(llvm::Instruction *I, llvm::SmallVectorImpl<llvm::InterestingMemoryOperand> &Interesting, llvm::SmallVector<llvm::StoreInst *, 16> &GlobalVariableStoreInsts);
     void instrumentMop(llvm::InterestingMemoryOperand &O, bool UseCalls);
     void instrumentGlobalPropageteWhitelist(llvm::StoreInst *SI);
+    bool instrumentRealEcallInst(llvm::CallInst *CI);
+    bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL, int depth);
     void instrumentAddress(llvm::Instruction *OrigIns, llvm::Instruction *InsertBefore, llvm::Value *Addr,
                            uint32_t TypeSize, bool IsWrite, llvm::Value *SizeArgument, bool UseCalls);
     void instrumentUnusualSizeOrAlignment(
@@ -78,6 +80,6 @@ private:
 
     llvm::GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
 
-    llvm::FunctionCallee OutAddrWhitelistCheck, GlobalWhitelistPropagate;
+    llvm::FunctionCallee OutAddrWhitelistInit, OutAddrWhitelistDestroy, OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck;
 };
 #endif //ADDRESS_SANITIZER_HPP

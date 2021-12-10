@@ -80,6 +80,18 @@ static cl::opt<bool> ClOutAddrWhitelistCheck(
     cl::Hidden,
     cl::init(true));
 
+static cl::opt<bool> ClOutAddrWhitelistInit(
+    "sgxsan-out-addr-whitelist-init",
+    cl::desc("init out-addr whitelist"),
+    cl::Hidden,
+    cl::init(false));
+
+static cl::opt<bool> ClAtEnclaveTBridge(
+    "sgxsan-at-enclave-tbridge",
+    cl::desc("at enclave tbridge"),
+    cl::Hidden,
+    cl::init(false));
+
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 
@@ -158,11 +170,17 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     // declare extern elrange symbol
     declareExternElrangeSymbol(M);
 
+    OutAddrWhitelistInit = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_init", IRB.getVoidTy());
+    OutAddrWhitelistDestroy = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_destroy", IRB.getVoidTy());
     OutAddrWhitelistCheck = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
                                                   IRB.getVoidTy(), IRB.getInt64Ty(),
                                                   IRB.getInt64Ty());
+
     GlobalWhitelistPropagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
                                                      IRB.getVoidTy(), IRB.getInt64Ty());
+    // void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt)
+    SGXSanEdgeCheck = M.getOrInsertFunction("sgxsan_edge_check", IRB.getVoidTy(),
+                                            IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt32Ty());
 }
 
 void AddressSanitizer::getInterestingMemoryOperands(
@@ -547,6 +565,85 @@ void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
     IRB.CreateCall(GlobalWhitelistPropagate, IRB.CreateCast(Instruction::ZExt, val, IRB.getInt64Ty()));
 }
 
+bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL, int depth)
+{
+    if (depth > 10)
+    {
+        return false;
+    }
+    depth++;
+    Type *operandType = operand->getType();
+    if (PointerType *pointerType = dyn_cast<PointerType>(operandType))
+    {
+        Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)), &(*IRB.GetInsertPoint()), false);
+        IRB.SetInsertPoint(PointerCheckTerm);
+        Type *elementType = pointerType->getElementType();
+        IRB.CreateCall(SGXSanEdgeCheck,
+                       {IRB.CreatePointerCast(operand, IRB.getInt64Ty()),
+                        ConstantInt::get(IRB.getInt64Ty(), DL.getTypeAllocSize(elementType)),
+                        ConstantInt::get(IRB.getInt32Ty(), -1, true)});
+        Value *pointee = IRB.CreateLoad(elementType, operand);
+        return instrumentParameterCheck(pointee, IRB, DL, depth);
+    }
+    else if (StructType *structType = dyn_cast<StructType>(operandType))
+    {
+        int index = 0;
+        bool ret = true;
+        Instruction *InsertPoint = &(*IRB.GetInsertPoint());
+        for (Type *elementType : structType->elements())
+        {
+            IRB.SetInsertPoint(InsertPoint);
+            Instruction *operandIstruciton = dyn_cast<Instruction>(operand);
+            assert(operandIstruciton != nullptr);
+            // fix: get value's address
+            Value *addr = operandIstruciton->getOperand(0);
+            Value *element_ptr = IRB.CreateGEP(structType, addr, {ConstantInt::get(IRB.getInt32Ty(), 0), ConstantInt::get(IRB.getInt32Ty(), index++)});
+            // element_ptr = IRB.CreatePointerCast(element_ptr, PointerType::get(elementType, 0));
+            Value *element = IRB.CreateLoad(elementType, element_ptr);
+            ret = (instrumentParameterCheck(element, IRB, DL, depth) && ret);
+        }
+        return ret;
+    }
+    else if (ArrayType *arrayType = dyn_cast<ArrayType>(operandType))
+    {
+        bool ret = true;
+        Type *elementType = arrayType->getElementType();
+        Instruction *InsertPoint = &(*IRB.GetInsertPoint());
+        for (int index = 0; index < arrayType->getNumElements(); index++)
+        {
+            IRB.SetInsertPoint(InsertPoint);
+            Instruction *operandIstruciton = dyn_cast<Instruction>(operand);
+            assert(operandIstruciton != nullptr);
+            // fix-me: get value's address
+            Value *addr = operandIstruciton->getOperand(0);
+            Value *element_ptr = IRB.CreateGEP(arrayType, addr, {ConstantInt::get(IRB.getInt32Ty(), 0), ConstantInt::get(IRB.getInt32Ty(), index)});
+            // element_ptr = IRB.CreatePointerCast(element_ptr, PointerType::get(elementType, 0));
+            Value *element = IRB.CreateLoad(elementType, element_ptr);
+            ret = (instrumentParameterCheck(element, IRB, DL, depth) && ret);
+        }
+        return ret;
+    }
+    return false;
+}
+
+bool AddressSanitizer::instrumentRealEcallInst(CallInst *CI)
+{
+    if (CI == nullptr)
+        return false;
+    IRBuilder<> IRB(CI);
+    IRB.CreateCall(OutAddrWhitelistInit);
+
+    for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++)
+    {
+        Value *operand = CI->getOperand(i);
+        const DataLayout &DL = (dyn_cast<Instruction>(CI))->getModule()->getDataLayout();
+        instrumentParameterCheck(operand, IRB, DL, 0);
+    }
+    IRB.SetInsertPoint(CI->getNextNode());
+    IRB.CreateCall(OutAddrWhitelistDestroy);
+    return true;
+}
+
 bool AddressSanitizer::instrumentFunction(Function &F)
 {
     if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
@@ -566,6 +663,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     SmallVector<Instruction *, 8> NoReturnCalls;
     SmallVector<BasicBlock *, 16> AllBlocks;
     SmallVector<StoreInst *, 16> GlobalVariableStoreInsts;
+    CallInst *RealEcallInst = nullptr;
     int NumAllocas = 0;
 
     // Fill the set of memory operations to instrument.
@@ -603,6 +701,37 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                 //         NoReturnCalls.push_back(CB);
                 // }
             }
+            if (CallInst *CI = dyn_cast<CallInst>(&Inst))
+            {
+                Function *callee = CI->getCalledFunction();
+                if (callee != nullptr)
+                {
+                    StringRef callee_name = callee->getName();
+                    if (callee_name != "")
+                    {
+                        if (F.getName() == ("sgx_" /* ecall wrapper prefix */ + callee_name.str()))
+                        {
+                            // it's an ecall wrapper
+                            if (RealEcallInst == nullptr)
+                            {
+                                RealEcallInst = CI;
+                            }
+                            else
+                            {
+                                // should only one ecall in ecall wrapper
+                                CI->dump();
+                                abort();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        CI->dump();
+                        abort();
+                    }
+                }
+            }
+
             if (NumInsnsPerBB >= ClMaxInsnsToInstrumentPerBB)
                 break;
         }
@@ -610,6 +739,17 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     bool UseCalls = (ClInstrumentationWithCallsThreshold >= 0 &&
                      OperandsToInstrument.size() + IntrinToInstrument.size() >
                          (unsigned)ClInstrumentationWithCallsThreshold);
+
+    if (ClAtEnclaveTBridge)
+    {
+        ClOutAddrWhitelistCheck = false;
+        ClOutAddrWhitelistInit = true;
+    }
+    else
+    {
+        ClOutAddrWhitelistCheck = true;
+        ClOutAddrWhitelistInit = false;
+    }
     // Instrument.
     for (auto &Operand : OperandsToInstrument)
     {
@@ -621,10 +761,17 @@ bool AddressSanitizer::instrumentFunction(Function &F)
         instrumentMemIntrinsic(Inst);
         FunctionModified = true;
     }
-    for (auto Inst : GlobalVariableStoreInsts)
+    if (ClOutAddrWhitelistCheck)
     {
-        instrumentGlobalPropageteWhitelist(Inst);
-        FunctionModified = true;
+        for (auto Inst : GlobalVariableStoreInsts)
+        {
+            instrumentGlobalPropageteWhitelist(Inst);
+            FunctionModified = true;
+        }
+    }
+    if (ClOutAddrWhitelistInit)
+    {
+        instrumentRealEcallInst(RealEcallInst);
     }
 
     FunctionStackPoisoner FSP(F, *this);
