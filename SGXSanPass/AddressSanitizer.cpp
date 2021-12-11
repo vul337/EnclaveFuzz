@@ -172,6 +172,8 @@ void AddressSanitizer::initializeCallbacks(Module &M)
 
     OutAddrWhitelistInit = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_init", IRB.getVoidTy());
     OutAddrWhitelistDestroy = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_destroy", IRB.getVoidTy());
+    OutAddrWhitelistActive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_active", IRB.getVoidTy());
+    OutAddrWhitelistDeactive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
     OutAddrWhitelistCheck = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
                                                   IRB.getVoidTy(), IRB.getInt64Ty(),
                                                   IRB.getInt64Ty());
@@ -644,6 +646,17 @@ bool AddressSanitizer::instrumentRealEcallInst(CallInst *CI)
     return true;
 }
 
+bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
+{
+    Instruction *insertPoint = &(*OcallWrapper.getBasicBlockList().begin()->begin());
+    IRBuilder<> IRB(insertPoint);
+    IRB.CreateCall(OutAddrWhitelistDeactive);
+
+    FunctionInstVisitor visitor(OcallWrapper);
+    visitor.insertRet(OutAddrWhitelistActive);
+    return true;
+}
+
 bool AddressSanitizer::instrumentFunction(Function &F)
 {
     if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
@@ -664,6 +677,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     SmallVector<BasicBlock *, 16> AllBlocks;
     SmallVector<StoreInst *, 16> GlobalVariableStoreInsts;
     CallInst *RealEcallInst = nullptr;
+    bool isOcallWrapper = false;
     int NumAllocas = 0;
 
     // Fill the set of memory operations to instrument.
@@ -723,6 +737,10 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                                 abort();
                             }
                         }
+                        else if (callee_name == "sgx_ocall")
+                        {
+                            isOcallWrapper = true;
+                        }
                     }
                     else
                     {
@@ -761,7 +779,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
         instrumentMemIntrinsic(Inst);
         FunctionModified = true;
     }
-    if (ClOutAddrWhitelistCheck)
+    if (!ClAtEnclaveTBridge)
     {
         for (auto Inst : GlobalVariableStoreInsts)
         {
@@ -769,9 +787,15 @@ bool AddressSanitizer::instrumentFunction(Function &F)
             FunctionModified = true;
         }
     }
-    if (ClOutAddrWhitelistInit)
+    if (RealEcallInst && ClOutAddrWhitelistInit)
     {
+        // when it is an ecall wrapper
         instrumentRealEcallInst(RealEcallInst);
+    }
+
+    if (isOcallWrapper && ClAtEnclaveTBridge)
+    {
+        instrumentOcallWrapper(F);
     }
 
     FunctionStackPoisoner FSP(F, *this);
@@ -858,4 +882,31 @@ bool AddressSanitizer::ignoreAccess(Value *Ptr)
             return true;
 
     return false;
+}
+
+FunctionInstVisitor::FunctionInstVisitor(Function &F) : m_function(F) {}
+
+void FunctionInstVisitor::visitReturnInst(ReturnInst &RI)
+{
+    if (CallInst *CI = RI.getParent()->getTerminatingMustTailCall())
+        RetVec.push_back(CI);
+    else
+        RetVec.push_back(&RI);
+}
+
+/// Collect all Resume instructions.
+void FunctionInstVisitor::visitResumeInst(ResumeInst &RI) { RetVec.push_back(&RI); }
+
+/// Collect all CatchReturnInst instructions.
+void FunctionInstVisitor::visitCleanupReturnInst(CleanupReturnInst &CRI) { RetVec.push_back(&CRI); }
+
+void FunctionInstVisitor::insertRet(FunctionCallee &OutAddrWhitelistActive)
+{
+    for (BasicBlock *BB : depth_first(&m_function.getEntryBlock()))
+        visit(*BB);
+    for (Instruction *Ret : RetVec)
+    {
+        IRBuilder<> IRBRet(Ret);
+        IRBRet.CreateCall(OutAddrWhitelistActive);
+    }
 }

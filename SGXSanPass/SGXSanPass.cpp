@@ -56,7 +56,9 @@ namespace
                     F.setName("sgxsan_calloc");
                 }
 #endif
-                if ((not F.isDeclaration()) and (func_name != "ocall_init_shadow_memory"))
+                // cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery
+                if ((not F.isDeclaration()) and (func_name != "ocall_init_shadow_memory") and
+                    (func_name != "sgxsan_printf") and (func_name != "sgxsan_ocall_print_string"))
                 {
                     Changed |= ASan.instrumentFunction(F);
                 }

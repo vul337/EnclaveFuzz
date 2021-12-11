@@ -38,6 +38,7 @@ public:
     void instrumentMop(llvm::InterestingMemoryOperand &O, bool UseCalls);
     void instrumentGlobalPropageteWhitelist(llvm::StoreInst *SI);
     bool instrumentRealEcallInst(llvm::CallInst *CI);
+    bool instrumentOcallWrapper(llvm::Function &OcallWrapper);
     bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL, int depth);
     void instrumentAddress(llvm::Instruction *OrigIns, llvm::Instruction *InsertBefore, llvm::Value *Addr,
                            uint32_t TypeSize, bool IsWrite, llvm::Value *SizeArgument, bool UseCalls);
@@ -80,6 +81,25 @@ private:
 
     llvm::GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
 
-    llvm::FunctionCallee OutAddrWhitelistInit, OutAddrWhitelistDestroy, OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck;
+    llvm::FunctionCallee OutAddrWhitelistInit, OutAddrWhitelistDestroy, OutAddrWhitelistActive, OutAddrWhitelistDeactive,
+        OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck;
+};
+
+class FunctionInstVisitor : public llvm::InstVisitor<FunctionInstVisitor>
+{
+public:
+    FunctionInstVisitor(llvm::Function &F);
+
+    void visitReturnInst(llvm::ReturnInst &RI);
+
+    void visitResumeInst(llvm::ResumeInst &RI);
+
+    void visitCleanupReturnInst(llvm::CleanupReturnInst &CRI);
+
+    void insertRet(llvm::FunctionCallee &OutAddrWhitelistActive);
+
+private:
+    llvm::Function &m_function;
+    llvm::SmallVector<llvm::Instruction *, 8> RetVec;
 };
 #endif //ADDRESS_SANITIZER_HPP
