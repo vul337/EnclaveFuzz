@@ -73,16 +73,16 @@ std::pair<std::map<uint64_t, uint64_t>::iterator, bool> WhitelistOfAddrOutEnclav
     return ret;
 }
 
-std::pair<uint64_t, uint64_t> WhitelistOfAddrOutEnclave::query(uint64_t start, uint64_t size)
+std::tuple<uint64_t, uint64_t, bool> WhitelistOfAddrOutEnclave::query(uint64_t start, uint64_t size)
 {
     if (m_whitelist_init_cnt < 1 || (!m_whitelist_active))
     {
-        return std::pair<uint64_t, uint64_t>(0, 1);
+        return std::tuple<uint64_t, uint64_t, bool>(0, 1, false);
     }
     // SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%lx(0x%lx)\n", "Thread", "?", start, size);
     // iter();
     std::map<uint64_t, uint64_t>::iterator it;
-    std::pair<uint64_t, uint64_t> ret, false_ret = std::pair<uint64_t, uint64_t>(0, 0);
+    std::tuple<uint64_t, uint64_t, bool> ret, false_ret = std::tuple<uint64_t, uint64_t, bool>(0, 0, false);
 
     if (m_whitelist->size() == 0)
     {
@@ -94,7 +94,7 @@ std::pair<uint64_t, uint64_t> WhitelistOfAddrOutEnclave::query(uint64_t start, u
 
     if (LIKELY(it != m_whitelist->end() and it->first == start))
     {
-        ret = it->second < size ? false_ret : std::pair<uint64_t, uint64_t>(it->first, it->second);
+        ret = it->second < size ? false_ret : std::tuple<uint64_t, uint64_t, bool>(it->first, it->second, false);
         goto exit;
     }
 
@@ -108,14 +108,19 @@ std::pair<uint64_t, uint64_t> WhitelistOfAddrOutEnclave::query(uint64_t start, u
     {
         // get the element just blow query addr
         --it;
-        ret = it->first + it->second < start + size ? false_ret : std::pair<uint64_t, uint64_t>(it->first, it->second);
+        ret = it->first + it->second < start + size ? false_ret : std::tuple<uint64_t, uint64_t, bool>(it->first, it->second, false);
         goto exit;
     }
 exit:
     if (ret == false_ret)
     {
-        ret = query_global(start, size);
+        auto global_query_ret = query_global(start, size);
+        ret = std::tuple<uint64_t, uint64_t, bool>(global_query_ret.first, global_query_ret.second, true);
     }
+    // return value:
+    // 1) query failed at thread and global whitelist
+    // 2) query success at thread whitelist (global whitelist may also contain this info)
+    // 3) query success at global whitelist (thread whitelist do not contain this info)
     return ret;
 }
 
@@ -161,11 +166,13 @@ exit:
 
 bool WhitelistOfAddrOutEnclave::global_propagate(uint64_t addr)
 {
-    auto ret = query(addr, 1);
-    if (ret.second != 0)
+    uint64_t find_start, find_size;
+    bool is_at_global;
+    std::tie(find_start, find_size, is_at_global) = query(addr, 1);
+    if (is_at_global == false && find_size != 0 /* return case 2 */)
     {
         // SGXSAN_TRACE("[Whitelist] [Thread] => 0x%lx => [~Global~]\n", addr);
-        add_global(ret.first, ret.second).second;
+        add_global(find_start, find_size);
     }
     return true;
 }
@@ -198,7 +205,10 @@ void WhitelistOfAddrOutEnclave_add(uint64_t start, uint64_t size)
 
 void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size)
 {
-    SGXSAN_WARNING(WhitelistOfAddrOutEnclave::query(start, size).second != 0, "[SGXSan] Illegal access outside-enclave");
+    uint64_t find_start, find_size;
+    bool is_at_global;
+    std::tie(find_start, find_size, is_at_global) = WhitelistOfAddrOutEnclave::query(start, size);
+    SGXSAN_WARNING(find_size != 0, "[SGXSan] Illegal access outside-enclave");
 }
 
 void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr)

@@ -555,6 +555,16 @@ void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
     IRB.CreateCall(GlobalWhitelistPropagate, IRB.CreateCast(Instruction::ZExt, val, IRB.getInt64Ty()));
 }
 
+Type *getArrayElementPrimitiveType(ArrayType *arrayType)
+{
+    Type *elementType = arrayType->getElementType();
+    while (elementType->isArrayTy())
+    {
+        elementType = elementType->getArrayElementType();
+    }
+    return elementType;
+}
+
 bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL, int depth)
 {
     if (depth > 10)
@@ -563,6 +573,7 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     }
     depth++;
     Type *operandType = operand->getType();
+    // fix-me: how about FunctionType
     if (PointerType *pointerType = dyn_cast<PointerType>(operandType))
     {
         Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)), &(*IRB.GetInsertPoint()), false);
@@ -590,6 +601,14 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     else if (ArrayType *arrayType = dyn_cast<ArrayType>(operandType))
     {
         Type *elementType = arrayType->getElementType();
+
+        Type *elementPrimitiveType = getArrayElementPrimitiveType(arrayType);
+        if (!elementPrimitiveType->isPointerTy() && !elementPrimitiveType->isStructTy())
+        {
+            // do not need instrument
+            return false;
+        }
+
         Instruction *InsertPoint = &(*IRB.GetInsertPoint());
         for (int index = 0; index < arrayType->getNumElements(); index++)
         {
@@ -631,8 +650,45 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
     visitor.getInstVec(ReturnInstVec);
     for (Instruction *RetInst : ReturnInstVec)
     {
-        IRBuilder<> IRBRet(RetInst);
-        IRBRet.CreateCall(OutAddrWhitelistActive);
+        const DataLayout &DL = (dyn_cast<Instruction>(RetInst))->getModule()->getDataLayout();
+        for (Argument &arg : OcallWrapper.args())
+        {
+            IRB.SetInsertPoint(RetInst);
+            Type *argType = arg.getType();
+            if (argType->isPointerTy())
+            {
+                Value *pointee = IRB.CreateLoad(&arg);
+                instrumentParameterCheck(pointee, IRB, DL, 0);
+            }
+            // it seem func arg will never be an array or a struct
+            else if (ArrayType *arrayType = dyn_cast<ArrayType>(argType))
+            {
+                Type *elementPrimitiveType = getArrayElementPrimitiveType(arrayType);
+                if (!elementPrimitiveType->isPointerTy() && !elementPrimitiveType->isStructTy())
+                {
+                    // do not need instrument
+                    continue;
+                }
+                for (int index = 0; index < arrayType->getNumElements(); index++)
+                {
+                    IRB.SetInsertPoint(RetInst);
+                    Value *element = IRB.CreateExtractValue(&arg, index);
+                    instrumentParameterCheck(element, IRB, DL, 0);
+                }
+            }
+            else if (StructType *structType = dyn_cast<StructType>(argType))
+            {
+                int index = 0;
+                for (Type *elementType : structType->elements())
+                {
+                    IRB.SetInsertPoint(RetInst);
+                    Value *element = IRB.CreateExtractValue(&arg, index++);
+                    instrumentParameterCheck(element, IRB, DL, 0);
+                }
+            }
+        }
+
+        IRB.CreateCall(OutAddrWhitelistActive);
     }
     return true;
 }
