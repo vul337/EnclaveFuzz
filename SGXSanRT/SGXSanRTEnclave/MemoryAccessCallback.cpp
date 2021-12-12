@@ -2,7 +2,7 @@
 #include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoisonCheck.hpp"
-#include "EdgeCheck.hpp"
+#include "WhitelistCheck.hpp"
 
 #define ASAN_MEMORY_ACCESS_CALLBACK_BODY(type, is_write, size, fatal)        \
     uptr smp = MEM_TO_SHADOW(addr);                                          \

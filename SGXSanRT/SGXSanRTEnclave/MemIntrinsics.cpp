@@ -7,7 +7,7 @@
 #include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanCommonPoisonCheck.hpp"
 #include "MemIntrinsics.hpp"
-#include "EdgeCheck.hpp"
+#include "WhitelistCheck.hpp"
 
 // In order to check safe memory operations:
 // If we do not instrument sgxsdk, we should replace memcpy used in memcpy_s with __asan_memcpy(weak symbol) by hand.

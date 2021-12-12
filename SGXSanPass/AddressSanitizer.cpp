@@ -74,18 +74,6 @@ static cl::opt<bool> ClUseElrangeGuard(
     cl::Hidden,
     cl::init(true));
 
-static cl::opt<bool> ClOutAddrWhitelistCheck(
-    "sgxsan-out-addr-whitelist-check",
-    cl::desc("check out-addr whitelist"),
-    cl::Hidden,
-    cl::init(true));
-
-static cl::opt<bool> ClOutAddrWhitelistInit(
-    "sgxsan-out-addr-whitelist-init",
-    cl::desc("init out-addr whitelist"),
-    cl::Hidden,
-    cl::init(false));
-
 static cl::opt<bool> ClAtEnclaveTBridge(
     "sgxsan-at-enclave-tbridge",
     cl::desc("at enclave tbridge"),
@@ -421,7 +409,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
         Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
         Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
         Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
-        if (!ClOutAddrWhitelistCheck)
+        if (ClAtEnclaveTBridge)
         {
             ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(IfCond, InsertBefore, false);
         }
@@ -590,40 +578,26 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     else if (StructType *structType = dyn_cast<StructType>(operandType))
     {
         int index = 0;
-        bool ret = true;
         Instruction *InsertPoint = &(*IRB.GetInsertPoint());
         for (Type *elementType : structType->elements())
         {
             IRB.SetInsertPoint(InsertPoint);
-            Instruction *operandIstruciton = dyn_cast<Instruction>(operand);
-            assert(operandIstruciton != nullptr);
-            // fix: get value's address
-            Value *addr = operandIstruciton->getOperand(0);
-            Value *element_ptr = IRB.CreateGEP(structType, addr, {ConstantInt::get(IRB.getInt32Ty(), 0), ConstantInt::get(IRB.getInt32Ty(), index++)});
-            // element_ptr = IRB.CreatePointerCast(element_ptr, PointerType::get(elementType, 0));
-            Value *element = IRB.CreateLoad(elementType, element_ptr);
-            ret = (instrumentParameterCheck(element, IRB, DL, depth) && ret);
+            Value *element = IRB.CreateExtractValue(operand, index++);
+            instrumentParameterCheck(element, IRB, DL, depth);
         }
-        return ret;
+        return true;
     }
     else if (ArrayType *arrayType = dyn_cast<ArrayType>(operandType))
     {
-        bool ret = true;
         Type *elementType = arrayType->getElementType();
         Instruction *InsertPoint = &(*IRB.GetInsertPoint());
         for (int index = 0; index < arrayType->getNumElements(); index++)
         {
             IRB.SetInsertPoint(InsertPoint);
-            Instruction *operandIstruciton = dyn_cast<Instruction>(operand);
-            assert(operandIstruciton != nullptr);
-            // fix-me: get value's address
-            Value *addr = operandIstruciton->getOperand(0);
-            Value *element_ptr = IRB.CreateGEP(arrayType, addr, {ConstantInt::get(IRB.getInt32Ty(), 0), ConstantInt::get(IRB.getInt32Ty(), index)});
-            // element_ptr = IRB.CreatePointerCast(element_ptr, PointerType::get(elementType, 0));
-            Value *element = IRB.CreateLoad(elementType, element_ptr);
-            ret = (instrumentParameterCheck(element, IRB, DL, depth) && ret);
+            Value *element = IRB.CreateExtractValue(operand, index);
+            instrumentParameterCheck(element, IRB, DL, depth);
         }
-        return ret;
+        return true;
     }
     return false;
 }
@@ -653,7 +627,13 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
     IRB.CreateCall(OutAddrWhitelistDeactive);
 
     FunctionInstVisitor visitor(OcallWrapper);
-    visitor.insertRet(OutAddrWhitelistActive);
+    SmallVector<llvm::Instruction *, 8> ReturnInstVec;
+    visitor.getInstVec(ReturnInstVec);
+    for (Instruction *RetInst : ReturnInstVec)
+    {
+        IRBuilder<> IRBRet(RetInst);
+        IRBRet.CreateCall(OutAddrWhitelistActive);
+    }
     return true;
 }
 
@@ -758,16 +738,6 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                      OperandsToInstrument.size() + IntrinToInstrument.size() >
                          (unsigned)ClInstrumentationWithCallsThreshold);
 
-    if (ClAtEnclaveTBridge)
-    {
-        ClOutAddrWhitelistCheck = false;
-        ClOutAddrWhitelistInit = true;
-    }
-    else
-    {
-        ClOutAddrWhitelistCheck = true;
-        ClOutAddrWhitelistInit = false;
-    }
     // Instrument.
     for (auto &Operand : OperandsToInstrument)
     {
@@ -787,7 +757,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
             FunctionModified = true;
         }
     }
-    if (RealEcallInst && ClOutAddrWhitelistInit)
+    if (RealEcallInst && ClAtEnclaveTBridge)
     {
         // when it is an ecall wrapper
         instrumentRealEcallInst(RealEcallInst);
@@ -882,31 +852,4 @@ bool AddressSanitizer::ignoreAccess(Value *Ptr)
             return true;
 
     return false;
-}
-
-FunctionInstVisitor::FunctionInstVisitor(Function &F) : m_function(F) {}
-
-void FunctionInstVisitor::visitReturnInst(ReturnInst &RI)
-{
-    if (CallInst *CI = RI.getParent()->getTerminatingMustTailCall())
-        RetVec.push_back(CI);
-    else
-        RetVec.push_back(&RI);
-}
-
-/// Collect all Resume instructions.
-void FunctionInstVisitor::visitResumeInst(ResumeInst &RI) { RetVec.push_back(&RI); }
-
-/// Collect all CatchReturnInst instructions.
-void FunctionInstVisitor::visitCleanupReturnInst(CleanupReturnInst &CRI) { RetVec.push_back(&CRI); }
-
-void FunctionInstVisitor::insertRet(FunctionCallee &OutAddrWhitelistActive)
-{
-    for (BasicBlock *BB : depth_first(&m_function.getEntryBlock()))
-        visit(*BB);
-    for (Instruction *Ret : RetVec)
-    {
-        IRBuilder<> IRBRet(Ret);
-        IRBRet.CreateCall(OutAddrWhitelistActive);
-    }
 }
