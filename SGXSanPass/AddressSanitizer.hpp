@@ -12,6 +12,7 @@
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include "llvm/ADT/Statistic.h"
 #include <assert.h>
+#include "SGXSanManifest.h"
 
 #ifndef DEBUG_TYPE
 #define DEBUG_TYPE "sgxsan"
@@ -37,9 +38,11 @@ public:
     void getInterestingMemoryOperands(llvm::Instruction *I, llvm::SmallVectorImpl<llvm::InterestingMemoryOperand> &Interesting, llvm::SmallVector<llvm::StoreInst *, 16> &GlobalVariableStoreInsts);
     void instrumentMop(llvm::InterestingMemoryOperand &O, bool UseCalls);
     void instrumentGlobalPropageteWhitelist(llvm::StoreInst *SI);
-    bool instrumentRealEcallInst(llvm::CallInst *CI);
+    bool instrumentRealEcall(llvm::CallInst *CI);
     bool instrumentOcallWrapper(llvm::Function &OcallWrapper);
-    bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL, int depth);
+    bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL,
+                                  int depth, llvm::Value *eleCnt = nullptr, llvm::Value *operandAddr = nullptr);
+    void replaceSGXSanIntrinName(llvm::Function &F);
     void instrumentAddress(llvm::Instruction *OrigIns, llvm::Instruction *InsertBefore, llvm::Value *Addr,
                            uint32_t TypeSize, bool IsWrite, llvm::Value *SizeArgument, bool UseCalls);
     void instrumentUnusualSizeOrAlignment(
@@ -82,7 +85,10 @@ private:
     llvm::GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
 
     llvm::FunctionCallee OutAddrWhitelistInit, OutAddrWhitelistDestroy, OutAddrWhitelistActive, OutAddrWhitelistDeactive,
-        OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck;
+        OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS;
+#if (USE_SGXSAN_MALLOC)
+    llvm::FunctionCallee SGXSanMalloc, SGXSanFree, SGXSanCalloc, SGXSanRealloc;
+#endif
 };
 
 class FunctionInstVisitor : public llvm::InstVisitor<FunctionInstVisitor>

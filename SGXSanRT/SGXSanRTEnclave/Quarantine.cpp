@@ -42,7 +42,7 @@ void QuarantineCache::put(QuarantineElement qe)
     if (qe.alloc_size > m_quarantine_cache_max_size)
     {
         BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
-        // PRINTF("[free] alloc_beg=0x%lx user_beg=0x%lx \n", qe.alloc_beg, qe.user_beg);
+        // PRINTF("[Recycle->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
         FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, alignment), kAsanHeapLeftRedzoneMagic);
         return;
     }
@@ -54,14 +54,14 @@ void QuarantineCache::put(QuarantineElement qe)
         QuarantineElement front_qe = m_queue.front();
         // free and poison
         BACKEND_FREE(reinterpret_cast<void *>(front_qe.alloc_beg));
-        // PRINTF("[free for quarantine] alloc_beg=0x%lx user_beg=0x%lx \n", front_qe.alloc_beg, front_qe.user_beg);
+        // PRINTF("[Quarantine->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n", front_qe.alloc_beg, front_qe.user_beg, front_qe.user_beg + front_qe.user_size, front_qe.alloc_beg + front_qe.alloc_size);
         FastPoisonShadow(front_qe.user_beg, RoundUpTo(front_qe.user_size, alignment), kAsanHeapLeftRedzoneMagic);
         // update quarantine cache
         assert(m_quarantine_cache_used_size >= front_qe.alloc_size);
         m_quarantine_cache_used_size -= front_qe.alloc_size;
         m_queue.pop();
     }
-    // PRINTF("[quaratine] alloc_beg=0x%lx user_beg=0x%lx\n", qe.alloc_beg, qe.user_beg);
+    // PRINTF("[Recycle->Quaratine] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
     m_queue.push(qe);
     m_quarantine_cache_used_size += qe.alloc_size;
     pthread_rwlock_unlock(&rwlock_quarantine_cache);

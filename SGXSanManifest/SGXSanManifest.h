@@ -19,6 +19,6 @@
 
 // USE_SGXSAN_MALLOC set 1 means we wrap malloc directly and some malloc replaced to sgxsan_malloc by pass will be hooked,
 // other mallocs which are not influenced by pass will not be hooked.
-#define USE_SGXSAN_MALLOC 1
+#define USE_SGXSAN_MALLOC 0
 
 #endif

@@ -22,40 +22,7 @@ namespace
             AddressSanitizer ASan(M);
             for (Function &F : M)
             {
-
-                // errs() << "Hello: " << F.getName() << '\n';
-                // (https://stackoverflow.com/questions/30990032/change-name-of-llvm-function)
                 StringRef func_name = F.getName();
-                if (func_name == "memcpy_s")
-                {
-                    F.setName("sgxsan_memcpy_s");
-                }
-                else if (func_name == "memset_s")
-                {
-                    F.setName("sgxsan_memset_s");
-                }
-                else if (func_name == "memmove_s")
-                {
-                    F.setName("sgxsan_memmove_s");
-                }
-#if (USE_SGXSAN_MALLOC)
-                else if (func_name == "malloc")
-                {
-                    F.setName("sgxsan_malloc");
-                }
-                else if (func_name == "free")
-                {
-                    F.setName("sgxsan_free");
-                }
-                else if (func_name == "realloc")
-                {
-                    F.setName("sgxsan_realloc");
-                }
-                else if (func_name == "calloc")
-                {
-                    F.setName("sgxsan_calloc");
-                }
-#endif
                 // cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery
                 if ((not F.isDeclaration()) and (func_name != "ocall_init_shadow_memory") and
                     (func_name != "sgxsan_printf") and (func_name != "sgxsan_ocall_print_string"))
