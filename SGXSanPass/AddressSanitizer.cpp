@@ -185,7 +185,7 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     OutAddrWhitelistDeactive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
     OutAddrWhitelistCheck = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
                                                   IRB.getVoidTy(), IRB.getInt64Ty(),
-                                                  IRB.getInt64Ty());
+                                                  IRB.getInt64Ty(), IRB.getInt1Ty());
 
     GlobalWhitelistPropagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
                                                      IRB.getVoidTy(), IRB.getInt64Ty());
@@ -456,7 +456,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
             Value *ElseIfCond = IRB.CreateOr(CmpEndAddrULTEnclaveBase, CmpStartAddrUGTEnclaveEnd);
             Instruction *ElseIfTerm = SplitBlockAndInsertIfThen(ElseIfCond, ElseTI, false);
             IRB.SetInsertPoint(ElseIfTerm);
-            IRB.CreateCall(OutAddrWhitelistCheck, {AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3))});
+            IRB.CreateCall(OutAddrWhitelistCheck, {AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3)), IRB.getInt1(IsWrite)});
         }
     }
 

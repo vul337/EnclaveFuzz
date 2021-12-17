@@ -25,7 +25,7 @@
         SGXSAN_ELRANGE_CHECK_BEG(addr, is_write, size)                          \
         ASAN_MEMORY_ACCESS_CALLBACK_BODY(type, is_write, size, true);           \
         SGXSAN_ELRANGE_CHECK_MID                                                \
-        WhitelistOfAddrOutEnclave_query((uint64_t)addr, size);                  \
+        WhitelistOfAddrOutEnclave_query((uint64_t)addr, size, is_write);        \
         SGXSAN_ELRANGE_CHECK_END;                                               \
     }
 
@@ -48,7 +48,7 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
         ReportGenericError(pc, bp, sp, addr, is_write, size, true);    \
     }                                                                  \
     SGXSAN_ELRANGE_CHECK_MID                                           \
-    WhitelistOfAddrOutEnclave_query((uint64_t)addr, size);             \
+    WhitelistOfAddrOutEnclave_query((uint64_t)addr, size, is_write);   \
     SGXSAN_ELRANGE_CHECK_END;
 
 extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_loadN(uptr addr, uptr size)

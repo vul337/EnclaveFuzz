@@ -13,7 +13,7 @@ void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt)
     }
     SGXSAN_ELRANGE_CHECK_MID
     //totally outside enclave, add to whitelist
-    ABORT_ASSERT(WhitelistOfAddrOutEnclave::add(ptr, (cnt == -1) ? (1 << 12) : (len * cnt)).second, "Insertion conflict?");
+    WhitelistOfAddrOutEnclave_add(ptr, (cnt == -1) ? (1 << 12) : (len * cnt));
     SGXSAN_ELRANGE_CHECK_END;
     return;
 }
