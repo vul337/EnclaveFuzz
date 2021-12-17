@@ -41,7 +41,8 @@ public:
     bool instrumentRealEcall(llvm::CallInst *CI);
     bool instrumentOcallWrapper(llvm::Function &OcallWrapper);
     bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL,
-                                  int depth, llvm::Value *eleCnt = nullptr, llvm::Value *operandAddr = nullptr);
+                                  int depth, llvm::Value *eleCnt = nullptr, llvm::Value *operandAddr = nullptr,
+                                  bool checkCurrentLevelPtr = true);
     void replaceSGXSanIntrinName(llvm::Function &F);
     void instrumentAddress(llvm::Instruction *OrigIns, llvm::Instruction *InsertBefore, llvm::Value *Addr,
                            uint32_t TypeSize, bool IsWrite, llvm::Value *SizeArgument, bool UseCalls);

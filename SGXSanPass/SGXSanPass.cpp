@@ -23,7 +23,11 @@ namespace
             for (Function &F : M)
             {
                 StringRef func_name = F.getName();
+                // since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte
+                // whether instrumented or not is not necessary
+                //
                 // cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery
+                // (e.g. sgxsan_memcpy_s will call WhitelistQuery)
                 if ((not F.isDeclaration()) and (func_name != "ocall_init_shadow_memory") and
                     (func_name != "sgxsan_printf") and (func_name != "sgxsan_ocall_print_string"))
                 {
@@ -32,13 +36,6 @@ namespace
             }
             return Changed;
         }
-
-        // bool runOnFunction(Function &F) override
-        // {
-        //     AddressSanitizer ASan(*F.getParent());
-
-        //     return ASan.instrumentFunction(F);
-        // }
     }; // end of struct SGXSanPass
 } // end of anonymous namespace
 

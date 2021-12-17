@@ -640,15 +640,49 @@ static SmallVector<Value *> getValuesByStrInFunction(Function *F, bool (*cmp)(Va
     return valueVec;
 }
 
-// fix-me: implementation is tricky
-// if (int64_t) length is not -1, then (Value *) paramLen must be not nullptr
-static std::pair<int64_t, Value *> __getParamLenInEDL(Value *param, Function *F)
+static std::pair<int64_t, Value *> getLenAndValueByNameInEDL(Function *F, std::string lenPrefixedValueName)
 {
     int64_t length = -1;
-    Value *paramLen = nullptr;
+    Value *lenValue = nullptr;
+    SmallVector<Value *> values = getValuesByStrInFunction(F, isValueNameEqualWith, lenPrefixedValueName);
+    assert(values.size() <= 1);
+    if (values.size() == 0)
+    {
+        goto exit;
+    }
+    // now values.size()==1
+    lenValue = values.front();
+    assert(lenValue != nullptr);
+    // find lenValue
+    for (auto user : lenValue->users())
+    {
+        if (StoreInst *SI = dyn_cast<StoreInst>(user))
+        {
+            if (ConstantInt *cInt = dyn_cast<ConstantInt>(SI->getOperand(0)))
+            {
+                length = cInt->getSExtValue();
+                assert(length > 0);
+                if (length <= 0)
+                {
+                    length = -1;
+                }
+                goto exit;
+            }
+        }
+    }
+exit:
+    return std::pair<int64_t, Value *>(length, lenValue);
+}
+
+// fix-me: implementation is tricky
+// if (int64_t) length is not -1, then (Value *) lenValue must be not nullptr
+static std::pair<int64_t, Value *> getLenAndValueByParamInEDL(Function *F, Value *param)
+{
+    int64_t length = -1;
+    Value *lenValue = nullptr;
 
     StringRef operandLengthName = "";
-    SmallVector<Value *> values;
+    std::pair<int64_t, llvm::Value *> lenAndValue;
     if (!param->getName().startswith("_in_"))
     {
         while (isa<CastInst>(param))
@@ -668,32 +702,12 @@ static std::pair<int64_t, Value *> __getParamLenInEDL(Value *param, Function *F)
 
     // now param prefixed with _in_
     // then find _len_ prefixed value
-    values = getValuesByStrInFunction(F, isValueNameEqualWith, "_len_" + param->getName().substr(4).str());
-    assert(values.size() == 1);
-    paramLen = values.front();
-    if (paramLen)
-    {
-        // find paramLen
-        for (auto user : paramLen->users())
-        {
-            if (StoreInst *SI = dyn_cast<StoreInst>(user))
-            {
-                if (ConstantInt *cInt = dyn_cast<ConstantInt>(SI->getOperand(0)))
-                {
-                    length = cInt->getSExtValue();
-                    assert(length > 0);
-                    if (length <= 0)
-                    {
-                        length = -1;
-                    }
-                    goto exit;
-                }
-            }
-        }
-    }
+    lenAndValue = getLenAndValueByNameInEDL(F, "_len_" + param->getName().substr(4).str());
+    length = lenAndValue.first;
+    lenValue = lenAndValue.second;
 
 exit:
-    return std::pair<int64_t, Value *>(length, paramLen);
+    return std::pair<int64_t, Value *>(length, lenValue);
 }
 
 // param means passed parameter at real ecall (not ecall wrapper) instruction
@@ -703,7 +717,7 @@ exit:
 //|-1           >=1         nullptr             /* [user_check] pointer */
 //|-1           >=1         (Value *) _len_xxx  /* [in]/[out] pointer, but length is not a ConstantInt */
 //|>=1          >=1         (Value *) _len_xxx  /* [in]/[out] pointer, and length is a ConstantInt */
-static std::tuple<int, int, Value *> getParamLenInEDL(Value *param, Function *F)
+static std::tuple<int, int, Value *> convertParamLenAndValue2Tuple(Value *param, Function *F, std::pair<int64_t, Value *> lenAndValue)
 {
     int elementCnt = -1;
     int elementSize = -1;
@@ -713,23 +727,23 @@ static std::tuple<int, int, Value *> getParamLenInEDL(Value *param, Function *F)
         elementSize = F->getParent()->getDataLayout().getTypeAllocSize(pointerType->getElementType()).getFixedSize();
         assert(elementSize >= 1);
     }
-    auto operandEdlLength = __getParamLenInEDL(param, F);
-    if (operandEdlLength.first > 0 && operandEdlLength.second != nullptr)
+    if (lenAndValue.first > 0 && lenAndValue.second != nullptr)
     {
         // this param is a (array-)pointer and has length, means [in]/[out]
         assert(param->getType()->isPointerTy() && (elementSize != -1));
-        elementCnt = operandEdlLength.first / elementSize;
+        elementCnt = lenAndValue.first / elementSize;
         assert(elementCnt >= 1);
     }
     // else: it's a user_check (array-)ptr/string/primitive variable
-    return std::tuple<int, int, Value *>(elementCnt, elementSize, operandEdlLength.second);
+    return std::tuple<int, int, Value *>(elementCnt, elementSize, lenAndValue.second);
 }
 
-Value *getPointerLenValueInEDL(Value *ptr, Instruction *insertPoint)
+Value *convertPointerLenAndValue2CountValue(Value *ptr, Instruction *insertPoint, std::pair<int64_t, Value *> lenAndValue)
 {
     int elementCnt = -1, elementSz = -1;
     Value *lenValue = nullptr;
-    std::tie(elementCnt, elementSz, lenValue) = getParamLenInEDL(ptr, insertPoint->getFunction());
+    Function *F = insertPoint->getFunction();
+    std::tie(elementCnt, elementSz, lenValue) = convertParamLenAndValue2Tuple(ptr, F, lenAndValue);
     IRBuilder<> IRB(insertPoint);
     if (elementCnt >= 1)
     {
@@ -746,7 +760,9 @@ Value *getPointerLenValueInEDL(Value *ptr, Instruction *insertPoint)
     }
 }
 
-bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL, int depth, Value *eleCnt, Value *operandAddr)
+bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL,
+                                                int depth, Value *eleCnt, Value *operandAddr,
+                                                bool checkCurrentLevelPtr)
 {
     if (depth > 10)
     {
@@ -760,10 +776,13 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     {
         Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)), &(*IRB.GetInsertPoint()), false);
         IRB.SetInsertPoint(PointerCheckTerm);
-        IRB.CreateCall(SGXSanEdgeCheck,
-                       {IRB.CreatePointerCast(operand, IRB.getInt64Ty()),
-                        IRB.getInt64(DL.getTypeAllocSize(pointerType->getElementType())),
-                        (eleCnt == nullptr ? IRB.getInt32(-1) : eleCnt)});
+        if (checkCurrentLevelPtr)
+        {
+            IRB.CreateCall(SGXSanEdgeCheck,
+                           {IRB.CreatePointerCast(operand, IRB.getInt64Ty()),
+                            IRB.getInt64(DL.getTypeAllocSize(pointerType->getElementType())),
+                            (eleCnt == nullptr ? IRB.getInt32(-1) : eleCnt)});
+        }
         assert(eleCnt != IRB.getInt32(0));
         if (eleCnt && (eleCnt != IRB.getInt32(-1)) && (eleCnt != IRB.getInt32(1)))
         {
@@ -797,12 +816,12 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     }
     else if (ArrayType *arrayType = dyn_cast<ArrayType>(operandType))
     {
-        // Type *unpackedType = unpackArrayType(arrayType);
-        // if (!unpackedType->isPointerTy() && !unpackedType->isStructTy())
-        // {
-        //     // do not need instrument
-        //     return false;
-        // }
+        Type *unpackedType = unpackArrayType(arrayType);
+        if (!unpackedType->isPointerTy() && !unpackedType->isStructTy())
+        {
+            // do not need instrument
+            return false;
+        }
         Instruction *insertPoint = &(*IRB.GetInsertPoint());
         if (operandAddr)
         {
@@ -844,8 +863,11 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
         {
             // Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)), CI, false);
             // maybe operand is a (array-)pointer and it has more then 1 element accroding to EDL Sementics
-            Value *ptrEleCnt = getPointerLenValueInEDL(operand, CI);
-            instrumentParameterCheck(operand, IRB, DL, 0, ptrEleCnt, nullptr);
+            auto lenAndValue = getLenAndValueByParamInEDL(CI->getFunction(), operand);
+            Value *ptrEleCnt = convertPointerLenAndValue2CountValue(operand, CI, lenAndValue);
+            // if it is [in]/[out] (array-)pointer, sub-element still need to be filled into whitelist
+            instrumentParameterCheck(operand, IRB, DL, 0, ptrEleCnt, nullptr,
+                                     lenAndValue.second == nullptr ? true : false /* _in_ prefixed ptr, needn't check */);
         }
         else if (ArrayType *arrType = dyn_cast<ArrayType>(operand->getType()))
         {
@@ -860,7 +882,7 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
             {
                 Value *addr = I->getOperand(0);
                 assert(addr->getType()->getPointerElementType() == arrType);
-                instrumentParameterCheck(addr, IRB, DL, 0, IRB.getInt32(1));
+                instrumentParameterCheck(addr, IRB, DL, 0, IRB.getInt32(1), nullptr, false);
             }
             else
             {
@@ -891,38 +913,24 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
         const DataLayout &DL = (dyn_cast<Instruction>(RetInst))->getModule()->getDataLayout();
         for (Argument &arg : OcallWrapper.args())
         {
+            // treat ocall-wrapper argument as _in_ prefixed parameter in real-ecall
             IRB.SetInsertPoint(RetInst);
             Type *argType = arg.getType();
             if (argType->isPointerTy())
             {
-                Value *pointee = IRB.CreateLoad(&arg);
-                instrumentParameterCheck(pointee, IRB, DL, 0);
+                std::string argName = arg.getName().str();
+                Value *ptrEleCnt = nullptr;
+                if (argName != "")
+                {
+                    auto lenAndValue = getLenAndValueByNameInEDL(RetInst->getFunction(), "_len_" + argName);
+                    ptrEleCnt = convertPointerLenAndValue2CountValue(&arg, RetInst, lenAndValue);
+                }
+                instrumentParameterCheck(&arg, IRB, DL, 0, ptrEleCnt, nullptr, false);
             }
             // it seem func arg will never be an array or a struct
-            else if (ArrayType *arrayType = dyn_cast<ArrayType>(argType))
+            else
             {
-                Type *elementPrimitiveType = unpackArrayType(arrayType);
-                if (!elementPrimitiveType->isPointerTy() && !elementPrimitiveType->isStructTy())
-                {
-                    // do not need instrument
-                    continue;
-                }
-                for (int index = 0; index < arrayType->getNumElements(); index++)
-                {
-                    IRB.SetInsertPoint(RetInst);
-                    Value *element = IRB.CreateExtractValue(&arg, index);
-                    instrumentParameterCheck(element, IRB, DL, 0);
-                }
-            }
-            else if (StructType *structType = dyn_cast<StructType>(argType))
-            {
-                int index = 0;
-                for (Type *elementType : structType->elements())
-                {
-                    IRB.SetInsertPoint(RetInst);
-                    Value *element = IRB.CreateExtractValue(&arg, index++);
-                    instrumentParameterCheck(element, IRB, DL, 0);
-                }
+                instrumentParameterCheck(&arg, IRB, DL, 0);
             }
         }
         IRB.SetInsertPoint(RetInst);
