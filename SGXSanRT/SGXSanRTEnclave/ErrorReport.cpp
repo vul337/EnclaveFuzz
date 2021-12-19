@@ -4,9 +4,10 @@
 #include <string>
 #include "SGXSanDefs.h"
 #include "SGXSanPrintf.hpp"
-#include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoisonCheck.hpp"
+
+#include "SGXSanCommonErrorReport.hpp"
 
 // -------------------------- Run-time entry ------------------- {{{1
 // exported functions
@@ -86,7 +87,7 @@ void PrintShadowMap(uptr addr)
 }
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
-                        uptr access_size, bool fatal)
+                        uptr access_size, bool fatal, bool is_warning)
 {
     if (!fatal)
         return;
@@ -97,7 +98,8 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
            pc, bp, sp, addr, is_write, access_size);
     PrintShadowMap(addr);
     PRINTF("================= Report End =================\n");
-    abort();
+    if (!is_warning)
+        abort();
     return;
 }
 

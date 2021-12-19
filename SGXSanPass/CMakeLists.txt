@@ -16,4 +16,4 @@ if(NOT LLVM_ENABLE_RTTI)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 endif()
 
-add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp FunctionStackPoisoner.cpp)
+add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp FunctionStackPoisoner.cpp AdjustUSP.cpp)

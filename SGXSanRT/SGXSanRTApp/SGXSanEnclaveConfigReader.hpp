@@ -116,9 +116,8 @@ private:
 
     uint64_t m_enclave_load_addr;
     // rva and page_count
-    std::vector<std::pair<uint64_t, uint32_t>> m_sgxsan_guard_list;
-    std::vector<std::pair<uint64_t, uint32_t>> m_sgxsan_tcs_list;
-    std::vector<std::pair<uint64_t, uint32_t>> m_sgxsan_ssa_list;
+    std::vector<std::pair<uint64_t, uint32_t>> m_sgxsan_guard_list, m_sgxsan_tcs_list, m_sgxsan_ssa_list,
+        m_sgxsan_td_list, m_sgxsan_stack_max_list, m_sgxsan_stack_min_list;
 };
 
 #endif

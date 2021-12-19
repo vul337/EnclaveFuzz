@@ -146,23 +146,44 @@ bool SGXSanEnclaveConfigReader::shallow_poison_senitive()
     for (auto guard : m_sgxsan_guard_list)
     {
         // sensitive area should be well aligned
-        SGXSAN_TRACE("\t\t[%lx,%lx]=>[%lx,%lx]\n", guard.first + m_enclave_load_addr, guard.first + m_enclave_load_addr + (guard.second << 12) - 1,
+        SGXSAN_TRACE("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n", guard.first + m_enclave_load_addr, guard.first + m_enclave_load_addr + (guard.second << 12) - 1,
                      MEM_TO_SHADOW(guard.first + m_enclave_load_addr), MEM_TO_SHADOW(guard.first + m_enclave_load_addr + (guard.second << 12) - 1));
         FastPoisonShadow(guard.first + m_enclave_load_addr, guard.second << 12, kSGXSanShadowSensitive);
     }
     SGXSAN_TRACE("\n[TCS list]\n");
     for (auto tcs : m_sgxsan_tcs_list)
     {
-        SGXSAN_TRACE("\t\t[%lx,%lx]=>[%lx,%lx]\n", tcs.first + m_enclave_load_addr, tcs.first + m_enclave_load_addr + (tcs.second << 12) - 1,
+        SGXSAN_TRACE("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n", tcs.first + m_enclave_load_addr, tcs.first + m_enclave_load_addr + (tcs.second << 12) - 1,
                      MEM_TO_SHADOW(tcs.first + m_enclave_load_addr), MEM_TO_SHADOW(tcs.first + m_enclave_load_addr + (tcs.second << 12) - 1));
         FastPoisonShadow(tcs.first + m_enclave_load_addr, tcs.second << 12, kSGXSanShadowSensitive);
     }
     SGXSAN_TRACE("\n[SSA list]\n");
     for (auto ssa : m_sgxsan_ssa_list)
     {
-        SGXSAN_TRACE("\t\t[%lx,%lx]=>[%lx,%lx]\n", ssa.first + m_enclave_load_addr, ssa.first + m_enclave_load_addr + (ssa.second << 12) - 1,
+        SGXSAN_TRACE("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n", ssa.first + m_enclave_load_addr, ssa.first + m_enclave_load_addr + (ssa.second << 12) - 1,
                      MEM_TO_SHADOW(ssa.first + m_enclave_load_addr), MEM_TO_SHADOW(ssa.first + m_enclave_load_addr + (ssa.second << 12) - 1));
         FastPoisonShadow(ssa.first + m_enclave_load_addr, ssa.second << 12, kSGXSanShadowSensitive);
+    }
+    SGXSAN_TRACE("\n[TD list]\n");
+    for (auto td : m_sgxsan_td_list)
+    {
+        SGXSAN_TRACE("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n", td.first + m_enclave_load_addr, td.first + m_enclave_load_addr + (td.second << 12) - 1,
+                     MEM_TO_SHADOW(td.first + m_enclave_load_addr), MEM_TO_SHADOW(td.first + m_enclave_load_addr + (td.second << 12) - 1));
+        // FastPoisonShadow(td.first + m_enclave_load_addr, td.second << 12, kSGXSanShadowSensitive);
+    }
+    SGXSAN_TRACE("\n[STACK list]\n");
+    assert(m_sgxsan_stack_min_list.size() == m_sgxsan_stack_max_list.size());
+    for (size_t i = 0; i < m_sgxsan_stack_min_list.size(); i++)
+    {
+        auto stack_min = m_sgxsan_stack_min_list[i], stack_max = m_sgxsan_stack_max_list[i];
+        SGXSAN_TRACE("\t\t[0x%lX...0x%lX, 0x%lX]=>[0x%lX...0x%lX, 0x%lX]\n",
+                     stack_max.first + m_enclave_load_addr,
+                     stack_min.first + m_enclave_load_addr,
+                     stack_min.first + m_enclave_load_addr + (stack_min.second << 12) - 1,
+                     MEM_TO_SHADOW(stack_max.first + m_enclave_load_addr),
+                     MEM_TO_SHADOW(stack_min.first + m_enclave_load_addr),
+                     MEM_TO_SHADOW(stack_min.first + m_enclave_load_addr + (stack_min.second << 12) - 1));
+        // FastPoisonShadow(td.first + m_enclave_load_addr, td.second << 12, kSGXSanShadowSensitive);
     }
     SGXSAN_TRACE("\n");
     return true;
@@ -265,6 +286,18 @@ bool SGXSanEnclaveConfigReader::get_layout_info(const uint64_t start_rva, layout
     else if (layout->id == LAYOUT_ID_SSA)
     {
         m_sgxsan_ssa_list.push_back(std::make_pair(rva, layout->page_count));
+    }
+    else if (layout->id == LAYOUT_ID_TD)
+    {
+        m_sgxsan_td_list.push_back(std::make_pair(rva, layout->page_count));
+    }
+    else if (layout->id == LAYOUT_ID_STACK_MAX)
+    {
+        m_sgxsan_stack_max_list.push_back(std::make_pair(rva, layout->page_count));
+    }
+    else if (layout->id == LAYOUT_ID_STACK_MIN)
+    {
+        m_sgxsan_stack_min_list.push_back(std::make_pair(rva, layout->page_count));
     }
     return true;
 }

@@ -6,6 +6,7 @@
 
 #include "AddressSanitizer.hpp"
 #include "SGXSanManifest.h"
+#include "AdjustUSP.hpp"
 
 using namespace llvm;
 
@@ -29,9 +30,16 @@ namespace
                 // cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery
                 // (e.g. sgxsan_memcpy_s will call WhitelistQuery)
                 if ((not F.isDeclaration()) and (func_name != "ocall_init_shadow_memory") and
-                    (func_name != "sgxsan_printf") and (func_name != "sgxsan_ocall_print_string"))
+                    (func_name != "sgxsan_printf") and (func_name != "sgxsan_ocall_print_string") and
+                    (func_name != "sgx_thread_set_multiple_untrusted_events_ocall" /* this may pass sensitive tcs */))
                 {
+                    // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
+                    // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.
                     Changed |= ASan.instrumentFunction(F);
+                }
+                if (func_name == "sgxsan_ocall_print_string")
+                {
+                    adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                 }
             }
             return Changed;

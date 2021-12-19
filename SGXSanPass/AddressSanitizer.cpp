@@ -1134,11 +1134,13 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     {
         // when it is an ecall wrapper
         instrumentRealEcall(RealEcallInst);
+        FunctionModified = true;
     }
 
     if (isOcallWrapper && ClAtEnclaveTBridge)
     {
         instrumentOcallWrapper(F);
+        FunctionModified = true;
     }
 
     FunctionStackPoisoner FSP(F, *this);
