@@ -3,6 +3,7 @@
 
 #include "SGXSanInt.h"
 #include "SGXSanManifest.h"
+#include "SGXSanStackTrace.hpp"
 
 #define NOINLINE __attribute__((noinline))
 #define INTERFACE_ATTRIBUTE __attribute__((visibility("default")))
@@ -25,6 +26,7 @@
         if (!(cond))                               \
         {                                          \
             PRINTF("[SGXSan Error] %s \n", (msg)); \
+            sgxsan_print_stack_trace();            \
             abort();                               \
         }                                          \
     } while (0)
@@ -37,6 +39,7 @@
         if (!(cond))                                 \
         {                                            \
             PRINTF("[SGXSan Warning] %s \n", (msg)); \
+            sgxsan_print_stack_trace();              \
         }                                            \
     } while (0)
 #endif

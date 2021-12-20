@@ -6,6 +6,7 @@
 #include "SGXSanPrintf.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoisonCheck.hpp"
+#include "SGXSanStackTrace.hpp"
 
 #include "SGXSanCommonErrorReport.hpp"
 
@@ -96,6 +97,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
            "  sp = 0x%lx\taddr = 0x%lx\n"
            "  is_write = %d\t\taccess_size = 0x%lx\n",
            pc, bp, sp, addr, is_write, access_size);
+    sgxsan_print_stack_trace();
     PrintShadowMap(addr);
     PRINTF("================= Report End =================\n");
     if (!is_warning)
@@ -111,5 +113,6 @@ void PrintErrorAndAbort(const char *format, ...)
     vsnprintf(buf, BUFSIZ, format, argptr);
     va_end(argptr);
     PRINTF("[PrintErrorAndAbort] %s\n", buf);
+    sgxsan_print_stack_trace();
     abort();
 }

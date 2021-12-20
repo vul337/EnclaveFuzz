@@ -6,6 +6,10 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sstream>
+#include <array>
+#include <memory>
+#include <iostream>
 #include "SGXSanManifest.h"
 #include "SGXSanRTApp.hpp"
 #include "SGXSanCommonShadowMap.hpp"
@@ -13,14 +17,17 @@
 #include "SGXSanEnclaveConfigReader.hpp"
 #include "SGXSanDefs.h"
 #include "PrintfSpeicification.h"
+#include "SGXSanStackTrace.hpp"
 
 // read ENCLAVE_FILENAME from -DENCLAVE_FILENAME in makefile
 #ifndef ENCLAVE_FILENAME
 #define ENCLAVE_FILENAME "enclave.signed.so"
 #endif
 // pass string to ENCLAVE_FILENAME (https://stackoverflow.com/questions/54602025/how-to-pass-a-string-from-a-make-file-into-a-c-program)
-#define xstr(s) str(s)
-#define str(s) #s
+#define _xstr(s) _str(s)
+#define _str(s) #s
+
+std::string enclave_name(_xstr(ENCLAVE_FILENAME));
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
 uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
@@ -150,7 +157,7 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
 	// start shallow poison on sensitive layout
 	SGXSanEnclaveConfigReader reader{g_enclave_base};
 	// printf("ENCLAVE_FILENAME=%s\n", xstr(ENCLAVE_FILENAME));
-	reader.collect_layout_infos(xstr(ENCLAVE_FILENAME));
+	reader.collect_layout_infos(enclave_name.c_str());
 	reader.shallow_poison_senitive();
 
 	// memset((void *)(kLowShadowBeg - page_size), kSGXSanElrangeLeftGuard, page_size);
@@ -159,10 +166,41 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
 }
 
 /* OCall functions */
-extern "C" void sgxsan_ocall_print_string(const char *str)
+void sgxsan_ocall_print_string(const char *str)
 {
 	/* Proxy/Bridge will check the length and null-terminate 
      * the input string to prevent buffer overflow. 
      */
 	printf("%s", str);
+}
+
+// from (https://stackoverflow.com/questions/478898/how-do-i-execute-a-command-and-get-the-output-of-the-command-within-c-using-po)
+std::string sgxsan_exec(const char *cmd)
+{
+	std::array<char, 128> buffer;
+	std::string result;
+	std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+	if (!pipe)
+	{
+		throw std::runtime_error("popen() failed!");
+	}
+	while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
+	{
+		result += buffer.data();
+	}
+	return result;
+}
+
+void sgxsan_ocall_addr2line(uint64_t addr, int level)
+{
+	std::stringstream cmd;
+	cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr;
+	std::string cmd_str = cmd.str();
+	std::cout << "    #" << level << " " << sgxsan_exec(cmd_str.c_str());
+}
+
+void sgxsan_print_stack_trace(int level)
+{
+	// do-nothing
+	(void)level;
 }

@@ -99,6 +99,11 @@ static inline uptr __asan_region_is_poisoned(uptr beg, uptr size, bool check_sha
     return 0;
 }
 
+static inline bool is_addr_in_elrange(uint64_t addr)
+{
+    return (g_enclave_base <= addr && addr < g_enclave_base + g_enclave_size) ? true : false;
+}
+
 // ElrangeCheck start
 #define SGXSAN_ELRANGE_CHECK_BEG(start, is_write, size)          \
     do                                                           \

@@ -19,6 +19,7 @@ namespace
 
         bool runOnModule(Module &M) override
         {
+            // errs() << "[SGXSan Pass] " << M.getName().str() << "\n";
             bool Changed = false;
             AddressSanitizer ASan(M);
             for (Function &F : M)
@@ -29,17 +30,19 @@ namespace
                 //
                 // cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery
                 // (e.g. sgxsan_memcpy_s will call WhitelistQuery)
-                if ((not F.isDeclaration()) and (func_name != "ocall_init_shadow_memory") and
-                    (func_name != "sgxsan_printf") and (func_name != "sgxsan_ocall_print_string") and
-                    (func_name != "sgx_thread_set_multiple_untrusted_events_ocall" /* this may pass sensitive tcs */))
+                if (func_name == "sgxsan_ocall_print_string" ||
+                    func_name == "sgxsan_ocall_addr2line")
+                {
+                    adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
+                }
+                else if ((not F.isDeclaration()) and
+                         (func_name != "ocall_init_shadow_memory") and
+                         (func_name != "sgxsan_printf") and
+                         (func_name != "sgx_thread_set_multiple_untrusted_events_ocall" /* this may pass sensitive tcs */))
                 {
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.
                     Changed |= ASan.instrumentFunction(F);
-                }
-                if (func_name == "sgxsan_ocall_print_string")
-                {
-                    adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                 }
             }
             return Changed;
@@ -48,12 +51,19 @@ namespace
 } // end of anonymous namespace
 
 char SGXSanPass::ID = 1;
-static RegisterPass<SGXSanPass> X("SGXSanPass", "SGXSanPass",
-                                  false /* Only looks at CFG */,
-                                  false /* Analysis Pass */);
+static RegisterPass<SGXSanPass> register_sgxsan_pass("SGXSanPass", "SGXSanPass",
+                                                     false /* Only looks at CFG */,
+                                                     false /* Analysis Pass */);
 
-static RegisterStandardPasses Y(
-    PassManagerBuilder::EP_EnabledOnOptLevel0, // EP_EarlyAsPossible can only be used in FunctionPass(https://lists.llvm.org/pipermail/llvm-dev/2018-June/123987.html)
+static RegisterStandardPasses l0_register_std_pass(
+    /* EP_EarlyAsPossible can only be used in FunctionPass(https://lists.llvm.org/pipermail/llvm-dev/2018-June/123987.html) */
+    PassManagerBuilder::EP_EnabledOnOptLevel0,
+    [](const PassManagerBuilder &Builder,
+       legacy::PassManagerBase &PM)
+    { PM.add(new SGXSanPass()); });
+
+static RegisterStandardPasses moe_register_std_pass(
+    PassManagerBuilder::EP_ModuleOptimizerEarly,
     [](const PassManagerBuilder &Builder,
        legacy::PassManagerBase &PM)
     { PM.add(new SGXSanPass()); });

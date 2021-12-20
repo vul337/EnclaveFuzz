@@ -7,10 +7,9 @@ typedef unsigned long uptr;
 extern "C"
 {
 #endif
-
-    //defined in Enclave.cpp
     void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow_beg_ptr, uptr *shadow_end_ptr);
-
+    void sgxsan_ocall_print_string(const char *str);
+    void sgxsan_ocall_addr2line(uint64_t addr, int level = 0);
 #if defined(__cplusplus)
 }
 #endif

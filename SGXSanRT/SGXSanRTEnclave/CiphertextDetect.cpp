@@ -1,14 +1,16 @@
 #include <unordered_map>
+#include <map>
 #include <string>
 #include <mbusafecrt.h>
 #include "SGXSanPrintf.hpp"
 #include "CiphertextDetect.hpp"
+#include "SGXSanStackTrace.hpp"
 
 bool isCiphertext(uint64_t addr, uint64_t size)
 {
-    if (size <= 0x10)
+    if (size <= 0x100)
         return true;
-    std::unordered_map<unsigned char, int> map;
+    std::map<unsigned char, int> map;
     for (uint64_t i = 0; i < size; i++)
     {
         unsigned char byte = *(unsigned char *)(addr + i);
@@ -21,7 +23,8 @@ bool isCiphertext(uint64_t addr, uint64_t size)
             map[byte] = 1;
         }
     }
-    int byteAvgCnt = (int)(size / map.size());
+    double byteAvgCnt = (int)size / /* (double)map.size() */ 256.0;
+    PRINTF("[Cipher Detect]ByteAvgCnt = %f \n", byteAvgCnt);
     bool is_cipher = true;
     PRINTF("======== Byte Count Begin ========\n");
     std::string byteStr = "", cntStr = "";
@@ -33,8 +36,13 @@ bool isCiphertext(uint64_t addr, uint64_t size)
         if (iter->second > byteAvgCnt * 2 and iter->first != 0)
         {
             is_cipher = false;
+            sprintf_s(buf, buf_size, "|*0x%02X*\t", iter->first);
         }
-        sprintf_s(buf, buf_size, "| 0x%02X\t", iter->first);
+        else
+        {
+            sprintf_s(buf, buf_size, "| 0x%02X\t", iter->first);
+        }
+
         byteStr = byteStr + buf;
         sprintf_s(buf, buf_size, "| %4d\t", iter->second);
         cntStr = cntStr + buf;
