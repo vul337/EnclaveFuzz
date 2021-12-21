@@ -8,56 +8,62 @@
 
 bool isCiphertext(uint64_t addr, uint64_t size)
 {
-    if (size <= 0x100)
+    if (size <= 0x1000)
         return true;
-    std::map<unsigned char, int> map;
+    int map[256 /* 2^8 */] = {0};
+    // std::map<unsigned char, int> map;
     for (uint64_t i = 0; i < size; i++)
     {
         unsigned char byte = *(unsigned char *)(addr + i);
-        if (map.count(byte) /* == 1 */)
-        {
-            map[byte]++;
-        }
-        else
-        {
-            map[byte] = 1;
-        }
+        map[byte]++;
+        // if (map.count(byte) /* == 1 */)
+        // {
+        //     map[byte]++;
+        // }
+        // else
+        // {
+        //     map[byte] = 1;
+        // }
     }
-    double byteAvgCnt = (int)size / /* (double)map.size() */ 256.0;
+
+    double byteAvgCnt = (int)(size - map[0] /* maybe 0-padding in ciphertest */) / /* (double)map.size() */ 255.0;
     PRINTF("[Cipher Detect]ByteAvgCnt = %f \n", byteAvgCnt);
     bool is_cipher = true;
     PRINTF("======== Byte Count Begin ========\n");
     std::string byteStr = "", cntStr = "";
     int buf_size = 1024;
     char buf[buf_size];
-    int i = 1;
-    for (auto iter = map.begin(); iter != map.end(); ++iter, i++)
+    for (int i = 0; i < 256; i++)
     {
-        if (iter->second > byteAvgCnt * 2 and iter->first != 0)
+        if ((map[i] > byteAvgCnt * 2 || map[i] < byteAvgCnt / 2) and i != 0)
         {
             is_cipher = false;
-            sprintf_s(buf, buf_size, "|*0x%02X*\t", iter->first);
+            sprintf_s(buf, buf_size, "|*0x%02X*", i);
         }
         else
         {
-            sprintf_s(buf, buf_size, "| 0x%02X\t", iter->first);
+            sprintf_s(buf, buf_size, "| 0x%02X ", i);
         }
 
         byteStr = byteStr + buf;
-        sprintf_s(buf, buf_size, "| %4d\t", iter->second);
+        sprintf_s(buf, buf_size, "| %4d ", map[i]);
         cntStr = cntStr + buf;
-        if (i % 10 == 0)
+        if (i % 16 == 15)
         {
-            PRINTF("%s \n", byteStr.c_str());
-            PRINTF("%s \n", cntStr.c_str());
+            PRINTF("________________________________________________________________________________________________________________\n"
+                   "%s \n"
+                   "%s \n",
+                   byteStr.c_str(), cntStr.c_str());
             byteStr = "";
             cntStr = "";
         }
     }
-    if (i % 10 != 1)
+    if (byteStr != "")
     {
-        PRINTF("%s \n", byteStr.c_str());
-        PRINTF("%s \n", cntStr.c_str());
+        PRINTF("________________________________________________________________________________________________________________\n"
+               "%s \n"
+               "%s \n",
+               byteStr.c_str(), cntStr.c_str());
     }
     PRINTF("========= Byte Count End =========\n");
     return is_cipher;

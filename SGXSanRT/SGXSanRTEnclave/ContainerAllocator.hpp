@@ -16,7 +16,7 @@
 #define CONTAINER_ALLOCATOR_HPP
 
 #include <stddef.h>
-#include "InternDlmalloc.hpp"
+#include "InternalDlmalloc.hpp"
 
 int call_newh();
 

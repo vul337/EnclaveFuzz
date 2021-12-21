@@ -8,7 +8,7 @@
 #include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanRTEnclave.hpp"
 #include "Quarantine.hpp"
-#include "InternDlmalloc.hpp"
+#include "InternalDlmalloc.hpp"
 #include "SGXSanPrintf.hpp"
 
 #if (USE_SGXSAN_MALLOC)
@@ -21,6 +21,7 @@
 #define REALLOC sgxsan_realloc
 #define BACKEND_REALLOC realloc
 #else
+// fix-me: how about tcmalloc
 #define MALLOC malloc
 #define BACKEND_MALLOC dlmalloc
 #define FREE free
@@ -69,7 +70,11 @@ void *MALLOC(size_t size)
 	uptr needed_size = rounded_size + 2 * rz_size;
 
 	void *allocated = BACKEND_MALLOC(needed_size);
-
+	// fix-me: there is no malloc_usable_size avaliable in sgxsdk
+#if (!USE_SGXSAN_MALLOC)
+	size_t allocated_size = dlmalloc_usable_size(allocated);
+	needed_size = allocated_size;
+#endif
 	if (allocated == nullptr)
 	{
 		return nullptr;
@@ -167,10 +172,15 @@ void FREE(void *ptr)
 	size_t user_size = m->user_size;
 	// PRINTF("\n[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg, user_beg + user_size, m->alloc_beg + ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment));
 	FastPoisonShadow(user_beg, RoundUpTo(user_size, alignment), kAsanHeapFreeMagic);
+	size_t calcualted_alloc_size = ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment);
+#if (!USE_SGXSAN_MALLOC)
+	size_t true_allocated_size = dlmalloc_usable_size((void *)m->alloc_beg);
+	calcualted_alloc_size = true_allocated_size;
+#endif
 
 	QuarantineElement qe = {
 		.alloc_beg = m->alloc_beg,
-		.alloc_size = ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment),
+		.alloc_size = calcualted_alloc_size,
 		.user_beg = user_beg,
 		.user_size = user_size};
 	g_quarantine_cache->put(qe);
