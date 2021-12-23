@@ -12,6 +12,7 @@
 #include <array>
 #include <memory>
 #include <iostream>
+#include <unistd.h>
 #include "SGXSanManifest.h"
 #include "SGXSanRTUBridge.hpp"
 #include "SGXSanCommonShadowMap.hpp"
@@ -227,21 +228,30 @@ void sgxsan_print_stack_trace(int level)
 	(void)level;
 }
 
+void string_rtrim(std::string &str)
+{
+	str.erase(std::find_if(str.rbegin(), str.rend(), [](unsigned char ch)
+						   { return !std::isspace(ch); })
+				  .base(),
+			  str.end());
+}
+
 void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size_t byte_arr_size, int bucket_num, bool is_cipher)
 {
 	static int prefix = 0;
 	std::string func_name = addr2func_name(addr), byte_str = "[";
-	func_name.erase(std::find_if(func_name.rbegin(), func_name.rend(), [](unsigned char ch)
-								 { return !std::isspace(ch); })
-						.base(),
-					func_name.end());
+	string_rtrim(func_name);
+	if (func_name == "ocall_print_string")
+		return;
 	for (size_t i = 0; i < byte_arr_size; i++)
 	{
 		byte_str = byte_str + std::to_string(byte_arr[i]) + (i == byte_arr_size - 1 ? "]" : ",");
 	}
 
-	system("mkdir -p sgxsan_data");
-	std::string save_fname = "sgxsan_data/" + std::to_string(prefix++) + "_" + func_name + (is_cipher ? "_true" : "_false") + ".json";
+	pid_t pid = getpid();
+	std::string cmd = "mkdir -p sgxsan_data_" + std::to_string(pid);
+	system(cmd.c_str());
+	std::string save_fname = "sgxsan_data_" + std::to_string(pid) + "/" + std::to_string(prefix++) + "_" + func_name + (is_cipher ? "_true" : "_false") + ".json";
 	{
 		std::fstream fs(save_fname, fs.out);
 		fs << "{\n"
@@ -251,8 +261,7 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size
 		   << "\t\"is_cipher\": " << (is_cipher ? "true" : "false") << "\n"
 		   << "}";
 	}
-	// fix-me: auto generate real path
-	std::string cmd = "python3 " + sgxsan_path + "/SGXSanRT/SGXSanRTApp/plot_byte_distr.py " + save_fname;
+	cmd = "python3 " + sgxsan_path + "/SGXSanRT/SGXSanRTApp/plot_byte_distr.py " + save_fname;
 	system(cmd.c_str());
 	return;
 }
