@@ -31,7 +31,8 @@ namespace
                 // cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery
                 // (e.g. sgxsan_memcpy_s will call WhitelistQuery)
                 if (func_name == "sgxsan_ocall_print_string" ||
-                    func_name == "sgxsan_ocall_addr2line")
+                    func_name == "sgxsan_ocall_addr2line" ||
+                    func_name == "sgxsan_ocall_depcit_distribute")
                 {
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                 }

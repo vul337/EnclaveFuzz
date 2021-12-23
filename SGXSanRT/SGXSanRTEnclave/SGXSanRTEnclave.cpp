@@ -5,6 +5,7 @@
 #include "SGXSanDefs.h"
 #include "SGXSanRTEnclave.hpp"
 #include "SGXSanCommonShadowMap.hpp"
+#include "SGXSanRTTBridge.hpp"
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_once_t sgxsan_init_once = PTHREAD_ONCE_INIT;
@@ -14,8 +15,6 @@ uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
          kShadowGapBeg = 0, kShadowGapEnd = 0,
          kHighShadowBeg = 0, kHighShadowEnd = 0,
          kHighMemBeg = 0, kHighMemEnd = 0;
-
-extern "C" void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow_beg_ptr, uptr *shadow_end_ptr);
 
 int asan_inited;
 

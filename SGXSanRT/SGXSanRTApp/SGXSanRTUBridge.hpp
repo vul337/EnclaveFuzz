@@ -1,6 +1,6 @@
-#ifndef SGXSAN_RT_APP_HPP
-#define SGXSAN_RT_APP_HPP
-
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
 typedef unsigned long uptr;
 
 #if defined(__cplusplus)
@@ -10,8 +10,7 @@ extern "C"
     void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow_beg_ptr, uptr *shadow_end_ptr);
     void sgxsan_ocall_print_string(const char *str);
     void sgxsan_ocall_addr2line(uint64_t addr, int level = 0);
+    void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size_t byte_arr_size, int bucket_num, bool is_cipher);
 #if defined(__cplusplus)
 }
-#endif
-
 #endif

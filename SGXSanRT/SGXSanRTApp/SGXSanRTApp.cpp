@@ -7,11 +7,13 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sstream>
+#include <fstream>
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <iostream>
 #include "SGXSanManifest.h"
-#include "SGXSanRTApp.hpp"
+#include "SGXSanRTUBridge.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoison.hpp"
 #include "SGXSanEnclaveConfigReader.hpp"
@@ -19,15 +21,21 @@
 #include "PrintfSpeicification.h"
 #include "SGXSanStackTrace.hpp"
 
-// read ENCLAVE_FILENAME from -DENCLAVE_FILENAME in makefile
-#ifndef ENCLAVE_FILENAME
-#define ENCLAVE_FILENAME "enclave.signed.so"
-#endif
 // pass string to ENCLAVE_FILENAME (https://stackoverflow.com/questions/54602025/how-to-pass-a-string-from-a-make-file-into-a-c-program)
 #define _xstr(s) _str(s)
 #define _str(s) #s
 
+// read ENCLAVE_FILENAME from -DENCLAVE_FILENAME in makefile
+#ifndef ENCLAVE_FILENAME
+#define ENCLAVE_FILENAME "enclave.signed.so"
+#endif
+
+#ifndef SGXSAN_PATH
+#define SGXSAN_PATH "/home/leone/文档/linux-sgx/SGXSan"
+#endif
+
 std::string enclave_name(_xstr(ENCLAVE_FILENAME));
+std::string sgxsan_path(_xstr(SGXSAN_PATH));
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
 uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
@@ -171,7 +179,8 @@ void sgxsan_ocall_print_string(const char *str)
 	/* Proxy/Bridge will check the length and null-terminate 
      * the input string to prevent buffer overflow. 
      */
-	printf("%s", str);
+	// printf("%s", str);
+	std::cerr << str;
 }
 
 // from (https://stackoverflow.com/questions/478898/how-do-i-execute-a-command-and-get-the-output-of-the-command-within-c-using-po)
@@ -191,16 +200,59 @@ std::string sgxsan_exec(const char *cmd)
 	return result;
 }
 
-void sgxsan_ocall_addr2line(uint64_t addr, int level)
+std::string addr2line(uint64_t addr)
 {
 	std::stringstream cmd;
 	cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr;
 	std::string cmd_str = cmd.str();
-	std::cout << "    #" << level << " " << sgxsan_exec(cmd_str.c_str());
+	return sgxsan_exec(cmd_str.c_str());
+}
+
+std::string addr2func_name(uint64_t addr)
+{
+	std::stringstream cmd;
+	cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr << "|cut -d \" \" -f 2";
+	std::string cmd_str = cmd.str();
+	return sgxsan_exec(cmd_str.c_str());
+}
+
+void sgxsan_ocall_addr2line(uint64_t addr, int level)
+{
+	std::cerr << "    #" << level << " " << addr2line(addr);
 }
 
 void sgxsan_print_stack_trace(int level)
 {
 	// do-nothing
 	(void)level;
+}
+
+void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size_t byte_arr_size, int bucket_num, bool is_cipher)
+{
+	static int prefix = 0;
+	std::string func_name = addr2func_name(addr), byte_str = "[";
+	func_name.erase(std::find_if(func_name.rbegin(), func_name.rend(), [](unsigned char ch)
+								 { return !std::isspace(ch); })
+						.base(),
+					func_name.end());
+	for (size_t i = 0; i < byte_arr_size; i++)
+	{
+		byte_str = byte_str + std::to_string(byte_arr[i]) + (i == byte_arr_size - 1 ? "]" : ",");
+	}
+
+	system("mkdir -p sgxsan_data");
+	std::string save_fname = "sgxsan_data/" + std::to_string(prefix++) + "_" + func_name + (is_cipher ? "_true" : "_false") + ".json";
+	{
+		std::fstream fs(save_fname, fs.out);
+		fs << "{\n"
+		   << "\t\"func_name\": \"" << func_name << "\",\n"
+		   << "\t\"byte_arr\": " << byte_str << ",\n"
+		   << "\t\"bucket_num\": " << std::to_string(bucket_num) << ",\n"
+		   << "\t\"is_cipher\": " << (is_cipher ? "true" : "false") << "\n"
+		   << "}";
+	}
+	// fix-me: auto generate real path
+	std::string cmd = "python3 " + sgxsan_path + "/SGXSanRT/SGXSanRTApp/plot_byte_distr.py " + save_fname;
+	system(cmd.c_str());
+	return;
 }

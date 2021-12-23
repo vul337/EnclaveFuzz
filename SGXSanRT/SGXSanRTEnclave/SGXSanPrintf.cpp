@@ -1,11 +1,8 @@
 #include <stdarg.h>
 #include <stdio.h> /* vsnprintf */
 #include <string.h>
-#include <sgx_error.h>
-#include <sgx_defs.h>
 #include "SGXSanPrintf.hpp"
-
-extern "C" sgx_status_t SGX_CDECL sgxsan_ocall_print_string(const char *str);
+#include "SGXSanRTTBridge.hpp"
 
 /*
  * sgxsan_printf:

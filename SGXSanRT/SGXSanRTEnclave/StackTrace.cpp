@@ -1,23 +1,19 @@
-#include <stdint.h>
-#include <sgx_error.h>
-#include <sgx_defs.h>
 #include "SGXSanPrintf.hpp"
 #include "SGXSanCommonPoisonCheck.hpp"
 #include "SGXSanStackTrace.hpp"
+#include "StackTrace.hpp"
+#include "SGXSanRTTBridge.hpp"
 
-extern "C" sgx_status_t SGX_CDECL sgxsan_ocall_addr2line(uint64_t addr, int level);
-
-void sgxsan_print_stack_trace(int level)
+void get_ret_addrs_in_stack(std::vector<int> &ret_addrs, uint64_t base_addr, int level)
 {
-    PRINTF("======= Stack Trace Begin =======\n");
+    level += 1;
     uint64_t ret_addr = (uint64_t)__builtin_return_address(0);
     uint64_t bp = (uint64_t)__builtin_frame_address(0);
-    for (int i = 0;; i++)
+    for (int i = 0; i - level < 50; i++)
     {
-        // PRINTF("ret_addr = %p\tbp = %p\n", ret_addr, bp);
         if (i >= level)
         {
-            sgxsan_ocall_addr2line(ret_addr - g_enclave_base - 1, i);
+            ret_addrs.emplace_back(ret_addr - base_addr);
         }
         bp = *(uint64_t *)bp;
         if (!is_addr_in_elrange(bp))
@@ -25,6 +21,17 @@ void sgxsan_print_stack_trace(int level)
         ret_addr = *(uint64_t *)(bp + 8);
         if (!is_addr_in_elrange(ret_addr))
             break;
+    }
+}
+
+void sgxsan_print_stack_trace(int level)
+{
+    PRINTF("======= Stack Trace Begin =======\n");
+    std::vector<int> ret_addrs;
+    get_ret_addrs_in_stack(ret_addrs, g_enclave_base, level);
+    for (size_t i = 0; i < ret_addrs.size(); i++)
+    {
+        sgxsan_ocall_addr2line(ret_addrs[i] - 1, (int)i);
     }
     PRINTF("======== Stack Trace End ========\n");
 }

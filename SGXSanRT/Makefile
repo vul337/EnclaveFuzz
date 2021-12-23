@@ -3,7 +3,7 @@ SGX_MODE ?= HW
 SGX_ARCH ?= x64
 SGX_DEBUG ?= 1
 SGX_PRERELEASE ?= 0
-
+SGXSanPath ?= "/home/leone/文档/linux-sgx/SGXSan"
 Enclave_File_Name ?= "enclave.signed.so"
 
 ifeq ($(shell getconf LONG_BIT), 32)
@@ -42,7 +42,7 @@ SGX_COMMON_CXXFLAGS := $(SGX_COMMON_FLAGS) -Wnon-virtual-dtor -std=c++11
 SGXSanRTApp_Cpp_Files := $(wildcard SGXSanRTApp/*.cpp)
 SGXSanRTApp_Include_Paths := -ISGXSanRTApp -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include
 
-SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${Enclave_File_Name}"
+SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${Enclave_File_Name}" -DSGXSAN_PATH="${SGXSanPath}"
 
 # Three configuration modes - Debug, prerelease, release
 #   Debug - Macro DEBUG enabled.
