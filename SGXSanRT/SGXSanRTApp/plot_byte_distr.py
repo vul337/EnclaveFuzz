@@ -2,8 +2,6 @@ import json
 import sys
 import os
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-import numpy as np
 
 with open(sys.argv[1]) as json_file:
     data = json.load(json_file)

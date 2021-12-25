@@ -586,7 +586,7 @@ void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
     IRBuilder<> IRB(SI);
     Value *val = SI->getValueOperand();
 
-    IRB.CreateCall(GlobalWhitelistPropagate, IRB.CreateCast(Instruction::ZExt, val, IRB.getInt64Ty()));
+    IRB.CreateCall(GlobalWhitelistPropagate, IRB.CreateCast(val->getType()->isPointerTy() ? Instruction::PtrToInt : Instruction::ZExt, val, IRB.getInt64Ty()));
 }
 
 Type *unpackArrayType(Type *type)
