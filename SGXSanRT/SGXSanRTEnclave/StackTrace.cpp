@@ -4,7 +4,7 @@
 #include "StackTrace.hpp"
 #include "SGXSanRTTBridge.hpp"
 
-void get_ret_addrs_in_stack(std::vector<int> &ret_addrs, uint64_t base_addr, int level)
+void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs, uint64_t base_addr, int level)
 {
     level += 1;
     uint64_t ret_addr = (uint64_t)__builtin_return_address(0);
@@ -26,12 +26,16 @@ void get_ret_addrs_in_stack(std::vector<int> &ret_addrs, uint64_t base_addr, int
 
 void sgxsan_print_stack_trace(int level)
 {
-    PRINTF("======= Stack Trace Begin =======\n");
-    std::vector<int> ret_addrs;
+    std::vector<uint64_t> ret_addrs;
     get_ret_addrs_in_stack(ret_addrs, g_enclave_base, level);
-    for (size_t i = 0; i < ret_addrs.size(); i++)
-    {
-        sgxsan_ocall_addr2line(ret_addrs[i] - 1, (int)i);
-    }
-    PRINTF("======== Stack Trace End ========\n");
+    PRINTF("======= Stack Trace Begin ========\n");
+    size_t ret_addr_arr_size = ret_addrs.size();
+    uint64_t ret_addr_arr[ret_addr_arr_size];
+    std::copy(ret_addrs.begin(), ret_addrs.end(), ret_addr_arr);
+    sgxsan_ocall_addr2line_ex(ret_addr_arr, ret_addr_arr_size);
+    // for (size_t i = 0; i < ret_addrs.size(); i++)
+    // {
+    //     sgxsan_ocall_addr2line(ret_addrs[i] - 1, (int)i);
+    // }
+    PRINTF("======== Stack Trace End =========\n");
 }

@@ -209,25 +209,6 @@ std::string addr2line(uint64_t addr)
 	return sgxsan_exec(cmd_str.c_str());
 }
 
-std::string addr2func_name(uint64_t addr)
-{
-	std::stringstream cmd;
-	cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr << "|cut -d \" \" -f 2";
-	std::string cmd_str = cmd.str();
-	return sgxsan_exec(cmd_str.c_str());
-}
-
-void sgxsan_ocall_addr2line(uint64_t addr, int level)
-{
-	std::cerr << "    #" << level << " " << addr2line(addr);
-}
-
-void sgxsan_print_stack_trace(int level)
-{
-	// do-nothing
-	(void)level;
-}
-
 void string_rtrim(std::string &str)
 {
 	str.erase(std::find_if(str.rbegin(), str.rend(), [](unsigned char ch)
@@ -236,13 +217,47 @@ void string_rtrim(std::string &str)
 			  str.end());
 }
 
+std::string addr2func_name(uint64_t addr)
+{
+	std::stringstream cmd;
+	cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr << "|cut -d \" \" -f 2";
+	std::string cmd_str = cmd.str(), ret_str = sgxsan_exec(cmd_str.c_str());
+	string_rtrim(ret_str);
+	return ret_str;
+}
+
+void sgxsan_ocall_addr2func_name(uint64_t addr, char *func_name, size_t buf_size)
+{
+	std::string str = addr2func_name(addr);
+	size_t cp_size = std::min(buf_size - 1, str.length());
+	strncpy(func_name, str.c_str(), cp_size);
+	func_name[cp_size] = '\0';
+}
+
+void sgxsan_ocall_addr2line(uint64_t addr, int level)
+{
+	std::cerr << "    #" << level << " " << addr2line(addr);
+}
+
+void sgxsan_ocall_addr2line_ex(uint64_t *addr_arr, size_t arr_cnt, int level)
+{
+	(void)level;
+	for (size_t i = 0; i < arr_cnt; i++)
+	{
+		sgxsan_ocall_addr2line(addr_arr[i], (int)i);
+	}
+}
+
+void sgxsan_print_stack_trace(int level)
+{
+	// do-nothing
+	(void)level;
+}
+
 void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size_t byte_arr_size, int bucket_num, bool is_cipher)
 {
 	static int prefix = 0;
 	std::string func_name = addr2func_name(addr), byte_str = "[";
-	string_rtrim(func_name);
-	if (func_name == "ocall_print_string")
-		return;
 	for (size_t i = 0; i < byte_arr_size; i++)
 	{
 		byte_str = byte_str + std::to_string(byte_arr[i]) + (i == byte_arr_size - 1 ? "]" : ",");

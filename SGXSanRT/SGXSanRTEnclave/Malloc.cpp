@@ -138,6 +138,8 @@ void *MALLOC(size_t size)
 
 void FREE(void *ptr)
 {
+	if (ptr == nullptr)
+		return;
 	if (not asan_inited)
 	{
 		BACKEND_FREE(ptr);
@@ -147,7 +149,7 @@ void FREE(void *ptr)
 	uptr user_beg = reinterpret_cast<uptr>(ptr);
 	uptr alignment = SHADOW_GRANULARITY;
 	CHECK(IsAligned(user_beg, alignment));
-
+	// PRINTF("\n[Recycle] 0x%lx\n", user_beg);
 #if (CHECK_MALLOC_FREE_MATCH)
 	pthread_rwlock_wrlock(&rwlock_heap_obj_user_beg_set);
 	if (heap_obj_user_beg_set.find(user_beg) == heap_obj_user_beg_set.end())

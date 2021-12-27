@@ -32,6 +32,8 @@ namespace
                 // (e.g. sgxsan_memcpy_s will call WhitelistQuery)
                 if (func_name == "sgxsan_ocall_print_string" ||
                     func_name == "sgxsan_ocall_addr2line" ||
+                    func_name == "sgxsan_ocall_addr2line_ex" ||
+                    func_name == "sgxsan_ocall_addr2func_name" ||
                     func_name == "sgxsan_ocall_depcit_distribute")
                 {
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
