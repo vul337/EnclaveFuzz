@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <string.h>
 #include <errno.h>
@@ -17,7 +18,6 @@
 #include "SGXSanRTUBridge.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoison.hpp"
-#include "SGXSanEnclaveConfigReader.hpp"
 #include "SGXSanDefs.h"
 #include "PrintfSpeicification.h"
 #include "SGXSanStackTrace.hpp"
@@ -25,18 +25,7 @@
 // pass string to ENCLAVE_FILENAME (https://stackoverflow.com/questions/54602025/how-to-pass-a-string-from-a-make-file-into-a-c-program)
 #define _xstr(s) _str(s)
 #define _str(s) #s
-
-// read ENCLAVE_FILENAME from -DENCLAVE_FILENAME in makefile
-#ifndef ENCLAVE_FILENAME
-#define ENCLAVE_FILENAME "enclave.signed.so"
-#endif
-
-#ifndef SGXSAN_PATH
-#define SGXSAN_PATH "/home/leone/文档/linux-sgx/SGXSan"
-#endif
-
 std::string enclave_name(_xstr(ENCLAVE_FILENAME));
-std::string sgxsan_path(_xstr(SGXSAN_PATH));
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
 uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
@@ -163,14 +152,6 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
 	*shadow_beg_ptr = kLowShadowBeg;
 	*shadow_end_ptr = kLowShadowEnd;
 
-	// start shallow poison on sensitive layout
-	SGXSanEnclaveConfigReader reader{g_enclave_base};
-	// printf("ENCLAVE_FILENAME=%s\n", xstr(ENCLAVE_FILENAME));
-	reader.collect_layout_infos(enclave_name.c_str());
-	reader.shallow_poison_senitive();
-
-	// memset((void *)(kLowShadowBeg - page_size), kSGXSanElrangeLeftGuard, page_size);
-
 	reg_sgxsan_sigaction();
 }
 
@@ -257,16 +238,14 @@ void sgxsan_print_stack_trace(int level)
 void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size_t byte_arr_size, int bucket_num, bool is_cipher)
 {
 	static int prefix = 0;
-	std::string func_name = addr2func_name(addr), byte_str = "[";
+	std::string func_name = addr2func_name(addr), byte_str = "[", dir = "sgxsan_data_" + std::to_string(getpid());
 	for (size_t i = 0; i < byte_arr_size; i++)
 	{
 		byte_str = byte_str + std::to_string(byte_arr[i]) + (i == byte_arr_size - 1 ? "]" : ",");
 	}
 
-	pid_t pid = getpid();
-	std::string cmd = "mkdir -p sgxsan_data_" + std::to_string(pid);
-	system(cmd.c_str());
-	std::string save_fname = "sgxsan_data_" + std::to_string(pid) + "/" + std::to_string(prefix++) + "_" + func_name + (is_cipher ? "_true" : "_false") + ".json";
+	mkdir(dir.c_str(), 0777);
+	std::string save_fname = dir + "/" + std::to_string(prefix++) + "_" + func_name + (is_cipher ? "_true" : "_false") + ".json";
 	{
 		std::fstream fs(save_fname, fs.out);
 		fs << "{\n"
@@ -276,7 +255,5 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size
 		   << "\t\"is_cipher\": " << (is_cipher ? "true" : "false") << "\n"
 		   << "}";
 	}
-	cmd = "python3 " + sgxsan_path + "/SGXSanRT/SGXSanRTApp/plot_byte_distr.py " + save_fname;
-	system(cmd.c_str());
 	return;
 }

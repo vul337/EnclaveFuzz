@@ -95,11 +95,7 @@ static cl::opt<bool> ClUseElrangeGuard(
     cl::Hidden,
     cl::init(true));
 
-static cl::opt<bool> ClAtEnclaveTBridge(
-    "sgxsan-at-enclave-tbridge",
-    cl::desc("at enclave tbridge"),
-    cl::Hidden,
-    cl::init(false));
+bool isAtEnclaveTBridge = false;
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
@@ -442,7 +438,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
         Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
         Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
         Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
-        if (ClAtEnclaveTBridge)
+        if (isAtEnclaveTBridge)
         {
             ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(IfCond, InsertBefore, false);
         }
@@ -1024,6 +1020,9 @@ void AddressSanitizer::replaceSGXSanIntrinName(Function &F)
 
 bool AddressSanitizer::instrumentFunction(Function &F)
 {
+    GlobalVariable *ecallTable = F.getParent()->getNamedGlobal("g_ecall_table");
+    isAtEnclaveTBridge = (ecallTable && !ecallTable->isDeclaration()) ? true : false;
+
     if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
         return false;
     if (F.getName().startswith("__asan_"))
@@ -1122,7 +1121,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
         instrumentMemIntrinsic(Inst);
         FunctionModified = true;
     }
-    if (!ClAtEnclaveTBridge)
+    if (!isAtEnclaveTBridge)
     {
         for (auto Inst : GlobalVariableStoreInsts)
         {
@@ -1130,14 +1129,14 @@ bool AddressSanitizer::instrumentFunction(Function &F)
             FunctionModified = true;
         }
     }
-    if (RealEcallInst && ClAtEnclaveTBridge)
+    if (RealEcallInst && isAtEnclaveTBridge)
     {
         // when it is an ecall wrapper
         instrumentRealEcall(RealEcallInst);
         FunctionModified = true;
     }
 
-    if (isOcallWrapper && ClAtEnclaveTBridge)
+    if (isOcallWrapper && isAtEnclaveTBridge)
     {
         instrumentOcallWrapper(F);
         FunctionModified = true;

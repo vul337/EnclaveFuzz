@@ -19,7 +19,7 @@ class QuarantineCache
 {
 public:
     QuarantineCache();
-    QuarantineCache(size_t quarantine_cache_max_size);
+
     void put(QuarantineElement qe);
 
 private:

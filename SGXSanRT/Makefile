@@ -1,28 +1,14 @@
 SGX_SDK ?= /opt/intel/sgxsdk
 SGX_MODE ?= HW
-SGX_ARCH ?= x64
 SGX_DEBUG ?= 1
 SGX_PRERELEASE ?= 0
-SGXSanPath ?= "/home/leone/文档/linux-sgx/SGXSan"
 Enclave_File_Name ?= "enclave.signed.so"
 
-ifeq ($(shell getconf LONG_BIT), 32)
-	SGX_ARCH := x86
-else ifeq ($(findstring -m32, $(CXXFLAGS)), -m32)
-	SGX_ARCH := x86
-endif
-
-ifeq ($(SGX_ARCH), x86)
-	SGX_COMMON_FLAGS := -m32
-	SGX_LIBRARY_PATH := $(SGX_SDK)/lib
-	SGX_ENCLAVE_SIGNER := $(SGX_SDK)/bin/x86/sgx_sign
-	SGX_EDGER8R := $(SGX_SDK)/bin/x86/sgx_edger8r
-else
-	SGX_COMMON_FLAGS := -m64
-	SGX_LIBRARY_PATH := $(SGX_SDK)/lib64
-	SGX_ENCLAVE_SIGNER := $(SGX_SDK)/bin/x64/sgx_sign
-	SGX_EDGER8R := $(SGX_SDK)/bin/x64/sgx_edger8r
-endif
+# current only support x64 arch
+SGX_COMMON_FLAGS := -m64
+SGX_LIBRARY_PATH := $(SGX_SDK)/lib64
+SGX_ENCLAVE_SIGNER := $(SGX_SDK)/bin/x64/sgx_sign
+SGX_EDGER8R := $(SGX_SDK)/bin/x64/sgx_edger8r
 
 ifeq ($(SGX_DEBUG), 1)
         SGX_COMMON_FLAGS += -O0 -g
@@ -42,7 +28,7 @@ SGX_COMMON_CXXFLAGS := $(SGX_COMMON_FLAGS) -Wnon-virtual-dtor -std=c++11
 SGXSanRTApp_Cpp_Files := $(wildcard SGXSanRTApp/*.cpp)
 SGXSanRTApp_Include_Paths := -ISGXSanRTApp -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include
 
-SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${Enclave_File_Name}" -DSGXSAN_PATH="${SGXSanPath}"
+SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${Enclave_File_Name}"
 
 # Three configuration modes - Debug, prerelease, release
 #   Debug - Macro DEBUG enabled.
@@ -102,6 +88,7 @@ SGXSanRTApp/%.o: SGXSanRTApp/%.cpp ../SGXSanManifest/SGXSanManifest.h
 
 $(LibSGXSanRTApp): $(SGXSanRTApp_Cpp_Objects)
 	@$(AR) rcs $@ $^
+	@cp $(LibSGXSanRTApp) ../output/$(LibSGXSanRTApp)
 
 ######## SGXSanRT Enclave Objects ########
 
@@ -121,7 +108,9 @@ SGXSanRTEnclave/%.o: SGXSanRTEnclave/%.cpp ../SGXSanManifest/SGXSanManifest.h
 
 $(LibSGXSanRTEnclave): $(SGXSanRTEnclave_Cpp_Objects)
 	@$(AR) rcs $@ $^
+	@cp $(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTEnclave)
 
 .PHONY: clean
 clean:
 	@rm -f $(LibSGXSanRTApp) $(SGXSanRTApp_Cpp_Objects) $(LibSGXSanRTEnclave) $(SGXSanRTEnclave_Cpp_Objects)
+	@rm -f ../output/$(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTApp)

@@ -1,3 +1,5 @@
+# how to use: cd into sgxsan_xxx directory in SGXAPP, call shell cmd(need to specify SGXSanPath) as follow
+# for file in *.json;do python3 ${SGXSanPath}/tool/plot_byte_distr.py $file; done
 import json
 import sys
 import os

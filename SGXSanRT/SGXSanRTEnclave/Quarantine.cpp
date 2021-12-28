@@ -4,6 +4,7 @@
 #include "SGXSanDefs.h"
 #include "SGXSanPrintf.hpp"
 #include "SGXSanManifest.h"
+#include "SGXInternal.hpp"
 
 #if (USE_SGXSAN_MALLOC)
 #define BACKEND_FREE free
@@ -16,13 +17,9 @@ static pthread_rwlock_t rwlock_quarantine_cache = PTHREAD_RWLOCK_INITIALIZER;
 QuarantineCache quarantine_cache;
 QuarantineCache *g_quarantine_cache = &quarantine_cache;
 
-QuarantineCache::QuarantineCache(size_t quarantine_cache_max_size) : m_quarantine_cache_max_size(quarantine_cache_max_size)
-{
-}
-
 QuarantineCache::QuarantineCache()
 {
-    m_quarantine_cache_max_size = SGXSAN_QUARANTINE_SIZE;
+    m_quarantine_cache_max_size = get_heap_size() / 1024;
 }
 
 void QuarantineCache::put(QuarantineElement qe)

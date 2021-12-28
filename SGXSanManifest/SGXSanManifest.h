@@ -13,12 +13,9 @@
 
 #define CHECK_MALLOC_FREE_MATCH 1
 
-// Consistent with Enclave.config.xml automatically by SyncHeapSize.py
-#define ENCLAVE_HEAP_SIZE 0x100000
-#define SGXSAN_QUARANTINE_SIZE ((ENCLAVE_HEAP_SIZE) / 1024)
-
 // USE_SGXSAN_MALLOC set 1 means we wrap malloc directly and some malloc replaced to sgxsan_malloc by pass will be hooked,
 // other mallocs which are not influenced by pass will not be hooked.
+// USE_SGXSAN_MALLOC==1 will miss some malloc-serial operation in third-party library
 #define USE_SGXSAN_MALLOC 0
 
 #endif

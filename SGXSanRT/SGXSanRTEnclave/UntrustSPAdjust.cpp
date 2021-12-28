@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include "UntrustSPAdjust.hpp"
-#include "SGXInternalStructure.h"
+#include "SGXInternal.hpp"
 
 void set_untrust_sp(size_t addr)
 {

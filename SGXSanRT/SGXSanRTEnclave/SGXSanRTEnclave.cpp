@@ -6,6 +6,7 @@
 #include "SGXSanRTEnclave.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanRTTBridge.hpp"
+#include "SensitivePoisoner.hpp"
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_once_t sgxsan_init_once = PTHREAD_ONCE_INIT;
@@ -25,6 +26,7 @@ static void init_shadow_memory_out_enclave()
     kLowMemBeg = g_enclave_base;
     kLowMemEnd = g_enclave_base + g_enclave_size - 1;
     assert(kLowShadowBeg == SGXSAN_SHADOW_MAP_BASE);
+    SensitivePoisoner::shallow_poison_senitive();
 }
 
 static void AsanInitInternal()
