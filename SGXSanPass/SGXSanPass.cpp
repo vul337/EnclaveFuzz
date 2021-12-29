@@ -24,6 +24,11 @@ namespace
             AddressSanitizer ASan(M);
             for (Function &F : M)
             {
+                // errs() << "[SGXSanPass] [Function] " << F.getName().str() << "\n";
+                if (F.isDeclaration())
+                {
+                    continue;
+                }
                 StringRef func_name = F.getName();
                 // since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte
                 // whether instrumented or not is not necessary
@@ -38,8 +43,7 @@ namespace
                 {
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                 }
-                else if ((not F.isDeclaration()) and
-                         (func_name != "ocall_init_shadow_memory") and
+                else if ((func_name != "ocall_init_shadow_memory") and
                          (func_name != "sgxsan_printf") and
                          (func_name != "sgx_thread_set_multiple_untrusted_events_ocall" /* this may pass sensitive tcs */))
                 {

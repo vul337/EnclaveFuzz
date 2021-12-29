@@ -36,6 +36,7 @@ class FunctionStackPoisoner : public llvm::InstVisitor<FunctionStackPoisoner>
 public:
     FunctionStackPoisoner(llvm::Function &F, AddressSanitizer &ASan);
     bool runOnFunction();
+    void getRetInstVec(llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
     void copyArgsPassedByValToAllocas();
     void visitReturnInst(llvm::ReturnInst &RI);
     void visitResumeInst(llvm::ResumeInst &RI);

@@ -577,6 +577,59 @@ void AddressSanitizer::instrumentMemIntrinsic(MemIntrinsic *MI)
     MI->eraseFromParent();
 }
 
+// Instrument memset_s/memmove_s/memcpy_s
+void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI)
+{
+    StringRef callee_name = CI->getCalledFunction()->getName();
+    IRBuilder<> IRB(CI);
+    CallInst *tempCI = nullptr;
+    if (callee_name == "memcpy_s")
+    {
+        tempCI = IRB.CreateCall(SGXSanMemcpyS, {CI->getOperand(0), CI->getOperand(1),
+                                                CI->getOperand(2), CI->getOperand(3)});
+    }
+    else if (callee_name == "memset_s")
+    {
+        tempCI = IRB.CreateCall(SGXSanMemsetS, {CI->getOperand(0), CI->getOperand(1),
+                                                CI->getOperand(2), CI->getOperand(3)});
+    }
+    else if (callee_name == "memmove_s")
+    {
+        tempCI = IRB.CreateCall(SGXSanMemmoveS, {CI->getOperand(0), CI->getOperand(1),
+                                                 CI->getOperand(2), CI->getOperand(3)});
+    }
+    CI->replaceAllUsesWith(tempCI);
+    CI->eraseFromParent();
+}
+
+#if (USE_SGXSAN_MALLOC)
+// Instrument malloc/free/calloc/realloc
+void AddressSanitizer::instrumentHeapCall(CallInst *CI)
+{
+    StringRef callee_name = CI->getCalledFunction()->getName();
+    IRBuilder<> IRB(CI);
+    CallInst *tempCI = nullptr;
+    if (callee_name == "malloc")
+    {
+        tempCI = IRB.CreateCall(SGXSanMalloc, CI->getOperand(0));
+    }
+    else if (callee_name == "free")
+    {
+        tempCI = IRB.CreateCall(SGXSanFree, CI->getOperand(0));
+    }
+    else if (callee_name == "calloc")
+    {
+        tempCI = IRB.CreateCall(SGXSanCalloc, {CI->getOperand(0), CI->getOperand(1)});
+    }
+    else if (callee_name == "realloc")
+    {
+        tempCI = IRB.CreateCall(SGXSanRealloc, {CI->getOperand(0), CI->getOperand(1)});
+    }
+    CI->replaceAllUsesWith(tempCI);
+    CI->eraseFromParent();
+}
+#endif
+
 void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
 {
     IRBuilder<> IRB(SI);
@@ -895,15 +948,12 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
     return true;
 }
 
-bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
+bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *, 8> &ReturnInstVec)
 {
     Instruction *insertPoint = &(*OcallWrapper.getBasicBlockList().begin()->begin());
     IRBuilder<> IRB(insertPoint);
     IRB.CreateCall(OutAddrWhitelistDeactive);
 
-    FunctionInstVisitor visitor(OcallWrapper);
-    SmallVector<Instruction *, 8> ReturnInstVec;
-    visitor.getInstVec(ReturnInstVec);
     for (Instruction *RetInst : ReturnInstVec)
     {
         const DataLayout &DL = (dyn_cast<Instruction>(RetInst))->getModule()->getDataLayout();
@@ -1033,8 +1083,6 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                       << F << "\n");
     initializeCallbacks(*F.getParent());
 
-    replaceSGXSanIntrinName(F);
-
     // We want to instrument every address only once per basic block (unless there
     // are calls between uses).
     SmallVector<InterestingMemoryOperand, 16> OperandsToInstrument;
@@ -1042,6 +1090,10 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     SmallVector<Instruction *, 8> NoReturnCalls;
     SmallVector<BasicBlock *, 16> AllBlocks;
     SmallVector<StoreInst *, 16> GlobalVariableStoreInsts;
+    SmallVector<CallInst *, 16> SecIntrinToInstrument;
+#if (USE_SGXSAN_MALLOC)
+    SmallVector<CallInst *, 16> HeapCIToInstrument;
+#endif
     CallInst *RealEcallInst = nullptr;
     bool isOcallWrapper = false;
     int NumAllocas = 0;
@@ -1099,6 +1151,16 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                     {
                         isOcallWrapper = true;
                     }
+                    else if (callee_name == "memcpy_s" || callee_name == "memset_s" || callee_name == "memmove_s")
+                    {
+                        SecIntrinToInstrument.push_back(CI);
+                    }
+#if (USE_SGXSAN_MALLOC)
+                    else if (callee_name == "malloc" || callee_name == "free" || callee_name == "calloc" || callee_name == "realloc")
+                    {
+                        HeapCIToInstrument.push_back(CI);
+                    }
+#endif
                 }
             }
 
@@ -1121,6 +1183,18 @@ bool AddressSanitizer::instrumentFunction(Function &F)
         instrumentMemIntrinsic(Inst);
         FunctionModified = true;
     }
+    for (auto CI : SecIntrinToInstrument)
+    {
+        instrumentSecMemIntrinsic(CI);
+        FunctionModified = true;
+    }
+#if (USE_SGXSAN_MALLOC)
+    for (auto CI : HeapCIToInstrument)
+    {
+        instrumentHeapCall(CI);
+        FunctionModified = true;
+    }
+#endif
     if (!isAtEnclaveTBridge)
     {
         for (auto Inst : GlobalVariableStoreInsts)
@@ -1136,14 +1210,17 @@ bool AddressSanitizer::instrumentFunction(Function &F)
         FunctionModified = true;
     }
 
-    if (isOcallWrapper && isAtEnclaveTBridge)
-    {
-        instrumentOcallWrapper(F);
-        FunctionModified = true;
-    }
-
     FunctionStackPoisoner FSP(F, *this);
     bool ChangedStack = FSP.runOnFunction();
+
+    SmallVector<Instruction *, 8> ReturnInstVec;
+    // FSP.runOnFunction() already save RetVec
+    FSP.getRetInstVec(ReturnInstVec);
+    if (isOcallWrapper && isAtEnclaveTBridge)
+    {
+        instrumentOcallWrapper(F, ReturnInstVec);
+        FunctionModified = true;
+    }
 
     // We must unpoison the stack before NoReturn calls (throw, _exit, etc).
     // See e.g. https://github.com/google/sanitizers/issues/37

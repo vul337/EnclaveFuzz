@@ -2,7 +2,7 @@ SGX_SDK ?= /opt/intel/sgxsdk
 SGX_MODE ?= HW
 SGX_DEBUG ?= 1
 SGX_PRERELEASE ?= 0
-Enclave_File_Name ?= "enclave.signed.so"
+EName ?= "enclave.signed.so"
 
 # current only support x64 arch
 SGX_COMMON_FLAGS := -m64
@@ -28,7 +28,7 @@ SGX_COMMON_CXXFLAGS := $(SGX_COMMON_FLAGS) -Wnon-virtual-dtor -std=c++11
 SGXSanRTApp_Cpp_Files := $(wildcard SGXSanRTApp/*.cpp)
 SGXSanRTApp_Include_Paths := -ISGXSanRTApp -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include
 
-SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${Enclave_File_Name}"
+SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${EName}"
 
 # Three configuration modes - Debug, prerelease, release
 #   Debug - Macro DEBUG enabled.

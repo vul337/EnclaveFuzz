@@ -40,7 +40,7 @@ public:
     void instrumentMop(llvm::InterestingMemoryOperand &O, bool UseCalls);
     void instrumentGlobalPropageteWhitelist(llvm::StoreInst *SI);
     bool instrumentRealEcall(llvm::CallInst *CI);
-    bool instrumentOcallWrapper(llvm::Function &OcallWrapper);
+    bool instrumentOcallWrapper(llvm::Function &OcallWrapper, llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
     bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL,
                                   int depth, llvm::Value *eleCnt = nullptr, llvm::Value *operandAddr = nullptr,
                                   bool checkCurrentLevelPtr = true);
@@ -60,6 +60,10 @@ public:
                                          size_t AccessSizeIndex,
                                          llvm::Value *SizeArgument);
     void instrumentMemIntrinsic(llvm::MemIntrinsic *MI);
+    void instrumentSecMemIntrinsic(llvm::CallInst *CI);
+#if (USE_SGXSAN_MALLOC)
+    void instrumentHeapCall(llvm::CallInst *CI);
+#endif
     bool isInterestingAlloca(const llvm::AllocaInst &AI);
     uint64_t getAllocaSizeInBytes(const llvm::AllocaInst &AI) const;
     bool ignoreAccess(llvm::Value *Ptr);
