@@ -92,23 +92,23 @@ void *__asan_memcpy(void *to, const void *from, uptr size)
                 PrintErrorAndAbort("[%s] %p:%lu overlap with %p:%lu\n", "memcpy", to, size, from, size);
             }
         }
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        // bool isSrcInEnclave = false, isDstOutEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(from, 0, size)
         ASAN_READ_RANGE(from, size);
-        isSrcInEnclave = true;
+        // isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query((uint64_t)from, size, false);
         SGXSAN_ELRANGE_CHECK_END;
         SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)
         ASAN_WRITE_RANGE(to, size);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
+        // isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query((uint64_t)to, size, true);
         SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
-        {
-            SGXSAN_WARNING(isCiphertext((uint64_t)from, size), "[SGXSan] Plaintext Transfer");
-        }
+        // if (isSrcInEnclave && isDstOutEnclave)
+        // {
+        //     SGXSAN_WARNING(isCiphertext((uint64_t)from, size), "[SGXSan] Plaintext Transfer");
+        // }
     }
     return memcpy(to, from, size);
 }
@@ -132,23 +132,23 @@ void *__asan_memmove(void *to, const void *from, uptr size)
     if (LIKELY(asan_inited))
     {
         ENSURE_ASAN_INITED();
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        // bool isSrcInEnclave = false, isDstOutEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(from, 0, size)
         ASAN_READ_RANGE(from, size);
-        isSrcInEnclave = true;
+        // isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query((uint64_t)from, size, false);
         SGXSAN_ELRANGE_CHECK_END;
         SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)
         ASAN_WRITE_RANGE(to, size);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
+        // isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query((uint64_t)to, size, true);
         SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
-        {
-            SGXSAN_WARNING(isCiphertext((uint64_t)from, size), "[SGXSan] Plaintext Transfer");
-        }
+        // if (isSrcInEnclave && isDstOutEnclave)
+        // {
+        //     SGXSAN_WARNING(isCiphertext((uint64_t)from, size), "[SGXSan] Plaintext Transfer");
+        // }
     }
     return memmove(to, from, size);
 }
@@ -165,23 +165,23 @@ errno_t sgxsan_memcpy_s(void *dst, size_t sizeInBytes, const void *src, size_t c
                 PrintErrorAndAbort("[%s] %p:%lu overlap with %p:%lu\n", "memcpy_s", dst, sizeInBytes, src, count);
             }
         }
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        // bool isSrcInEnclave = false, isDstOutEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(src, 0, count)
         ASAN_READ_RANGE(src, count);
-        isSrcInEnclave = true;
+        // isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query((uint64_t)src, count, false);
         SGXSAN_ELRANGE_CHECK_END;
         SGXSAN_ELRANGE_CHECK_BEG(dst, 1, sizeInBytes)
         ASAN_WRITE_RANGE(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
+        // isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query((uint64_t)dst, sizeInBytes, true);
         SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
-        {
-            SGXSAN_WARNING(isCiphertext((uint64_t)src, count), "[SGXSan] Plaintext Transfer");
-        }
+        // if (isSrcInEnclave && isDstOutEnclave)
+        // {
+        //     SGXSAN_WARNING(isCiphertext((uint64_t)src, count), "[SGXSan] Plaintext Transfer");
+        // }
     }
     return memcpy_s(dst, sizeInBytes, src, count);
 }
@@ -205,23 +205,23 @@ int sgxsan_memmove_s(void *dst, size_t sizeInBytes, const void *src, size_t coun
     if (LIKELY(asan_inited))
     {
         ENSURE_ASAN_INITED();
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        // bool isSrcInEnclave = false, isDstOutEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(src, 0, count)
         ASAN_READ_RANGE(src, count);
-        isSrcInEnclave = true;
+        // isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query((uint64_t)src, count, false);
         SGXSAN_ELRANGE_CHECK_END;
         SGXSAN_ELRANGE_CHECK_BEG(dst, 1, sizeInBytes)
         ASAN_WRITE_RANGE(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
+        // isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query((uint64_t)dst, sizeInBytes, true);
         SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
-        {
-            SGXSAN_WARNING(isCiphertext((uint64_t)src, count), "[SGXSan] Plaintext Transfer");
-        }
+        // if (isSrcInEnclave && isDstOutEnclave)
+        // {
+        //     SGXSAN_WARNING(isCiphertext((uint64_t)src, count), "[SGXSan] Plaintext Transfer");
+        // }
     }
     return memmove_s(dst, sizeInBytes, src, count);
 }
