@@ -1,7 +1,8 @@
+#include <string>
 #include "WhitelistCheck.hpp"
 #include "SGXSanPrintf.hpp"
-#include "SGXSanCommonPoisonCheck.hpp"
-
+#include "PoisonCheck.hpp"
+#include "SGXSanCommonShadowMap.hpp"
 // Init/Destroy at Enclave Tbridge Side, I didn't want to modify sgxsdk
 // Active/Deactive at Enclave Tbridge Side to avoid nested calls, these operations are as close to Customized Enclave Side as possible
 // Add at Enclave Tbridge Side to collect whitlist info
@@ -27,7 +28,6 @@ public:
 private:
     static __thread std::map<uint64_t, uint64_t> *m_whitelist;
     // used in nested ecall-ocall case
-    static __thread int m_whitelist_init_cnt;
     static __thread bool m_whitelist_active;
     static __thread uint64_t last_query_start, last_query_size;
     static std::map<uint64_t, uint64_t> m_global_whitelist;
@@ -36,7 +36,6 @@ private:
 
 // __thread can not decorate class object, because __thread will not call class object's constructor
 __thread std::map<uint64_t, uint64_t> *WhitelistOfAddrOutEnclave::m_whitelist;
-__thread int WhitelistOfAddrOutEnclave::m_whitelist_init_cnt;
 __thread bool WhitelistOfAddrOutEnclave::m_whitelist_active;
 __thread uint64_t WhitelistOfAddrOutEnclave::last_query_start, WhitelistOfAddrOutEnclave::last_query_size;
 std::map<uint64_t, uint64_t> WhitelistOfAddrOutEnclave::m_global_whitelist;
@@ -45,29 +44,16 @@ pthread_rwlock_t WhitelistOfAddrOutEnclave::m_rwlock_global_whitelist = PTHREAD_
 // add at bridge
 void WhitelistOfAddrOutEnclave::init()
 {
-    // m_whitelist_init_cnt >= 1 means inited
-    if (m_whitelist_init_cnt == 0)
-    {
-        m_whitelist = new std::map<uint64_t, uint64_t>();
-        // SGXSAN_TRACE("[Whitelist] [Thread] [init] => %p\n", m_whitelist);
-    }
-    m_whitelist_init_cnt++;
-    active();
-    ABORT_ASSERT(m_whitelist_init_cnt < 1024, "[Whitelist] [Thread] Too much ecall nested");
+    m_whitelist = new std::map<uint64_t, uint64_t>();
+    m_whitelist_active = false;
+    last_query_start = 0;
+    last_query_size = 0;
 }
 
 void WhitelistOfAddrOutEnclave::destroy()
 {
-    // m_whitelist_init_cnt < 1 means uninited
-    if (m_whitelist_init_cnt == 1)
-    {
-        // SGXSAN_TRACE("[Whitelist] [Thread] [destroy] %p => nullptr\n", m_whitelist);
-        delete m_whitelist;
-        m_whitelist = nullptr;
-    }
-    m_whitelist_init_cnt--;
-    deactive();
-    ABORT_ASSERT(m_whitelist_init_cnt >= 0, "[Whitelist] [Thread] Extra Destroy?");
+    delete m_whitelist;
+    m_whitelist = nullptr;
 }
 
 void WhitelistOfAddrOutEnclave::iter(bool is_global)
@@ -83,7 +69,7 @@ void WhitelistOfAddrOutEnclave::iter(bool is_global)
 
 std::pair<std::map<uint64_t, uint64_t>::iterator, bool> WhitelistOfAddrOutEnclave::add(uint64_t start, uint64_t size)
 {
-    if (start == 0 || m_whitelist_init_cnt < 1)
+    if (start == 0 || !m_whitelist)
     {
         return std::pair<std::map<uint64_t, uint64_t>::iterator, bool>(std::map<uint64_t, uint64_t>::iterator(), true);
     }
@@ -111,7 +97,7 @@ std::tuple<uint64_t, uint64_t, bool> WhitelistOfAddrOutEnclave::query(uint64_t s
                                                                       bool enable_double_fetch_check,
                                                                       bool is_write)
 {
-    if (m_whitelist_init_cnt < 1 || (!m_whitelist_active))
+    if (!m_whitelist || (!m_whitelist_active))
     {
         return std::tuple<uint64_t, uint64_t, bool>(0, 1, false);
     }
@@ -252,10 +238,13 @@ void WhitelistOfAddrOutEnclave_add(uint64_t start, uint64_t size)
 
 void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size, bool is_write)
 {
+    // fix-me: it is better to annotate SensitiveLeakSan's load/store as noinstr
+    // if (start >= kLowShadowBeg && (start + size - 1) <= kLowShadowEnd)
+    //     return;
     uint64_t find_start, find_size;
     bool is_at_global;
     std::tie(find_start, find_size, is_at_global) = WhitelistOfAddrOutEnclave::query(start, size, true, is_write);
-    SGXSAN_WARNING(find_size != 0, "[SGXSan] Illegal access outside-enclave");
+    SGXSAN_WARNING(find_size != 0, ("[SGXSan] Illegal access outside-enclave: " + std::to_string(start)).c_str());
 }
 
 void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr)

@@ -30,8 +30,10 @@ const int kAsanAllocaRightMagic = 0xcb;
 // protection there (i.e. Myriad).
 const int kAsanShadowGap = 0xcc;
 // mark sensitive area
-const int kSGXSanShadowSensitive = 0x10;
+const int kSGXSanSensitiveLayout = 0x10;
+const int kSGXSanSensitiveObjData = 0x20;
 const int kSGXSanElrangeLeftGuard = 0xe0;
+
 
 #ifndef SHADOW_GRANULARITY
 #define SHADOW_GRANULARITY 8

@@ -1,7 +1,7 @@
 #include "SGXSanDefs.h"
 #include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanCommonPoisonCheck.hpp"
+#include "PoisonCheck.hpp"
 #include "WhitelistCheck.hpp"
 
 #define ASAN_MEMORY_ACCESS_CALLBACK_BODY(type, is_write, size, fatal)        \
@@ -42,7 +42,7 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 
 #define SGXSAN_MEMORY_ACCESS_CALLBACK_SIZED_BODY(addr, size, is_write) \
     SGXSAN_ELRANGE_CHECK_BEG(addr, is_write, size)                     \
-    if (__asan_region_is_poisoned(addr, size))                         \
+    if (sgxsan_region_is_poisoned(addr, size))                         \
     {                                                                  \
         GET_CALLER_PC_BP_SP;                                           \
         ReportGenericError(pc, bp, sp, addr, is_write, size, true);    \

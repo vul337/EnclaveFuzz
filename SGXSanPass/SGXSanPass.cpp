@@ -45,7 +45,7 @@ namespace
                 }
                 else if ((func_name != "ocall_init_shadow_memory") and
                          (func_name != "sgxsan_printf") and
-                         (func_name != "sgx_thread_set_multiple_untrusted_events_ocall" /* this may pass sensitive tcs */))
+                         (func_name != "sgx_thread_set_multiple_untrusted_events_ocall"))
                 {
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.
@@ -61,6 +61,11 @@ char SGXSanPass::ID = 1;
 static RegisterPass<SGXSanPass> register_sgxsan_pass("SGXSanPass", "SGXSanPass",
                                                      false /* Only looks at CFG */,
                                                      false /* Analysis Pass */);
+
+static RegisterStandardPasses lto_register_std_pass(
+    PassManagerBuilder::EP_FullLinkTimeOptimizationEarly,
+    [](const PassManagerBuilder &Builder, legacy::PassManagerBase &PM)
+    { PM.add(new SGXSanPass()); });
 
 static RegisterStandardPasses l0_register_std_pass(
     /* EP_EarlyAsPossible can only be used in FunctionPass(https://lists.llvm.org/pipermail/llvm-dev/2018-June/123987.html) */

@@ -19,15 +19,14 @@ class QuarantineCache
 {
 public:
     QuarantineCache();
-
     void put(QuarantineElement qe);
 
 private:
     // Use SGXSan::Allocator avoid malloc-new-malloc's like infinitive loop
 #if (!USE_SGXSAN_MALLOC)
-    std::queue<QuarantineElement, std::deque<QuarantineElement, SGXSan::ContainerAllocator<QuarantineElement>>> m_queue;
+    std::deque<QuarantineElement, SGXSan::ContainerAllocator<QuarantineElement>> m_queue;
 #else
-    std::queue<QuarantineElement> m_queue;
+    std::deque<QuarantineElement> m_queue;
 #endif
     size_t m_quarantine_cache_used_size = 0;
     size_t m_quarantine_cache_max_size = 0;

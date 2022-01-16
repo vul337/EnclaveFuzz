@@ -1,6 +1,6 @@
 #include "EdgeCheck.hpp"
 #include "WhitelistCheck.hpp"
-#include "SGXSanCommonPoisonCheck.hpp"
+#include "PoisonCheck.hpp"
 #include "SGXSanCommonErrorReport.hpp"
 #include "SGXSanPrintf.hpp"
 
@@ -13,7 +13,7 @@ void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt)
         min_size = len;
     }
     SGXSAN_ELRANGE_CHECK_BEG(ptr, 0, min_size)
-    if (__asan_region_is_poisoned(ptr, min_size, true))
+    if (sgxsan_region_is_poisoned(ptr, min_size, (~0x70) | kSGXSanSensitiveLayout))
     {
         // PrintErrorAndAbort("[sgxsan_edge_check] 0x%lx point to sensitive area\n", ptr);
         GET_CALLER_PC_BP_SP;

@@ -95,7 +95,7 @@ static cl::opt<bool> ClUseElrangeGuard(
     cl::Hidden,
     cl::init(true));
 
-bool isAtEnclaveTBridge = false;
+bool isFuncAtEnclaveTBridge = false;
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
@@ -174,6 +174,9 @@ void AddressSanitizer::initializeCallbacks(Module &M)
 
     // declare extern elrange symbol
     declareExternElrangeSymbol(M);
+
+    EnclaveTLSConstructorAtTBridgeBegin = M.getOrInsertFunction("EnclaveTLSConstructorAtTBridgeBegin", IRB.getVoidTy());
+    EnclaveTLSDestructorAtTBridgeEnd = M.getOrInsertFunction("EnclaveTLSDestructorAtTBridgeEnd", IRB.getVoidTy());
 
     OutAddrWhitelistInit = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_init", IRB.getVoidTy());
     OutAddrWhitelistDestroy = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_destroy", IRB.getVoidTy());
@@ -394,9 +397,9 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     // now can use elrange guard page to detect cross boundary
     if (!ClUseElrangeGuard)
     {
-        // if (not(end < EnclaveBase or start > EnclaveEnd)) // equal to if (end >= EnclaveBase and start <= EnclaveEnd))
+        // if (not(end < EnclaveBase or start > EnclaveEnd)) // equal to if (end >= EnclaveBase [i1 type bitwise]and start <= EnclaveEnd))
         // {
-        //     if (not(start >= EnclaveBase and end <= EnclaveEnd)) // equal to if (start < EnclaveBase or end > EnclaveEnd)
+        //     if (not(start >= EnclaveBase and end <= EnclaveEnd)) // equal to if (start < EnclaveBase [i1 type bitwise]or end > EnclaveEnd)
         //     {
         //         cross-boundary; // unreachable                                                       <= CrossBoundaryTerm
         //     }
@@ -423,12 +426,12 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     }
     else
     {
-        // if (EnclaveBase <= start and end <= EnclaveEnd) // totally in elrange
+        // if (EnclaveBase <= start [i1 type bitwise]and end <= EnclaveEnd) // totally in elrange
         // {
         //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
         //                                                                                              <= ShadowCheckInsertPoint
         // }
-        // else if (end < EnclaveBase or start > EnclaveEnd) // totally outside enclave
+        // else if (end < EnclaveBase [i1 type bitwise]or start > EnclaveEnd) // totally outside enclave
         // {
         //     Out-Addr Whitelist check(start, size);
         // }
@@ -438,7 +441,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
         Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
         Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
         Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
-        if (isAtEnclaveTBridge)
+        if (isFuncAtEnclaveTBridge)
         {
             ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(IfCond, InsertBefore, false);
         }
@@ -580,7 +583,9 @@ void AddressSanitizer::instrumentMemIntrinsic(MemIntrinsic *MI)
 // Instrument memset_s/memmove_s/memcpy_s
 void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI)
 {
-    StringRef callee_name = CI->getCalledFunction()->getName();
+    Function *callee = CI->getCalledFunction();
+    assert(callee);
+    StringRef callee_name = callee->getName();
     IRBuilder<> IRB(CI);
     CallInst *tempCI = nullptr;
     if (callee_name == "memcpy_s")
@@ -606,7 +611,9 @@ void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI)
 // Instrument malloc/free/calloc/realloc
 void AddressSanitizer::instrumentHeapCall(CallInst *CI)
 {
-    StringRef callee_name = CI->getCalledFunction()->getName();
+    Function *callee = CI->getCalledFunction();
+    assert(callee);
+    StringRef callee_name = callee->getName();
     IRBuilder<> IRB(CI);
     CallInst *tempCI = nullptr;
     if (callee_name == "malloc")
@@ -689,6 +696,24 @@ static SmallVector<Value *> getValuesByStrInFunction(Function *F, bool (*cmp)(Va
     return valueVec;
 }
 
+static Value *getValueByStrInFunction(Function *F, bool (*cmp)(Value *, std::string), std::string str)
+{
+    for (auto &BB : *F)
+    {
+        for (auto &inst : BB)
+        {
+            if (Value *value = dyn_cast<Value>(&inst))
+            {
+                if (cmp(value, str))
+                {
+                    return value;
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
 static std::pair<int64_t, Value *> getLenAndValueByNameInEDL(Function *F, std::string lenPrefixedValueName)
 {
     int64_t length = -1;
@@ -762,7 +787,7 @@ exit:
 // param means passed parameter at real ecall (not ecall wrapper) instruction
 // Return:
 // ElementCnt   ElementSize LenValue
-//|-1           -1          nullptr             /* not a pointer */
+//|-1           -1          nullptr             /* not a pointer or a function pointer */
 //|-1           >=1         nullptr             /* [user_check] pointer */
 //|-1           >=1         (Value *) _len_xxx  /* [in]/[out] pointer, but length is not a ConstantInt */
 //|>=1          >=1         (Value *) _len_xxx  /* [in]/[out] pointer, and length is a ConstantInt */
@@ -773,10 +798,13 @@ static std::tuple<int, int, Value *> convertParamLenAndValue2Tuple(Value *param,
 
     if (PointerType *pointerType = dyn_cast<PointerType>(param->getType()))
     {
-        elementSize = F->getParent()->getDataLayout().getTypeAllocSize(pointerType->getElementType()).getFixedSize();
-        assert(elementSize >= 1);
+        if (pointerType->getElementType()->isSized())
+        {
+            elementSize = F->getParent()->getDataLayout().getTypeAllocSize(pointerType->getElementType()).getFixedSize();
+            assert(elementSize >= 1);
+        }
     }
-    if (lenAndValue.first > 0 && lenAndValue.second != nullptr)
+    if (elementSize != -1 && lenAndValue.first > 0 && lenAndValue.second != nullptr)
     {
         // this param is a (array-)pointer and has length, means [in]/[out]
         assert(param->getType()->isPointerTy() && (elementSize != -1));
@@ -823,6 +851,10 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     // fix-me: how about FunctionType
     if (PointerType *pointerType = dyn_cast<PointerType>(operandType))
     {
+        // if it's a function pointer, ignore
+        if (!pointerType->getElementType()->isSized())
+            return false;
+
         Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)), &(*IRB.GetInsertPoint()), false);
         IRB.SetInsertPoint(PointerCheckTerm);
         if (checkCurrentLevelPtr)
@@ -895,12 +927,15 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     return false;
 }
 
-bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
+bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction *, 8> &ReturnInstVec)
 {
     if (CI == nullptr)
         return false;
-    IRBuilder<> IRB(CI);
-    IRB.CreateCall(OutAddrWhitelistInit);
+    auto &firstFuncInsertPoint = *CI->getFunction()->getEntryBlock().getFirstInsertionPt();
+    IRBuilder<> IRB(&firstFuncInsertPoint);
+    IRB.CreateCall(EnclaveTLSConstructorAtTBridgeBegin);
+    IRB.SetInsertPoint(CI);
+    IRB.CreateCall(OutAddrWhitelistActive);
     const DataLayout &DL = CI->getModule()->getDataLayout();
 
     for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++)
@@ -944,11 +979,16 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
         }
     }
     IRB.SetInsertPoint(CI->getNextNode());
-    IRB.CreateCall(OutAddrWhitelistDestroy);
+    IRB.CreateCall(OutAddrWhitelistDeactive);
+    for (auto RetInst : ReturnInstVec)
+    {
+        IRB.SetInsertPoint(RetInst);
+        IRB.CreateCall(EnclaveTLSDestructorAtTBridgeEnd);
+    }
     return true;
 }
 
-bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *, 8> &ReturnInstVec)
+bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, CallInst *sgx_ocall_inst, SmallVector<Instruction *, 8> &ReturnInstVec)
 {
     Instruction *insertPoint = &(*OcallWrapper.getBasicBlockList().begin()->begin());
     IRBuilder<> IRB(insertPoint);
@@ -968,6 +1008,12 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVecto
                 Value *ptrEleCnt = nullptr;
                 if (argName != "")
                 {
+                    // make sure parameter is passed in enclave
+                    // '__tmp_xxx' exist, then means there is routine that use xxx at untrusted side, and copy xxx back to trusted side
+                    // fix-me: implementation is tricky
+                    if (getValueByStrInFunction(&OcallWrapper, isValueNameEqualWith, "__tmp_" + argName) == nullptr)
+                        continue;
+
                     auto lenAndValue = getLenAndValueByNameInEDL(RetInst->getFunction(), "_len_" + argName);
                     ptrEleCnt = convertPointerLenAndValue2CountValue(&arg, RetInst, lenAndValue);
                 }
@@ -1070,9 +1116,7 @@ void AddressSanitizer::replaceSGXSanIntrinName(Function &F)
 
 bool AddressSanitizer::instrumentFunction(Function &F)
 {
-    GlobalVariable *ecallTable = F.getParent()->getNamedGlobal("g_ecall_table");
-    isAtEnclaveTBridge = (ecallTable && !ecallTable->isDeclaration()) ? true : false;
-
+    isFuncAtEnclaveTBridge = false;
     if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
         return false;
     if (F.getName().startswith("__asan_"))
@@ -1096,6 +1140,7 @@ bool AddressSanitizer::instrumentFunction(Function &F)
 #endif
     CallInst *RealEcallInst = nullptr;
     bool isOcallWrapper = false;
+    CallInst *sgx_ocall_inst = nullptr;
     int NumAllocas = 0;
 
     // Fill the set of memory operations to instrument.
@@ -1118,9 +1163,12 @@ bool AddressSanitizer::instrumentFunction(Function &F)
             }
             else if (MemIntrinsic *MI = dyn_cast<MemIntrinsic>(&Inst))
             {
-                // ok, take it.
-                IntrinToInstrument.push_back(MI);
-                NumInsnsPerBB++;
+                if (!MI->hasMetadata("nosanitize"))
+                {
+                    // ok, take it.
+                    IntrinToInstrument.push_back(MI);
+                    NumInsnsPerBB++;
+                }
             }
             else
             {
@@ -1146,10 +1194,13 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                         // should only one ecall in ecall wrapper
                         assert(RealEcallInst == nullptr);
                         RealEcallInst = CI;
+                        isFuncAtEnclaveTBridge = true;
                     }
                     else if (callee_name == "sgx_ocall")
                     {
                         isOcallWrapper = true;
+                        sgx_ocall_inst = CI;
+                        isFuncAtEnclaveTBridge = true;
                     }
                     else if (callee_name == "memcpy_s" || callee_name == "memset_s" || callee_name == "memmove_s")
                     {
@@ -1195,19 +1246,13 @@ bool AddressSanitizer::instrumentFunction(Function &F)
         FunctionModified = true;
     }
 #endif
-    if (!isAtEnclaveTBridge)
+    if (!isFuncAtEnclaveTBridge)
     {
         for (auto Inst : GlobalVariableStoreInsts)
         {
             instrumentGlobalPropageteWhitelist(Inst);
             FunctionModified = true;
         }
-    }
-    if (RealEcallInst && isAtEnclaveTBridge)
-    {
-        // when it is an ecall wrapper
-        instrumentRealEcall(RealEcallInst);
-        FunctionModified = true;
     }
 
     FunctionStackPoisoner FSP(F, *this);
@@ -1216,9 +1261,17 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     SmallVector<Instruction *, 8> ReturnInstVec;
     // FSP.runOnFunction() already save RetVec
     FSP.getRetInstVec(ReturnInstVec);
-    if (isOcallWrapper && isAtEnclaveTBridge)
+
+    if (RealEcallInst != nullptr)
     {
-        instrumentOcallWrapper(F, ReturnInstVec);
+        // when it is an ecall wrapper
+        instrumentRealEcall(RealEcallInst, ReturnInstVec);
+        FunctionModified = true;
+    }
+
+    if (isOcallWrapper)
+    {
+        instrumentOcallWrapper(F, sgx_ocall_inst, ReturnInstVec);
         FunctionModified = true;
     }
 

@@ -44,6 +44,16 @@ typedef struct malloc_chunk *mchunkptr;
 #define overhead_for(p) \
     (is_mmapped(p) ? MMAP_CHUNK_OVERHEAD : CHUNK_OVERHEAD)
 
+#if defined(__cplusplus)
+extern "C"
+{
+#endif
+    //fix-me: attention: if use tcmalloc, need alias malloc_usable_size to tc_malloc_size
+    size_t __attribute__((weak, alias("dlmalloc_usable_size"), used)) malloc_usable_size(void *mem);
+#if defined(__cplusplus)
+}
+#endif
+
 size_t dlmalloc_usable_size(void *mem)
 {
     if (mem != 0)

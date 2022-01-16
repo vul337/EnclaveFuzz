@@ -2,7 +2,7 @@
 #include <unordered_set>
 #include <pthread.h>
 #include "SGXSanManifest.h"
-#include "SGXSanCommonPoisonCheck.hpp"
+#include "PoisonCheck.hpp"
 #include "Malloc.hpp"
 #include "SGXSanCommonPoison.hpp"
 #include "SGXSanCommonErrorReport.hpp"
@@ -20,6 +20,8 @@
 #define BACKEND_CALLOC calloc
 #define REALLOC sgxsan_realloc
 #define BACKEND_REALLOC realloc
+#define MALLOC_USABLE_SZIE sgxsan_malloc_usable_size
+#define BACKEND_MALLOC_USABLE_SZIE malloc_usable_size
 #else
 // fix-me: how about tcmalloc
 #define MALLOC malloc
@@ -30,20 +32,14 @@
 #define BACKEND_CALLOC dlcalloc
 #define REALLOC realloc
 #define BACKEND_REALLOC dlrealloc
+#define MALLOC_USABLE_SZIE malloc_usable_size
+#define BACKEND_MALLOC_USABLE_SZIE dlmalloc_usable_size
 #endif
 
-#if (CHECK_MALLOC_FREE_MATCH)
-static pthread_rwlock_t rwlock_heap_obj_user_beg_set = PTHREAD_RWLOCK_INITIALIZER;
+/* The maximum possible size_t value has all bits set */
+#define MAX_SIZE_T (~(size_t)0)
 
-#if (!USE_SGXSAN_MALLOC)
-// Use SGXSan::DLAllocator avoid malloc-new-malloc's like infinitive loop
-// there are two mempool never free, dwarf_reg_state_pool and dwarf_cie_info_pool
-static std::unordered_set<uptr, std::hash<uptr>, std::equal_to<uptr>, SGXSan::ContainerAllocator<uptr>> heap_obj_user_beg_set;
-#else
-static std::unordered_set<uptr> heap_obj_user_beg_set;
-#endif
-
-#endif
+__thread bool is_in_heap_operator_wrapper = false;
 
 struct chunk
 {
@@ -58,23 +54,28 @@ void *MALLOC(size_t size)
 		return BACKEND_MALLOC(size);
 	}
 
+	if (is_in_heap_operator_wrapper)
+	{
+		return BACKEND_MALLOC(size);
+	}
+	is_in_heap_operator_wrapper = true;
+
 	uptr alignment = SHADOW_GRANULARITY;
 
-	if (size == 0)
-	{
-		return nullptr;
-	}
+	// if (size == 0)
+	// {
+	// 	return nullptr;
+	// }
 
 	uptr rz_size = ComputeRZSize(size);
 	uptr rounded_size = RoundUpTo(size, alignment);
 	uptr needed_size = rounded_size + 2 * rz_size;
 
 	void *allocated = BACKEND_MALLOC(needed_size);
-	// fix-me: there is no malloc_usable_size avaliable in sgxsdk
-#if (!USE_SGXSAN_MALLOC)
-	size_t allocated_size = dlmalloc_usable_size(allocated);
+
+	size_t allocated_size = BACKEND_MALLOC_USABLE_SZIE(allocated);
 	needed_size = allocated_size;
-#endif
+
 	if (allocated == nullptr)
 	{
 		return nullptr;
@@ -109,76 +110,43 @@ void *MALLOC(size_t size)
 	uptr right_redzone_beg = RoundUpTo(user_end, alignment);
 	/* Fast */ PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg, kAsanHeapRightRedzoneMagic);
 
-	// record user_beg avoid user passing incorrect addr to free
-	// I assume dlmalloc will not alloc an memory that already allocated
-	// also assume thread safety implemented by dlmalloc, then alloc_beg never be the same for multi-threads
-	// fix-me: is container thread-safe? (https://en.cppreference.com/w/cpp/container)
-#if (CHECK_MALLOC_FREE_MATCH)
-	pthread_rwlock_wrlock(&rwlock_heap_obj_user_beg_set);
-	if (heap_obj_user_beg_set.find(user_beg) == heap_obj_user_beg_set.end())
-	{
-		heap_obj_user_beg_set.insert(user_beg);
-		// PRINTF("[Heap Obj(UserBeg)] [After Malloc] ");
-		// for (uptr p : heap_obj_user_beg_set)
-		// {
-		// 	PRINTF(" %lx", p);
-		// }
-		// PRINTF(" %s", "\n");
-		pthread_rwlock_unlock(&rwlock_heap_obj_user_beg_set);
-	}
-	else
-	{
-		pthread_rwlock_unlock(&rwlock_heap_obj_user_beg_set);
-		PrintErrorAndAbort("malloc an already allocated memory");
-	}
-#endif
+	is_in_heap_operator_wrapper = false;
 
 	return reinterpret_cast<void *>(user_beg);
 }
 
 void FREE(void *ptr)
 {
-	if (ptr == nullptr)
-		return;
 	if (not asan_inited)
 	{
 		BACKEND_FREE(ptr);
 		return;
 	}
 
+	if (is_in_heap_operator_wrapper)
+	{
+		BACKEND_FREE(ptr);
+		return;
+	}
+	is_in_heap_operator_wrapper = true;
+
+	if (ptr == nullptr)
+		return;
+
 	uptr user_beg = reinterpret_cast<uptr>(ptr);
 	uptr alignment = SHADOW_GRANULARITY;
 	CHECK(IsAligned(user_beg, alignment));
 	// PRINTF("\n[Recycle] 0x%lx\n", user_beg);
-#if (CHECK_MALLOC_FREE_MATCH)
-	pthread_rwlock_wrlock(&rwlock_heap_obj_user_beg_set);
-	if (heap_obj_user_beg_set.find(user_beg) == heap_obj_user_beg_set.end())
-	{
-		pthread_rwlock_unlock(&rwlock_heap_obj_user_beg_set);
-		PrintErrorAndAbort("free an non-recorded address"); // abort();
-	}
-	else
-	{
-		heap_obj_user_beg_set.erase(user_beg);
-		// PRINTF("[Heap Obj(UserBeg)] [After Free] ");
-		// for (uptr p : heap_obj_user_beg_set)
-		// {
-		// 	PRINTF(" %lx", p);
-		// }
-		// PRINTF(" %s", "\n");
-		pthread_rwlock_unlock(&rwlock_heap_obj_user_beg_set);
-	}
-#endif
+
 	uptr chunk_beg = user_beg - sizeof(chunk);
 	chunk *m = reinterpret_cast<chunk *>(chunk_beg);
 	size_t user_size = m->user_size;
 	// PRINTF("\n[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg, user_beg + user_size, m->alloc_beg + ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment));
 	FastPoisonShadow(user_beg, RoundUpTo(user_size, alignment), kAsanHeapFreeMagic);
 	size_t calcualted_alloc_size = ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment);
-#if (!USE_SGXSAN_MALLOC)
-	size_t true_allocated_size = dlmalloc_usable_size((void *)m->alloc_beg);
+
+	size_t true_allocated_size = BACKEND_MALLOC_USABLE_SZIE((void *)m->alloc_beg);
 	calcualted_alloc_size = true_allocated_size;
-#endif
 
 	QuarantineElement qe = {
 		.alloc_beg = m->alloc_beg,
@@ -186,6 +154,8 @@ void FREE(void *ptr)
 		.user_beg = user_beg,
 		.user_size = user_size};
 	g_quarantine_cache->put(qe);
+
+	is_in_heap_operator_wrapper = false;
 }
 
 void *CALLOC(size_t n_elements, size_t elem_size)
@@ -195,16 +165,18 @@ void *CALLOC(size_t n_elements, size_t elem_size)
 		return BACKEND_CALLOC(n_elements, elem_size);
 	}
 
-	if (n_elements == 0 || elem_size == 0)
+	void *mem;
+	size_t req = 0;
+	if (n_elements != 0)
 	{
-		return nullptr;
+		req = n_elements * elem_size;
+		if (((n_elements | elem_size) & ~(size_t)0xffff) &&
+			req / n_elements != elem_size)
+		{
+			req = MAX_SIZE_T; /* force downstream failure on overflow */
+		}
 	}
-	size_t req = n_elements * elem_size;
-	if (req / n_elements != elem_size)
-	{
-		return nullptr;
-	}
-	void *mem = MALLOC(req);
+	mem = MALLOC(req);
 	if (mem != nullptr)
 	{
 		memset(mem, 0, req);
@@ -243,4 +215,15 @@ void *REALLOC(void *oldmem, size_t bytes)
 	}
 
 	return mem;
+}
+
+size_t MALLOC_USABLE_SZIE(void *mem)
+{
+	uptr user_beg = reinterpret_cast<uptr>(mem);
+
+	uptr chunk_beg = user_beg - sizeof(chunk);
+	chunk *m = reinterpret_cast<chunk *>(chunk_beg);
+	size_t user_size = m->user_size;
+
+	return user_size;
 }

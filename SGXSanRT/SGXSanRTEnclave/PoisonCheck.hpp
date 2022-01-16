@@ -7,17 +7,34 @@
 #include "SGXSanAlignment.h"
 #include "SGXSanCommonPoison.hpp"
 
-static inline bool AddressIsPoisoned(uptr a, bool check_shallow_poison = false /* default don't check shallow poison */)
+#if defined(__cplusplus)
+extern "C"
+{
+#endif
+    uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask = ~0x70);
+    bool is_addr_in_elrange(uint64_t addr);
+    bool is_addr_in_elrange_ex(uint64_t addr, uint64_t size);
+    bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8_t mask);
+#if defined(__cplusplus)
+}
+#endif
+
+static inline bool AddressIsPoisoned(uptr a, uint8_t mask = ~0x70)
 {
     const uptr kAccessSize = 1;
     u8 *shadow_address = (u8 *)MEM_TO_SHADOW(a);
-    s8 shadow_value = *shadow_address;
+    // situation of shadow_value >= SHADOW_GRANULARITY (max positive integer for shadow byte is 0x7f) is that sgxsan's shallow poison usage
+    s8 shadow_value = (*shadow_address) & mask;
+    if (shadow_value >= 0x8)
+    {
+        return true;
+    }
     if (shadow_value)
     {
         // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
         u8 last_accessed_byte = (a & (SHADOW_GRANULARITY - 1)) + kAccessSize - 1;
-        // situation of shadow_value >= SHADOW_GRANULARITY (max positive integer for shadow byte is 0x7f) is that sgxsan's shallow poison usage
-        return (check_shallow_poison ? SHADOW_GRANULARITY < shadow_value : false || last_accessed_byte >= shadow_value);
+
+        return last_accessed_byte >= shadow_value;
     }
     return false;
 }
@@ -41,67 +58,20 @@ static inline bool QuickCheckForUnpoisonedRegion(uptr beg, uptr size)
     return false;
 }
 
-static inline bool mem_is_zero(const char *beg, uptr size, uint8_t mask = ~0)
+static inline uint8_t mem_byte_wise_bit_or(uint8_t *beg, uptr size)
 {
     CHECK_LE(size, 1ULL << 40); // Sanity check.
-    const char *end = beg + size;
-    uptr *aligned_beg = (uptr *)RoundUpTo((uptr)beg, sizeof(uptr));
-    uptr *aligned_end = (uptr *)RoundDownTo((uptr)end, sizeof(uptr));
-    uptr all = 0;
-    // Prologue.
-    for (const char *mem = beg; mem < (char *)aligned_beg && mem < end; mem++)
+    uint8_t *end = beg + size;
+    uint8_t all = 0;
+    for (uint8_t *mem = beg; mem < end; mem++)
         all |= *mem;
-    // Aligned loop.
-    for (; aligned_beg < aligned_end; aligned_beg++)
-        all |= *aligned_beg;
-    // Epilogue.
-    if ((char *)aligned_end >= beg)
-    {
-        for (const char *mem = (char *)aligned_end; mem < end; mem++)
-            all |= *mem;
-    }
+    return all;
+}
+
+static inline bool mem_is_zero(uint8_t *beg, uptr size, uint8_t mask = ~0x70)
+{
+    uint8_t all = mem_byte_wise_bit_or((uint8_t *)beg, size);
     return (all & mask) == 0;
-}
-
-static inline uptr __asan_region_is_poisoned(uptr beg, uptr size, bool check_shallow_poison = false)
-{
-    if (!size)
-        return 0;
-    uptr end = beg + size;
-    if (!AddrIsInMem(beg))
-        return beg;
-    if (!AddrIsInMem(end))
-        return end;
-
-    CHECK_LT(beg, end);
-    uptr aligned_b = RoundUpTo(beg, SHADOW_GRANULARITY);
-    uptr aligned_e = RoundDownTo(end, SHADOW_GRANULARITY);
-    uptr shadow_beg = MemToShadow(aligned_b);
-    uptr shadow_end = MemToShadow(aligned_e);
-    // First check the first and the last application bytes,
-    // then check the SHADOW_GRANULARITY-aligned region by calling
-    // mem_is_zero on the corresponding shadow.
-    if (!AddressIsPoisoned(beg, check_shallow_poison) && !AddressIsPoisoned(end - 1, check_shallow_poison) &&
-        (shadow_end <= shadow_beg || mem_is_zero(
-                                         (const char *)shadow_beg,
-                                         shadow_end - shadow_beg,
-                                         (uint8_t)(check_shallow_poison ? ~0 : (~kSGXSanShadowSensitive)))))
-    {
-        return 0;
-    }
-
-    // The fast check failed, so we have a poisoned byte somewhere.
-    // Find it slowly.
-    for (; beg < end; beg++)
-        if (AddressIsPoisoned(beg, check_shallow_poison))
-            return beg;
-    // UNREACHABLE("mem_is_zero returned false, but poisoned byte was not found");
-    return 0;
-}
-
-static inline bool is_addr_in_elrange(uint64_t addr)
-{
-    return (g_enclave_base <= addr && addr < g_enclave_base + g_enclave_size) ? true : false;
 }
 
 // ElrangeCheck start
@@ -174,7 +144,7 @@ static inline bool RangesOverlap(const char *offset1, uptr length1,
             PrintErrorAndAbort("[%s:%d] 0x%lx:%lu size overflow", __FILE__, __LINE__, __offset, __size); \
         }                                                                                                \
         if (!QuickCheckForUnpoisonedRegion(__offset, __size) &&                                          \
-            (__bad = __asan_region_is_poisoned(__offset, __size)))                                       \
+            (__bad = sgxsan_region_is_poisoned(__offset, __size)))                                       \
         {                                                                                                \
             GET_CALLER_PC_BP_SP;                                                                         \
             ReportGenericError(pc, bp, sp, __bad, isWrite, __size, false);                               \

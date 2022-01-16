@@ -1,5 +1,4 @@
-#ifndef MALLOC_HPP
-#define MALLOC_HPP
+#pragma once
 
 #include "SGXSanCheck.h"
 #include "SGXSanDefs.h"
@@ -30,6 +29,7 @@ static inline uptr ComputeRZSize(uptr size)
     return 16 << ComputeRZLog(size);
 }
 
+#if (USE_SGXSAN_MALLOC)
 #if defined(__cplusplus)
 extern "C"
 {
@@ -38,6 +38,7 @@ extern "C"
     void sgxsan_free(void *ptr);
     void *sgxsan_calloc(size_t n_elements, size_t elem_size);
     void *sgxsan_realloc(void *oldmem, size_t bytes);
+    size_t sgxsan_malloc_usable_size(void *mem);
 #if defined(__cplusplus)
 }
 #endif

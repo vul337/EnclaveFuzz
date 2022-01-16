@@ -5,7 +5,7 @@
 #include "SGXSanDefs.h"
 #include "SGXSanPrintf.hpp"
 #include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanCommonPoisonCheck.hpp"
+#include "PoisonCheck.hpp"
 #include "SGXSanStackTrace.hpp"
 
 #include "SGXSanCommonErrorReport.hpp"
@@ -72,6 +72,8 @@ void PrintShadowMap(uptr addr)
     PRINTF("Shadow byte legend (one shadow byte represents 8 application bytes):\n"
            "  Addressable:           00\n"
            "  Partially addressable: 01 02 03 04 05 06 07\n"
+           "  SGX sensitive layout:  10\n"
+           "  SGX sensitive data:    20\n"
            "  Heap left redzone:     fa\n"
            "  Heap righ redzone:     fb\n"
            "  Freed Heap region:     fd\n"
@@ -115,4 +117,16 @@ void PrintErrorAndAbort(const char *format, ...)
     PRINTF("[PrintErrorAndAbort] %s\n", buf);
     sgxsan_print_stack_trace();
     abort();
+}
+
+void sgxsan_warning_detail(bool cond, const char *message, uint64_t addr, uint64_t size)
+{
+    if (!cond)
+    {
+        PRINTF("================== Message ===================\n"
+               "[SGXSan Warning] %s \n",
+               message);
+        GET_CALLER_PC_BP_SP;
+        ReportGenericError(pc, bp, sp, addr, 0, size, true, true);
+    }
 }

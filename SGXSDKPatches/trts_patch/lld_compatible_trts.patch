@@ -1,0 +1,109 @@
+diff --git a/sdk/cpprt/linux/libunwind/src/se-iterate-phdr.c b/sdk/cpprt/linux/libunwind/src/se-iterate-phdr.c
+index 76c84d74..1e66413d 100644
+--- a/sdk/cpprt/linux/libunwind/src/se-iterate-phdr.c
++++ b/sdk/cpprt/linux/libunwind/src/se-iterate-phdr.c
+@@ -37,6 +37,7 @@
+ #endif
+ #include <link.h>
+ 
++void *get_enclave_base(void);
+ /**
+  * This function is commonly provided by glibc for application to walk
+  * through list of shared objects.  It is needed inside Enclave so that
+@@ -51,7 +52,7 @@ int dl_iterate_phdr(
+     ElfW(Ehdr)         *ehdr;
+ 
+     memset(&info, 0, sizeof(info));
+-    ehdr = (ElfW(Ehdr) *) &__ImageBase;
++    ehdr = (ElfW(Ehdr) *) get_enclave_base()/* &__ImageBase */;
+ 
+     info.dlpi_addr   = (ElfW(Addr)) ehdr;
+     info.dlpi_name  = "";
+diff --git a/sdk/trts/init_enclave.cpp b/sdk/trts/init_enclave.cpp
+index b8c12256..f62fb8db 100644
+--- a/sdk/trts/init_enclave.cpp
++++ b/sdk/trts/init_enclave.cpp
+@@ -116,7 +116,7 @@ extern "C" int init_enclave(void *enclave_base, void *ms)
+         return -1;
+     }
+ 
+-    g_enclave_base = (uint64_t)&__ImageBase;
++    g_enclave_base = (uint64_t)get_enclave_base() /* &__ImageBase */;
+     g_enclave_size = g_global_data.elrange_size;
+     //we are not allowed to set enclave_image_address to 0 if elrange is set
+     //so if enclave_image_address is 0, it means elrange is not set
+diff --git a/sdk/trts/linux/global_init.c b/sdk/trts/linux/global_init.c
+index a180adf3..b316e5cc 100644
+--- a/sdk/trts/linux/global_init.c
++++ b/sdk/trts/linux/global_init.c
+@@ -40,6 +40,8 @@
+ #include <assert.h>
+ #include <stdlib.h>
+ 
++void *get_enclave_base(void);
++
+ typedef void (*cxa_function_t)(void *para);
+ 
+ typedef struct _exit_function_t
+@@ -143,7 +145,7 @@ static void do_ctors_aux(void)
+     fp_t *p = NULL;
+     uintptr_t init_array_addr = 0;
+     size_t init_array_size = 0;
+-    const void *enclave_start = (const void*)&__ImageBase;
++    const void *enclave_start = (const void*)get_enclave_base() /* &__ImageBase */;
+ 
+     if (0 != elf_get_init_array(enclave_start, &init_array_addr, &init_array_size)|| init_array_addr == 0 || init_array_size == 0)
+         return;
+@@ -164,7 +166,7 @@ static void do_dtors_aux(void)
+     fp_t *p = NULL;
+     uintptr_t uninit_array_addr;
+     size_t uninit_array_size;
+-    const void *enclave_start = (const void*)&__ImageBase;
++    const void *enclave_start = (const void*)get_enclave_base() /* &__ImageBase */;
+ 
+     elf_get_uninit_array(enclave_start, &uninit_array_addr, &uninit_array_size);
+ 
+diff --git a/sdk/trts/trts_ecall.cpp b/sdk/trts/trts_ecall.cpp
+index bb12e7d2..e7460878 100644
+--- a/sdk/trts/trts_ecall.cpp
++++ b/sdk/trts/trts_ecall.cpp
+@@ -278,7 +278,7 @@ static sgx_status_t trts_ecall(uint32_t ordinal, void *ms)
+                 }
+ 
+                 //change back the page permission
+-                size_t enclave_start = (size_t)&__ImageBase;
++                size_t enclave_start = (size_t)get_enclave_base() /* &__ImageBase */;
+                 if((status = change_protection((void *)enclave_start)) != SGX_SUCCESS)
+                 {
+                     sgx_spin_unlock(&g_ife_lock);
+@@ -360,7 +360,7 @@ sgx_status_t do_init_thread(void *tcs, bool enclave_init)
+     uintptr_t tls_addr = 0;
+     size_t tdata_size = 0;
+ 
+-    if(0 != GET_TLS_INFO(&__ImageBase, &tls_addr, &tdata_size))
++    if(0 != GET_TLS_INFO(get_enclave_base() /* &__ImageBase */, &tls_addr, &tdata_size))
+     {
+         return SGX_ERROR_UNEXPECTED;
+     }
+diff --git a/sdk/trts/trts_util.cpp b/sdk/trts/trts_util.cpp
+index c0b59ef4..517d9cb7 100644
+--- a/sdk/trts/trts_util.cpp
++++ b/sdk/trts/trts_util.cpp
+@@ -50,7 +50,7 @@ size_t get_enclave_end(void)
+ 
+ void * get_heap_base(void)
+ {
+-    return GET_PTR(void, &__ImageBase, g_global_data.heap_offset);
++    return GET_PTR(void, get_enclave_base() /* &__ImageBase */, g_global_data.heap_offset);
+ }
+ 
+ size_t get_heap_size(void)
+@@ -85,7 +85,7 @@ size_t get_heap_min_size(void)
+ 
+ void * get_rsrv_base(void)
+ {
+-    return GET_PTR(void, &__ImageBase, g_global_data.rsrv_offset);
++    return GET_PTR(void, get_enclave_base() /* &__ImageBase */, g_global_data.rsrv_offset);
+ }
+ 
+ size_t get_rsrv_end(void)

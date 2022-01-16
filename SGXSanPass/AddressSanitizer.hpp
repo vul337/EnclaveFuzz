@@ -13,7 +13,7 @@
 #include "llvm/ADT/Statistic.h"
 #include <assert.h>
 #include "SGXSanManifest.h"
-#include "FunctionInstVisitor.hpp"
+// #include "FunctionInstVisitor.hpp"
 
 #ifndef DEBUG_TYPE
 #define DEBUG_TYPE "sgxsan"
@@ -39,8 +39,8 @@ public:
     void getInterestingMemoryOperands(llvm::Instruction *I, llvm::SmallVectorImpl<llvm::InterestingMemoryOperand> &Interesting, llvm::SmallVector<llvm::StoreInst *, 16> &GlobalVariableStoreInsts);
     void instrumentMop(llvm::InterestingMemoryOperand &O, bool UseCalls);
     void instrumentGlobalPropageteWhitelist(llvm::StoreInst *SI);
-    bool instrumentRealEcall(llvm::CallInst *CI);
-    bool instrumentOcallWrapper(llvm::Function &OcallWrapper, llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
+    bool instrumentRealEcall(llvm::CallInst *CI, llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
+    bool instrumentOcallWrapper(llvm::Function &OcallWrapper, llvm::CallInst *sgx_ocall_inst, llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
     bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL,
                                   int depth, llvm::Value *eleCnt = nullptr, llvm::Value *operandAddr = nullptr,
                                   bool checkCurrentLevelPtr = true);
@@ -91,7 +91,8 @@ private:
     llvm::GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
 
     llvm::FunctionCallee OutAddrWhitelistInit, OutAddrWhitelistDestroy, OutAddrWhitelistActive, OutAddrWhitelistDeactive,
-        OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS;
+        OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
+        EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd;
 #if (USE_SGXSAN_MALLOC)
     llvm::FunctionCallee SGXSanMalloc, SGXSanFree, SGXSanCalloc, SGXSanRealloc;
 #endif
