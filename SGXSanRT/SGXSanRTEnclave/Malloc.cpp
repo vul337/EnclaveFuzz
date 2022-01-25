@@ -153,7 +153,7 @@ void FREE(void *ptr)
 		.alloc_size = calcualted_alloc_size,
 		.user_beg = user_beg,
 		.user_size = user_size};
-	g_quarantine_cache->put(qe);
+	QuarantineCache::put(qe);
 
 	is_in_heap_operator_wrapper = false;
 }

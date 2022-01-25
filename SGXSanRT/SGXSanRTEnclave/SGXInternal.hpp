@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#define SE_GUARD_PAGE_SHIFT 16
+#define SE_GUARD_PAGE_SIZE (1 << SE_GUARD_PAGE_SHIFT)
+#define STATIC_STACK_SIZE   688
+#define TD2TCS(td) ((const void *)(((thread_data_t*)(td))->stack_base_addr + (size_t)STATIC_STACK_SIZE + (size_t)SE_GUARD_PAGE_SIZE))
+
 typedef size_t sys_word_t;
 
 typedef struct _thread_data_t
@@ -164,6 +169,7 @@ extern "C"
 #endif
     thread_data_t *get_thread_data(void);
     size_t get_heap_size(void);
+    const void *get_tcs(void);
 #if defined(__cplusplus)
 }
 #endif

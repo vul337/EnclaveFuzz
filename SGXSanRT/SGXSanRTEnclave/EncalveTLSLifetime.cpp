@@ -2,25 +2,32 @@
 #include "SGXInternal.hpp"
 #include "WhitelistCheck.hpp"
 #include "ThreadFuncArgShadowStack.hpp"
+#include "Quarantine.hpp"
+
+__thread int64_t TLS_init_count;
 
 void EnclaveTLSConstructorAtTBridgeBegin()
 {
-    thread_data_t *td = get_thread_data();
-    if (td->stack_base_addr == td->last_sp)
+    if (TLS_init_count == 0)
     {
         // root ecall
+        QuarantineCache::init();
         WhitelistOfAddrOutEnclave_init();
         init_thread_func_arg_shadow_stack();
     }
+    TLS_init_count++;
+    assert(TLS_init_count < 1024);
 }
 
 void EnclaveTLSDestructorAtTBridgeEnd()
 {
-    thread_data_t *td = get_thread_data();
-    if (td->stack_base_addr == td->last_sp)
+    if (TLS_init_count == 1)
     {
         // root ecall
         WhitelistOfAddrOutEnclave_destroy();
         destroy_thread_func_arg_shadow_stack();
+        QuarantineCache::destory();
     }
+    TLS_init_count--;
+    assert(TLS_init_count >= 0);
 }

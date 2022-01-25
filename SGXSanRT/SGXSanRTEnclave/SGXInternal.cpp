@@ -24,3 +24,9 @@ const char *layout_id_str[] = {
     "RSRV_MIN",
     "RSRV_INIT",
     "RSRV_MAX"};
+
+const void *get_tcs(void)
+{
+    thread_data_t *td = get_thread_data();
+    return TD2TCS(td);
+}

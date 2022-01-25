@@ -44,8 +44,7 @@ namespace
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                 }
                 else if ((func_name != "ocall_init_shadow_memory") and
-                         (func_name != "sgxsan_printf") and
-                         (func_name != "sgx_thread_set_multiple_untrusted_events_ocall"))
+                         (func_name != "sgxsan_printf"))
                 {
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.

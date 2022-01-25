@@ -18,20 +18,19 @@ struct QuarantineElement
 class QuarantineCache
 {
 public:
-    QuarantineCache();
-    void put(QuarantineElement qe);
+    static void init();
+    static void destory();
+    static void put(QuarantineElement qe);
 
 private:
     // Use SGXSan::Allocator avoid malloc-new-malloc's like infinitive loop
 #if (!USE_SGXSAN_MALLOC)
-    std::deque<QuarantineElement, SGXSan::ContainerAllocator<QuarantineElement>> m_queue;
+    static __thread std::deque<QuarantineElement, SGXSan::ContainerAllocator<QuarantineElement>> *m_queue;
 #else
-    std::deque<QuarantineElement> m_queue;
+    static __thread std::deque<QuarantineElement> *m_queue;
 #endif
-    size_t m_quarantine_cache_used_size = 0;
-    size_t m_quarantine_cache_max_size = 0;
+    static __thread size_t m_quarantine_cache_used_size;
+    static __thread size_t m_quarantine_cache_max_size;
 };
-
-extern QuarantineCache *g_quarantine_cache;
 
 #endif
