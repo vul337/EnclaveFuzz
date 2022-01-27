@@ -33,7 +33,7 @@ public:
     void collectAndPoisonSensitiveObj(llvm::Module &M);
     void doVFA(llvm::Value *work);
     void pushSensitiveObj(llvm::Value *annotatedVar, llvm::Value *annotationStrOp);
-    void instrumentSensitivePoison(llvm::Instruction *addr, llvm::Value *annotatedSize);
+    void instrumentSensitivePoison(llvm::Instruction *objI);
     llvm::Value *memToShadow(llvm::Value *Shadow, llvm::IRBuilder<> &IRB);
     llvm::Value *memToShadowPtr(llvm::Value *memPtr, llvm::IRBuilder<> &IRB);
 
@@ -41,19 +41,19 @@ public:
     int getFuncArgPosition(llvm::Argument *arg);
     void getDirectAndIndirectCalledFunction(llvm::CallInst *CI, llvm::SmallVector<llvm::Function *> &calleeVec);
     llvm::Instruction *findInstByName(llvm::Function *F, std::string InstName);
-    void getSVFPtObjs(llvm::Value *ptr, std::unordered_set<llvm::Value *> &objSet);
-    void getSVFOneLevelPtrs(llvm::Value *obj, std::unordered_set<llvm::Value *> &oneLevelPtrs);
-    void add2SensitiveObjAndPoison(llvm::Value *obj);
+    void getPtrValPNs(SVF::ObjPN *obj, std::unordered_set<SVF::ValPN *> &oneLevelPtrs);
+    void add2SensitiveObjAndPoison(SVF::ObjPN *obj);
     static llvm::Value *RoundUpUDiv(llvm::IRBuilder<> &IRB, llvm::Value *size, uint64_t dividend);
     uint64_t RoundUpUDiv(uint64_t dividend, uint64_t divisor);
     void pushPtObj2WorkList(llvm::Value *ptr);
+    static llvm::StringRef getBelongedFunctionName(SVF::PAGNode *node);
     static llvm::StringRef getBelongedFunctionName(llvm::Value *val);
     void setNoSanitizeMetadata(llvm::Instruction *I);
     void propagateShadowInMemTransfer(llvm::CallInst *CI, llvm::Instruction *insertPoint, llvm::Value *destPtr,
                                       llvm::Value *srcPtr, llvm::Value *size);
     uint64_t getPointerElementSize(llvm::Value *ptr);
-    llvm::Value *getSensitiveObjSize(llvm::Value *obj);
-    void getNonPointerObjs(llvm::Value *ptr, std::unordered_set<llvm::Value *> &objs);
+    llvm::Value *getSensitiveObjSize(llvm::Value *obj, llvm::IRBuilder<> &IRB);
+    void getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objs);
     llvm::Value *instrumentPoisonCheck(llvm::Value *src);
     llvm::Value *isLIPoisoned(llvm::LoadInst *src);
     llvm::Value *isArgPoisoned(llvm::Argument *src);
@@ -71,7 +71,7 @@ public:
     static bool isSecureVersionMemTransferCI(llvm::CallInst *CI);
 
 private:
-    std::unordered_set<llvm::Value *> SensitiveObjs, WorkList, ProcessedList;
+    std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
     std::unordered_set<llvm::Value *> poisonedInst;
     std::unordered_set<llvm::CallInst *> processedMemTransferInst;
     std::unordered_map<llvm::CallInst *, std::unordered_set<int>> poisonedCI;

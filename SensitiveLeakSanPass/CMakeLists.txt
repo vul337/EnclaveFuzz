@@ -19,4 +19,4 @@ endif()
 
 add_library(SensitiveLeakSanPass MODULE SensitiveLeakSanPass.cpp SensitiveLeakSan.cpp)
 
-target_link_libraries(SensitiveLeakSanPass ${LEONE_SVF_INSTALL_DIR}/Debug-build/lib/libSvf.a)
+target_link_libraries(SensitiveLeakSanPass ${LEONE_SVF_INSTALL_DIR}/Debug-build/lib/libSvf.a LLVMDemangle)

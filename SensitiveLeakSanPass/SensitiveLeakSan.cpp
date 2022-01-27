@@ -1,7 +1,7 @@
 #include "SensitiveLeakSan.hpp"
 #include "SGXSanManifest.h"
 #include "FunctionInstVisitor.hpp"
-
+#include "llvm/Demangle/Demangle.h"
 using namespace llvm;
 
 #define SGXSAN_SENSITIVE_OBJ_FLAG 0x20
@@ -48,10 +48,13 @@ Value *SensitiveLeakSan::RoundUpUDiv(IRBuilder<> &IRB, Value *size, uint64_t div
     return IRB.CreateUDiv(IRB.CreateAdd(size, IRB.getInt64(dividend - 1)), IRB.getInt64(dividend));
 }
 
-void SensitiveLeakSan::instrumentSensitivePoison(Instruction *objI, Value *objSize)
+void SensitiveLeakSan::instrumentSensitivePoison(Instruction *objI)
 {
     Instruction *insertPt = objI->getNextNode();
     IRBuilder<> IRB(insertPt);
+
+    Value *objSize = getSensitiveObjSize(objI, IRB);
+    assert(objSize != nullptr);
 
     Value *shadowAddr = memToShadowPtr(objI, IRB);
     objSize = IRB.CreateIntCast(objSize, IRB.getInt64Ty(), false);
@@ -60,28 +63,30 @@ void SensitiveLeakSan::instrumentSensitivePoison(Instruction *objI, Value *objSi
     setNoSanitizeMetadata(memsetCI);
 }
 
-Value *SensitiveLeakSan::getSensitiveObjSize(Value *obj)
+Value *SensitiveLeakSan::getSensitiveObjSize(Value *obj, IRBuilder<> &IRB)
 {
     if (AllocaInst *AI = dyn_cast<AllocaInst>(obj))
     {
         Type *objTy = AI->getAllocatedType();
         TypeSize size = M->getDataLayout().getTypeAllocSize(objTy);
-        IRBuilder<> IRB(*C);
         return IRB.getInt64(size.getFixedSize());
     }
     else if (CallInst *CI = dyn_cast<CallInst>(obj))
     {
         if (Function *callee = CI->getCalledFunction())
         {
-            StringRef calleeName = callee->getName();
-            if (calleeName.equals("_Znwm") || calleeName.equals("malloc") ||
-                calleeName.equals("calloc"))
+            std::string calleeName = llvm::demangle(callee->getName().str());
+            if (calleeName.find("new") != std::string::npos || calleeName == "malloc")
             {
                 return CI->getArgOperand(0);
             }
-            else if (calleeName.equals("realloc"))
+            else if (calleeName == "realloc")
             {
                 return CI->getArgOperand(1);
+            }
+            else if (calleeName == "calloc")
+            {
+                return IRB.CreateNUWMul(CI->getArgOperand(0), CI->getArgOperand(1));
             }
         }
     }
@@ -121,16 +126,15 @@ std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal)
     return annotation;
 }
 
-void SensitiveLeakSan::add2SensitiveObjAndPoison(Value *obj)
+void SensitiveLeakSan::add2SensitiveObjAndPoison(SVF::ObjPN *objPN)
 {
-    auto emplaceResult = SensitiveObjs.emplace(obj);
+    auto emplaceResult = SensitiveObjs.emplace(objPN);
     if (emplaceResult.second)
     {
+        Value *obj = const_cast<Value *>(objPN->getValue());
         if (Instruction *objI = dyn_cast<Instruction>(obj))
         {
-            Value *objSize = getSensitiveObjSize(obj);
-            assert(objSize != nullptr);
-            instrumentSensitivePoison(objI, objSize);
+            instrumentSensitivePoison(objI);
         }
         // TODO: non-instruction obj like global variable need to be poisoned at runtime
     }
@@ -158,49 +162,46 @@ Value *SensitiveLeakSan::stripCast(Value *v)
     return value;
 }
 
-void SensitiveLeakSan::getNonPointerObjs(Value *ptr, std::unordered_set<Value *> &objs)
+void SensitiveLeakSan::getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objs)
 {
-    std::unordered_set<Value *> svfObjs;
-    // svfObjs contain memobjs and may contain pointer's memobjs
-    getSVFPtObjs(ptr, svfObjs);
-    for (auto obj : svfObjs)
+    assert(objPN != nullptr && objPN->isPointer());
+    if (isa<SVF::DummyObjPN>(objPN))
+        return;
+    Value *obj = const_cast<Value *>(objPN->getValue());
+    // SVF ObjPN is a mem object and even maybe a pointer object
+    // e.g. '%p = alloca i8*'
+    // however mem object is pointed by 1-level pointer
+    // e.g. '%a = alloca i8'
+    // where %a is 'i8*' type, and mem object is 'i8' type
+    int pointerLevel = getPointerLevel(obj);
+    assert(pointerLevel != 0);
+    if (pointerLevel == 1)
     {
-        if (getPointerLevel(obj) == 1)
+        if (CallInst *CI = dyn_cast<CallInst>(obj))
         {
-            // 1-level pointer point to memobj
-            // e.g. '%a = alloca i8'
-            // where %a is 'i8*' type, and memobj is 'i8' type
-            objs.emplace(obj);
-        }
-        else
-        {
-            for (auto user : obj->users())
+            Function *callee = CI->getCalledFunction();
+            assert(callee); // assument svf-recognized callee is not an indirect callee
+            std::vector<std::string> allocs{"malloc", "calloc", "realloc"};
+            std::string calleeName = llvm::demangle(callee->getName().str());
+            if (not(calleeName.find("new") /* 'operator new[](...)' */ != std::string::npos ||
+                    std::find(allocs.begin(), allocs.end(), calleeName) != allocs.end()))
             {
-                Value *stripedCastUser = stripCast(user);
-                if (getPointerLevel(user) != getPointerLevel(stripedCastUser))
-                {
-                    // pointer's level changed
-                    continue;
-                }
-                if (StoreInst *SI = dyn_cast<StoreInst>(user))
-                {
-                    Value *src = SI->getOperand(0);
-                    src = stripCast(src);
-                    if (CallInst *CI = dyn_cast<CallInst>(src))
-                    {
-                        Function *callee = CI->getCalledFunction();
-                        if (callee)
-                        {
-                            StringRef calleeName = callee->getName();
-                            if (calleeName.equals("_Znwm" /* new in cpp */) ||
-                                calleeName.equals("malloc") || calleeName.equals("calloc") ||
-                                calleeName.equals("realloc"))
-                            {
-                                objs.emplace(CI);
-                            }
-                        }
-                    }
-                }
+                // not interesting CI, get next objPN
+                return;
+            }
+        }
+        // non-CI or alloc-CI
+        objs.emplace(objPN);
+    }
+    else /* > 1 */
+    {
+        for (SVF::NodeID deepObjNodeID : ander->getPts(objPN->getId()))
+        {
+            if (SVF::ObjPN *deepObjPN = dyn_cast<SVF::ObjPN>(pag->getPAGNode(deepObjNodeID)))
+            {
+                Value *deepObj = const_cast<Value *>(deepObjPN->getValue());
+                assert(getPointerLevel(deepObj) < pointerLevel);
+                getNonPointerObjPNs(deepObjPN, objs);
             }
         }
     }
@@ -211,8 +212,12 @@ void SensitiveLeakSan::pushSensitiveObj(Value *annotatedPtr, Value *annotationSt
     std::string annotation = extractAnnotation(annotationStr);
     if (annotation == "SGXSAN_SENSITIVE")
     {
-        std::unordered_set<llvm::Value *> objSet;
-        getNonPointerObjs(annotatedPtr, objSet);
+        std::unordered_set<SVF::ObjPN *> objSet;
+        for (SVF::NodeID objPNID : ander->getPts(pag->getValueNode(annotatedPtr)))
+        {
+            if (SVF::ObjPN *objPN = dyn_cast<SVF::ObjPN>(pag->getPAGNode(objPNID)))
+                getNonPointerObjPNs(objPN, objSet);
+        }
         assert(objSet.size() <= 1);
         for (auto obj : objSet)
         {
@@ -228,7 +233,7 @@ bool SensitiveLeakSan::is_llvm_var_annotation_intrinsic(CallInst *CI)
     if (callee)
     {
         StringRef funcName = callee->getName();
-        if (funcName.equals("llvm.var.annotation"))
+        if (funcName.contains("llvm") && funcName.contains("annotation"))
         {
             return true;
         }
@@ -267,6 +272,16 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
                     Value *annotatedPtr = CI->getOperand(0),
                           *annotateStr = CI->getArgOperand(1);
                     assert(isa<PointerType>(annotatedPtr->getType()));
+                    // if (CI->getCalledFunction()->getName().contains("llvm.ptr.annotation"))
+                    // {
+                    //     SVF::NodeID CIPNID = pag->getValueNode(CI);
+                    //     for (SVF::NodeID objPNID : ander->getPts(pag->getValueNode(annotatedPtr)))
+                    //     {
+                    //         pag->addGepPE(objPNID, CIPNID, SVF::LocationSet(1), true);
+                    //         pag->dump("pag");
+                    //         ander = SVF::AndersenWaveDiff::createAndersenWaveDiff(pag);
+                    //     }
+                    // }
                     pushSensitiveObj(annotatedPtr, annotateStr);
                 }
             }
@@ -325,6 +340,12 @@ SensitiveLeakSan::SensitiveLeakSan(Module &ArgM)
     initSVF();
 }
 
+StringRef SensitiveLeakSan::getBelongedFunctionName(SVF::PAGNode *node)
+{
+    Value *value = const_cast<Value *>(node->getValue());
+    return getBelongedFunctionName(value);
+}
+
 StringRef SensitiveLeakSan::getBelongedFunctionName(Value *val)
 {
     Function *func = nullptr;
@@ -337,60 +358,23 @@ StringRef SensitiveLeakSan::getBelongedFunctionName(Value *val)
     return func->getName();
 }
 
-void SensitiveLeakSan::getSVFOneLevelPtrs(Value *obj, std::unordered_set<Value *> &oneLevelPtrs)
+void SensitiveLeakSan::getPtrValPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ValPN *> &ptrValPNs)
 {
-    SVF::NodeID nodeID = pag->getObjectNode(obj);
-    const SVF::NodeBS revPts = ander->getRevPts(nodeID);
-    for (auto revPt : revPts)
+    for (SVF::NodeID ptrValPNID : ander->getRevPts(objPN->getId()))
     {
-        SVF::PAGNode *node = pag->getPAGNode(revPt);
-        if (isa<SVF::ValPN>(node) && !isa<SVF::DummyValPN>(node))
+        SVF::PAGNode *node = pag->getPAGNode(ptrValPNID);
+        if (SVF::ValPN *ptrValPN = dyn_cast<SVF::ValPN>(node))
         {
-            Value *ptr = const_cast<Value *>(node->getValue());
-            if (ptr->getType() == obj->getType())
-            {
-                oneLevelPtrs.emplace(ptr);
-            }
+            if (isa<SVF::DummyValPN>(ptrValPN))
+                continue;
+            Value *ptr = const_cast<Value *>(ptrValPN->getValue());
+            Value *obj = const_cast<Value *>(objPN->getValue());
+            // if (getPointerLevel(ptr) == getPointerLevel(obj))
+            // {
+            ptrValPNs.emplace(ptrValPN);
+            // }
         }
     }
-}
-
-bool SensitiveLeakSan::runOnModule()
-{
-
-    collectAndPoisonSensitiveObj(*M);
-
-    for (auto obj : SensitiveObjs)
-        obj->dump();
-
-    WorkList = this->SensitiveObjs;
-    while (!WorkList.empty())
-    {
-        // update work status
-        Value *work = *WorkList.begin();
-        WorkList.erase(WorkList.begin());
-        ProcessedList.emplace(work);
-
-        std::unordered_set<Value *> ptr_set;
-        getSVFOneLevelPtrs(work, ptr_set);
-
-        errs() << "============== Show point-to set ==============\n";
-        errs() << getBelongedFunctionName(work) << "\t";
-        work->dump();
-        errs() << "-----------------------------------------------\n";
-        for (auto ptr : ptr_set)
-        {
-            errs() << getBelongedFunctionName(ptr) << "\t";
-            ptr->dump();
-        }
-        errs() << "========== End of showing point-to set ==========\n";
-
-        for (auto ptr : ptr_set)
-        {
-            doVFA(ptr);
-        }
-    }
-    return true;
 }
 
 int SensitiveLeakSan::getCallInstOperandPosition(CallInst *CI, Value *operand)
@@ -640,32 +624,21 @@ void SensitiveLeakSan::PoisonRetShadow(Value *isPoisoned, ReturnInst *calleeRI)
     }
 }
 
-void SensitiveLeakSan::getSVFPtObjs(Value *ptr, std::unordered_set<Value *> &objSet)
-{
-    assert(pag->hasValueNode(ptr));
-    SVF::NodeID ptrNodeID = pag->getValueNode(ptr);
-    const SVF::PointsTo &pts = ander->getPts(ptrNodeID);
-    for (unsigned int pt : pts)
-    {
-        SVF::PAGNode *node = pag->getPAGNode(pt);
-        if (isa<SVF::ObjPN>(node) && !isa<SVF::DummyObjPN>(node))
-        {
-            Value *nodeVal = const_cast<Value *>(node->getValue());
-            objSet.emplace(nodeVal);
-        }
-    }
-}
-
 void SensitiveLeakSan::pushPtObj2WorkList(Value *ptr)
 {
     if (pag->hasValueNode(ptr))
     {
-        std::unordered_set<llvm::Value *> objSet;
-        getSVFPtObjs(ptr, objSet);
-        for (auto obj : objSet)
+        SVF::NodeID ptrValPNID = pag->getValueNode(ptr);
+        for (SVF::NodeID objPNID : ander->getPts(ptrValPNID))
         {
-            if (ProcessedList.count(obj) == 0)
-                WorkList.emplace(obj);
+            SVF::PAGNode *PN = pag->getPAGNode(objPNID);
+            if (SVF::ObjPN *objPN = dyn_cast<SVF::ObjPN>(PN))
+            {
+                if (isa<SVF::DummyObjPN>(objPN))
+                    continue;
+                if (ProcessedList.count(objPN) == 0)
+                    WorkList.emplace(objPN);
+            }
         }
     }
 }
@@ -735,6 +708,14 @@ void SensitiveLeakSan::doVFA(Value *work)
                                              CI->getOperand(0), CI->getOperand(2),
                                              CI->getOperand(1));
             }
+            else
+            {
+                Function *callee = CI->getCalledFunction();
+                if (callee && callee->getName().contains("llvm.ptr.annotation"))
+                {
+                    doVFA(CI);
+                }
+            }
         }
     }
 }
@@ -789,4 +770,43 @@ void SensitiveLeakSan::propagateShadow(Value *src)
             }
         }
     }
+}
+
+bool SensitiveLeakSan::runOnModule()
+{
+
+    collectAndPoisonSensitiveObj(*M);
+
+    for (auto obj : SensitiveObjs)
+        obj->dump();
+
+    WorkList = this->SensitiveObjs;
+    while (!WorkList.empty())
+    {
+        // update work status
+        SVF::ObjPN *workObjPN = *WorkList.begin();
+        Value *work = const_cast<Value *>(workObjPN->getValue());
+        WorkList.erase(WorkList.begin());
+        ProcessedList.emplace(workObjPN);
+
+        std::unordered_set<SVF::ValPN *> ptrValPNs;
+        getPtrValPNs(workObjPN, ptrValPNs);
+
+        errs() << "============== Show point-to set ==============\n";
+        errs() << getBelongedFunctionName(workObjPN) << "\t";
+        workObjPN->dump();
+        errs() << "-----------------------------------------------\n";
+        for (auto ptrValPN : ptrValPNs)
+        {
+            errs() << getBelongedFunctionName(ptrValPN) << "\t";
+            ptrValPN->dump();
+        }
+        errs() << "========= End of showing point-to set ==========\n";
+
+        for (auto ptrValPN : ptrValPNs)
+        {
+            doVFA(const_cast<Value *>(ptrValPN->getValue()));
+        }
+    }
+    return true;
 }

@@ -1,3 +1,4 @@
 *.o
-SGXSanRT/libSGXSanRTApp.a
-SGXSanRT/libSGXSanRTEnclave.a
+SGXSanRT/*.a
+output/*.a
+output/*.so
