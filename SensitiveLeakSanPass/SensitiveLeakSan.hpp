@@ -17,6 +17,8 @@
 #include "SABER/LeakChecker.h"
 #include "SVF-FE/PAGBuilder.h"
 
+#include "SGXSanInstVisitor.hpp"
+
 #include <unordered_set>
 #include <unordered_map>
 
@@ -32,12 +34,12 @@ public:
     bool runOnModule();
     void collectAndPoisonSensitiveObj(llvm::Module &M);
     void doVFA(llvm::Value *work);
-    void pushSensitiveObj(llvm::Value *annotatedVar, llvm::Value *annotationStrOp);
+    void pushSensitiveObj(llvm::Value *annotatedVar);
     void instrumentSensitivePoison(llvm::Instruction *objI);
     llvm::Value *memToShadow(llvm::Value *Shadow, llvm::IRBuilder<> &IRB);
     llvm::Value *memToShadowPtr(llvm::Value *memPtr, llvm::IRBuilder<> &IRB);
 
-    int getCallInstOperandPosition(llvm::CallInst *CI, llvm::Value *oprend);
+    int getCallInstOperandPosition(llvm::CallInst *CI, llvm::Value *oprend, bool rawOperand = false);
     int getFuncArgPosition(llvm::Argument *arg);
     void getDirectAndIndirectCalledFunction(llvm::CallInst *CI, llvm::SmallVector<llvm::Function *> &calleeVec);
     llvm::Instruction *findInstByName(llvm::Function *F, std::string InstName);
@@ -69,6 +71,11 @@ public:
     static bool is_llvm_var_annotation_intrinsic(llvm::CallInst *CI);
     static std::string extractAnnotation(llvm::Value *annotationStrVal);
     static bool isSecureVersionMemTransferCI(llvm::CallInst *CI);
+    static bool StringRefContainWord(llvm::StringRef str, std::string word);
+    static bool isEncryptionFunction(llvm::Function *F);
+    void cleanStackObjectSensitiveShadow(llvm::Value *stackObject);
+    void PoisonObject(llvm::Value *objPtr, llvm::Value *objSize, llvm::IRBuilder<> &IRB, uint8_t poisonValue);
+    static void getNonCastUsers(llvm::Value *value, std::vector<llvm::User *> &users);
 
 private:
     std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
@@ -91,4 +98,6 @@ private:
     SVF::PAG *pag;
     SVF::Andersen *ander;
     SVF::PTACallGraph *callgraph;
+
+    SGXSanInstVisitor *instVisitor;
 };
