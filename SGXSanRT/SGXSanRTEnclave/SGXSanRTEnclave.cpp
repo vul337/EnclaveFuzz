@@ -9,7 +9,6 @@
 #include "SensitivePoisoner.hpp"
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_once_t sgxsan_init_once = PTHREAD_ONCE_INIT;
 
 uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
          kLowShadowBeg = 0, kLowShadowEnd = 0,
@@ -47,7 +46,8 @@ void AsanInitFromRtl()
     pthread_mutex_unlock(&sgxsan_init_mutex);
 }
 
-void __attribute__((constructor)) asan_ctor()
+void __attribute__((constructor(101))) asan_ctor()
 {
-    pthread_once(&sgxsan_init_once, AsanInitInternal);
+    // sgxsdk already ensure each ctor only run once
+    AsanInitInternal();
 }

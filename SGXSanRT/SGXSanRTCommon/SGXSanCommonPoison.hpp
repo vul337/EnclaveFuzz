@@ -34,10 +34,32 @@ const int kSGXSanSensitiveLayout = 0x10;
 const int kSGXSanSensitiveObjData = 0x20;
 const int kSGXSanElrangeLeftGuard = 0xe0;
 
-
 #ifndef SHADOW_GRANULARITY
 #define SHADOW_GRANULARITY 8
 #endif
+
+static inline void FastPoisonShadowPartialRightRedzone(
+    uptr aligned_addr, uptr size, uptr redzone_size, u8 value)
+{
+    bool poison_partial = true;
+    u8 *shadow = (u8 *)MEM_TO_SHADOW(aligned_addr);
+    for (uptr i = 0; i < redzone_size; i += SHADOW_GRANULARITY, shadow++)
+    {
+        if (i + SHADOW_GRANULARITY <= size)
+        {
+            *shadow = 0; // fully addressable
+        }
+        else if (i >= size)
+        {
+            *shadow = (SHADOW_GRANULARITY == 128) ? 0xff : value; // unaddressable
+        }
+        else
+        {
+            // first size-i bytes are addressable
+            *shadow = poison_partial ? static_cast<u8>(size - i) : 0;
+        }
+    }
+}
 
 // assume all are aligned to SHADOW_GRANULARITY
 static inline void FastPoisonShadow(uptr addr, uptr size, u8 value)

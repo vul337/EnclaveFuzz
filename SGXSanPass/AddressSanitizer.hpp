@@ -13,7 +13,7 @@
 #include "llvm/ADT/Statistic.h"
 #include <assert.h>
 #include "SGXSanManifest.h"
-// #include "FunctionInstVisitor.hpp"
+#include "ASanCommon.hpp"
 
 #ifndef DEBUG_TYPE
 #define DEBUG_TYPE "sgxsan"
@@ -21,14 +21,6 @@
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 static const size_t kNumberOfAccessSizes = 5;
-
-/// This struct defines the shadow mapping using the rule:
-///   shadow = (mem >> Scale) ADD Offset.
-struct ShadowMapping
-{
-    int Scale;
-    uint64_t Offset;
-};
 
 class AddressSanitizer
 {
@@ -98,4 +90,4 @@ private:
 #endif
 };
 
-#endif //ADDRESS_SANITIZER_HPP
+#endif // ADDRESS_SANITIZER_HPP

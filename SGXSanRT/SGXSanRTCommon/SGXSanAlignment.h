@@ -3,10 +3,16 @@
 
 #include "SGXSanInt.h"
 #include "SGXSanCheck.h"
+#include "SGXSanManifest.h"
 
 static inline bool IsAligned(uptr a, uptr alignment)
 {
     return (a & (alignment - 1)) == 0;
+}
+
+static inline bool AddrIsAlignedByGranularity(uptr addr)
+{
+    return IsAligned(addr, SHADOW_GRANULARITY);
 }
 
 static inline bool IsPowerOfTwo(uptr x)

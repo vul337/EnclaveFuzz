@@ -5,6 +5,7 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
 #include "AddressSanitizer.hpp"
+#include "ModuleAddressSanitizer.hpp"
 #include "SGXSanManifest.h"
 #include "AdjustUSP.hpp"
 
@@ -21,6 +22,9 @@ namespace
         {
             // errs() << "[SGXSan Pass] " << M.getName().str() << "\n";
             bool Changed = false;
+            ModuleAddressSanitizer MASan(M);
+            MASan.instrumentModule(M);
+
             AddressSanitizer ASan(M);
             for (Function &F : M)
             {

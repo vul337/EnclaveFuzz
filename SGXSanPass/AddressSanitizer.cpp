@@ -100,14 +100,6 @@ bool isFuncAtEnclaveTBridge = false;
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 
-static ShadowMapping getShadowMapping()
-{
-    ShadowMapping Mapping;
-    Mapping.Scale = 3;
-    Mapping.Offset = SGXSAN_SHADOW_MAP_BASE;
-    return Mapping;
-}
-
 AddressSanitizer::AddressSanitizer(Module &M)
 {
     C = &(M.getContext());
@@ -226,6 +218,16 @@ void AddressSanitizer::getInterestingMemoryOperands(
         if (isa<GlobalVariable>(SI->getPointerOperand()))
         {
             GlobalVariableStoreInsts.emplace_back(SI);
+        }
+        else if (ConstantExpr *CE = dyn_cast<ConstantExpr>(SI->getPointerOperand()))
+        {
+            if (CE->getOpcode() == Instruction::GetElementPtr)
+            {
+                if (isa<GlobalVariable>(CE->getOperand(0)))
+                {
+                    GlobalVariableStoreInsts.emplace_back(SI);
+                }
+            }
         }
         Interesting.emplace_back(I, SI->getPointerOperandIndex(), true,
                                  SI->getValueOperand()->getType(), SI->getAlign());
