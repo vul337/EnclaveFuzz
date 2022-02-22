@@ -1,15 +1,16 @@
 #pragma once
 
 #include "llvm/IR/Function.h"
-#include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/CommandLine.h"
+#include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Support/CommandLine.h"
 
 #include "SVF-FE/LLVMUtil.h"
 #include "Graphs/SVFG.h"
@@ -68,7 +69,7 @@ public:
     static llvm::Value *stripCast(llvm::Value *v);
     void propagateShadow(llvm::Value *src);
     uint64_t getTypeAllocaSize(llvm::Type *type);
-    static bool is_llvm_var_annotation_intrinsic(llvm::CallInst *CI);
+    static bool isAnnotationIntrinsic(llvm::CallInst *CI);
     static std::string extractAnnotation(llvm::Value *annotationStrVal);
     static bool isSecureVersionMemTransferCI(llvm::CallInst *CI);
     static bool StringRefContainWord(llvm::StringRef str, std::string word);
@@ -76,6 +77,8 @@ public:
     void cleanStackObjectSensitiveShadow(llvm::Value *stackObject);
     void PoisonObject(llvm::Value *objPtr, llvm::Value *objSize, llvm::IRBuilder<> &IRB, uint8_t poisonValue);
     static void getNonCastUsers(llvm::Value *value, std::vector<llvm::User *> &users);
+    void poisonSensitiveGlobalVariableAtRuntime();
+    void initializeCallbacks();
 
 private:
     std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
@@ -89,10 +92,11 @@ private:
         query_thread_func_arg_shadow_stack, clear_thread_func_arg_shadow_stack,
         push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
         sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
-        sgxsan_region_is_in_elrange_and_poisoned;
+        sgxsan_region_is_in_elrange_and_poisoned, PoisonSensitiveGlobal;
 
     llvm::Module *M;
     llvm::LLVMContext *C;
+    llvm::Type *IntptrTy;
 
     SVF::SVFModule *svfModule;
     SVF::PAG *pag;
@@ -100,4 +104,6 @@ private:
     SVF::PTACallGraph *callgraph;
 
     SGXSanInstVisitor *instVisitor;
+    llvm::SmallVector<llvm::Constant *> globalsToBePolluted;
+    llvm::Function *PoisonSensitiveGlobalModuleCtor;
 };

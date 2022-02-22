@@ -63,9 +63,7 @@ Value *SensitiveLeakSan::getSensitiveObjSize(Value *obj, IRBuilder<> &IRB)
 {
     if (AllocaInst *AI = dyn_cast<AllocaInst>(obj))
     {
-        Type *objTy = AI->getAllocatedType();
-        TypeSize size = M->getDataLayout().getTypeAllocSize(objTy);
-        return IRB.getInt64(size.getFixedSize());
+        return IRB.getInt64(getTypeAllocaSize(AI->getAllocatedType()));
     }
     else if (CallInst *CI = dyn_cast<CallInst>(obj))
     {
@@ -133,6 +131,19 @@ void SensitiveLeakSan::add2SensitiveObjAndPoison(SVF::ObjPN *objPN)
             instrumentSensitivePoison(objI);
         }
         // TODO: non-instruction obj like global variable need to be poisoned at runtime
+        else if (GlobalVariable *objGV = dyn_cast<GlobalVariable>(obj))
+        {
+            uint64_t SizeInBytes = getTypeAllocaSize(objGV->getValueType());
+            uint8_t poisonValue = SGXSAN_SENSITIVE_OBJ_FLAG;
+            StructType *globalToBePollutedTy = StructType::get(IntptrTy, IntptrTy, Type::getInt8Ty(*C));
+            Constant *globalToBePolluted = ConstantStruct::get(
+                globalToBePollutedTy,
+                ConstantExpr::getPointerCast(objGV, IntptrTy),
+                ConstantInt::get(IntptrTy, SizeInBytes),
+                ConstantInt::get(Type::getInt8Ty(*C), poisonValue));
+            globalsToBePolluted.push_back(globalToBePolluted);
+            // globalToBePolluted->dump();
+        }
     }
 }
 
@@ -191,10 +202,13 @@ void SensitiveLeakSan::getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set
     }
     else /* > 1 */
     {
+        // it seem svf can not get constant object
         for (SVF::NodeID deepObjNodeID : ander->getPts(objPN->getId()))
         {
             if (SVF::ObjPN *deepObjPN = dyn_cast<SVF::ObjPN>(pag->getPAGNode(deepObjNodeID)))
             {
+                if (isa<SVF::DummyObjPN>(deepObjPN))
+                    continue;
                 Value *deepObj = const_cast<Value *>(deepObjPN->getValue());
                 assert(getPointerLevel(deepObj) < pointerLevel);
                 getNonPointerObjPNs(deepObjPN, objs);
@@ -218,7 +232,7 @@ void SensitiveLeakSan::pushSensitiveObj(Value *annotatedPtr)
     }
 }
 
-bool SensitiveLeakSan::is_llvm_var_annotation_intrinsic(CallInst *CI)
+bool SensitiveLeakSan::isAnnotationIntrinsic(CallInst *CI)
 {
     assert(CI != nullptr);
     Function *callee = CI->getCalledFunction();
@@ -253,6 +267,24 @@ bool SensitiveLeakSan::isEncryptionFunction(Function *F)
             StringRefContainWord(funcName, "seal") && !StringRefContainWord(funcName, "unseal") && !StringRefContainWord(funcName, "sealed"))
                ? true
                : false;
+}
+
+void SensitiveLeakSan::poisonSensitiveGlobalVariableAtRuntime()
+{
+    PoisonSensitiveGlobalModuleCtor = createSanitizerCtor(*M, "PoisonSensitiveGlobalModuleCtor");
+    IRBuilder<> IRB(PoisonSensitiveGlobalModuleCtor->getEntryBlock().getTerminator());
+
+    size_t N = globalsToBePolluted.size();
+    ArrayType *ArrayOfGlobalStructTy =
+        ArrayType::get(globalsToBePolluted[0]->getType(), N);
+    auto AllGlobals = new GlobalVariable(
+        *M, ArrayOfGlobalStructTy, false, GlobalVariable::InternalLinkage,
+        ConstantArray::get(ArrayOfGlobalStructTy, globalsToBePolluted), "");
+
+    IRB.CreateCall(PoisonSensitiveGlobal,
+                   {IRB.CreatePointerCast(AllGlobals, IntptrTy),
+                    ConstantInt::get(IntptrTy, N)});
+    appendToGlobalCtors(*M, PoisonSensitiveGlobalModuleCtor, 103);
 }
 
 void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
@@ -299,28 +331,34 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
         }
     }
 
-    // if (GlobalVariable *globalAnnotation = M.getGlobalVariable("llvm.global.annotations"))
-    // {
-    //     for (Value *GAOp : globalAnnotation->operands())
-    //     {
-    //         ConstantArray *CA = cast<ConstantArray>(GAOp);
-    //         for (Value *CAOp : CA->operands())
-    //         {
-    //             ConstantStruct *CS = cast<ConstantStruct>(CAOp);
-    //             Value *annotatedVar = CS->getOperand(0);
-    //             ConstantExpr *CE = dyn_cast<ConstantExpr>(annotatedVar);
-    //             while (CE && CE->getOpcode() == Instruction::BitCast)
-    //             {
-    //                 annotatedVar = CE->getOperand(0);
-    //                 CE = dyn_cast<ConstantExpr>(annotatedVar);
-    //             }
-    //             pushSensitiveObj(annotatedVar, CS->getOperand(1));
-    //         }
-    //     }
-    // }
+    if (GlobalVariable *globalAnnotation = M.getGlobalVariable("llvm.global.annotations"))
+    {
+        for (Value *GAOp : globalAnnotation->operands())
+        {
+            ConstantArray *CA = cast<ConstantArray>(GAOp);
+            for (Value *CAOp : CA->operands())
+            {
+                ConstantStruct *CS = cast<ConstantStruct>(CAOp);
+                std::string annotation = extractAnnotation(CS->getOperand(1));
+                if (annotation == "SGXSAN_SENSITIVE")
+                {
+                    Value *annotatedVar = CS->getOperand(0);
+                    ConstantExpr *CE = dyn_cast<ConstantExpr>(annotatedVar);
+                    while (CE && CE->getOpcode() == Instruction::BitCast)
+                    {
+                        annotatedVar = CE->getOperand(0);
+                        CE = dyn_cast<ConstantExpr>(annotatedVar);
+                    }
+                    pushSensitiveObj(annotatedVar);
+                }
+            }
+        }
+    }
+    poisonSensitiveGlobalVariableAtRuntime();
+
     for (auto CI : CallInstVec)
     {
-        if (is_llvm_var_annotation_intrinsic(CI))
+        if (isAnnotationIntrinsic(CI))
         {
             Value *annotatedPtr = CI->getOperand(0),
                   *annotateStr = CI->getArgOperand(1);
@@ -377,14 +415,25 @@ void SensitiveLeakSan::includeSGXSanCheck()
     sgxsan_region_is_in_elrange_and_poisoned = M->getOrInsertFunction("sgxsan_region_is_in_elrange_and_poisoned", IRB.getInt1Ty(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
 }
 
+void SensitiveLeakSan::initializeCallbacks()
+{
+    IRBuilder<> IRB(*C);
+
+    PoisonSensitiveGlobal = M->getOrInsertFunction(
+        "PoisonSensitiveGlobal", IRB.getVoidTy(), IntptrTy, IntptrTy);
+}
+
 SensitiveLeakSan::SensitiveLeakSan(Module &ArgM)
 {
     M = &ArgM;
     C = &(M->getContext());
+    int LongSize = M->getDataLayout().getPointerSizeInBits();
+    IntptrTy = Type::getIntNTy(*C, LongSize);
     includeThreadFuncArgShadow();
     includeElrange();
     includeSGXSanCheck();
     initSVF();
+    initializeCallbacks();
     instVisitor = new SGXSanInstVisitor(*M);
 }
 
@@ -402,7 +451,7 @@ StringRef SensitiveLeakSan::getBelongedFunctionName(Value *val)
     else if (Argument *arg = dyn_cast<Argument>(val))
         func = arg->getParent();
     else
-        abort();
+        return StringRef("None");
     return func->getName();
 }
 

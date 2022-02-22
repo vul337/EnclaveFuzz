@@ -1,5 +1,6 @@
+#pragma once
 
-typedef unsigned long uptr;
+#include "SGXSanInt.h"
 
 // This structure describes an instrumented global variable.
 struct __asan_global

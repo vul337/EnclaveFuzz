@@ -4,8 +4,8 @@
 #include <sgx_defs.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "SGXSanInt.h"
 
-typedef unsigned long uptr;
 #if defined(__cplusplus)
 extern "C"
 {
