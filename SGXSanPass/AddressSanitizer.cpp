@@ -476,6 +476,16 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     Value *CmpVal = Constant::getNullValue(ShadowTy);
     Value *ShadowValue = IRB.CreateLoad(ShadowTy, IRB.CreateIntToPtr(ShadowPtr, ShadowPtrTy));
 
+    // filte out sensitive poison value, then sensitive partial valid object oob access can be detected
+    if (TypeSize == 128)
+    {
+        ShadowValue = IRB.CreateAnd(ShadowValue, IRB.getInt16(0x8F8F));
+    }
+    else
+    {
+        ShadowValue = IRB.CreateAnd(ShadowValue, IRB.getInt8(0x8F));
+    }
+
     Value *Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
     Instruction *CrashTerm = nullptr;
 

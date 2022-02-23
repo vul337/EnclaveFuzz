@@ -767,8 +767,22 @@ void SensitiveLeakSan::PoisonObject(Value *objPtr, Value *objSize, IRBuilder<> &
     Value *shadowAddr = memToShadowPtr(objPtr, IRB);
     objSize = IRB.CreateIntCast(objSize, IRB.getInt64Ty(), false);
     Value *shadowSpan = RoundUpUDiv(IRB, objSize, SHADOW_GRANULARITY);
-    CallInst *memsetCI = IRB.CreateMemSet(shadowAddr, IRB.getInt8(poisonValue), shadowSpan, MaybeAlign());
+    Value *shadowSpanMinusOne = IRB.CreateSub(shadowSpan, IRB.getInt64(1));
+    CallInst *memsetCI = IRB.CreateMemSet(shadowAddr, IRB.getInt8(poisonValue), shadowSpanMinusOne, MaybeAlign());
     setNoSanitizeMetadata(memsetCI);
+
+    Value *lastShadowBytePtr = IRB.CreateIntToPtr(IRB.CreateAdd(IRB.CreatePtrToInt(shadowAddr, IRB.getInt64Ty()), shadowSpanMinusOne), IRB.getInt8PtrTy());
+    LoadInst *lastShadowByte = IRB.CreateLoad(lastShadowBytePtr);
+    setNoSanitizeMetadata(lastShadowByte);
+    Value *validShadow = IRB.CreateICmpULT(lastShadowByte, IRB.getInt8(0x8));
+    Instruction *thenTerm = nullptr, *elseTerm = nullptr;
+    SplitBlockAndInsertIfThenElse(validShadow, &(*IRB.GetInsertPoint()), &thenTerm, &elseTerm);
+    IRB.SetInsertPoint(thenTerm);
+    StoreInst *lastShadowByteSI = IRB.CreateStore(IRB.CreateAdd(lastShadowByte, IRB.getInt8(poisonValue)), lastShadowBytePtr);
+    setNoSanitizeMetadata(lastShadowByteSI);
+    IRB.SetInsertPoint(elseTerm);
+    lastShadowByteSI = IRB.CreateStore(IRB.getInt8(poisonValue), lastShadowBytePtr);
+    setNoSanitizeMetadata(lastShadowByteSI);
 }
 
 void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN)
