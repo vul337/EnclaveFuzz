@@ -36,7 +36,7 @@ public:
     void collectAndPoisonSensitiveObj(llvm::Module &M);
     void doVFA(llvm::Value *work);
     void pushSensitiveObj(llvm::Value *annotatedVar);
-    void instrumentSensitivePoison(llvm::Instruction *objI);
+    void instrumentSensitiveInstObjPoison(SVF::ObjPN *objPN);
     llvm::Value *memToShadow(llvm::Value *Shadow, llvm::IRBuilder<> &IRB);
     llvm::Value *memToShadowPtr(llvm::Value *memPtr, llvm::IRBuilder<> &IRB);
 
@@ -55,7 +55,7 @@ public:
     void propagateShadowInMemTransfer(llvm::CallInst *CI, llvm::Instruction *insertPoint, llvm::Value *destPtr,
                                       llvm::Value *srcPtr, llvm::Value *size);
     uint64_t getPointerElementSize(llvm::Value *ptr);
-    llvm::Value *getSensitiveObjSize(llvm::Value *obj, llvm::IRBuilder<> &IRB);
+    llvm::Value *getHeapObjSize(llvm::CallInst *obj, llvm::IRBuilder<> &IRB);
     void getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objs);
     llvm::Value *instrumentPoisonCheck(llvm::Value *src);
     llvm::Value *isLIPoisoned(llvm::LoadInst *src);
@@ -79,6 +79,8 @@ public:
     static void getNonCastUsers(llvm::Value *value, std::vector<llvm::User *> &users);
     void poisonSensitiveGlobalVariableAtRuntime();
     void initializeCallbacks();
+    void cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN);
+    llvm::Value *getStackOrHeapInstObjSize(llvm::Instruction *objI, llvm::IRBuilder<> &IRB);
 
 private:
     std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;

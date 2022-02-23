@@ -47,43 +47,65 @@ Value *SensitiveLeakSan::RoundUpUDiv(IRBuilder<> &IRB, Value *size, uint64_t div
     return IRB.CreateUDiv(IRB.CreateAdd(size, IRB.getInt64(dividend - 1)), IRB.getInt64(dividend));
 }
 
-void SensitiveLeakSan::instrumentSensitivePoison(Instruction *objI)
+void SensitiveLeakSan::instrumentSensitiveInstObjPoison(SVF::ObjPN *objPN)
 {
-    Instruction *insertPt = objI->getNextNode();
-    IRBuilder<> IRB(insertPt);
+    Instruction *objI = cast<Instruction>(const_cast<Value *>(objPN->getValue()));
+    IRBuilder<> IRB(objI->getNextNode());
 
-    Value *objSize = getSensitiveObjSize(objI, IRB);
-    assert(objSize != nullptr);
+    Value *obj = nullptr, *objSize = nullptr;
+    if (SVF::GepObjPN *gepObjPN = SVF::SVFUtil::dyn_cast<SVF::GepObjPN>(objPN))
+    {
+        auto inStructOffset = gepObjPN->getLocationSet().getOffset();
+        obj = IRB.CreateGEP(objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
+        objSize = IRB.getInt64(getTypeAllocaSize(cast<PointerType>(obj->getType())->getElementType()));
+    }
+    else if (isa<SVF::FIObjPN>(objPN))
+    {
+        obj = objI;
+        objSize = getStackOrHeapInstObjSize(objI, IRB);
+        assert(objSize != nullptr);
+    }
+    else
+        abort();
 
-    PoisonObject(objI, objSize, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
-    cleanStackObjectSensitiveShadow(objI);
+    PoisonObject(obj, objSize, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
+    cleanStackObjectSensitiveShadow(objPN);
 }
 
-Value *SensitiveLeakSan::getSensitiveObjSize(Value *obj, IRBuilder<> &IRB)
+Value *SensitiveLeakSan::getStackOrHeapInstObjSize(Instruction *objI, IRBuilder<> &IRB)
 {
-    if (AllocaInst *AI = dyn_cast<AllocaInst>(obj))
+    Value *objSize = nullptr;
+    if (AllocaInst *AI = dyn_cast<AllocaInst>(objI))
     {
-        return IRB.getInt64(getTypeAllocaSize(AI->getAllocatedType()));
+        objSize = IRB.getInt64(getTypeAllocaSize(AI->getAllocatedType()));
     }
-    else if (CallInst *CI = dyn_cast<CallInst>(obj))
+    else if (CallInst *CI = dyn_cast<CallInst>(objI))
     {
-        if (Function *callee = CI->getCalledFunction())
+        objSize = getHeapObjSize(CI, IRB);
+    }
+    return objSize;
+}
+
+Value *SensitiveLeakSan::getHeapObjSize(CallInst *CI, IRBuilder<> &IRB)
+{
+
+    if (Function *callee = CI->getCalledFunction())
+    {
+        std::string calleeName = llvm::demangle(callee->getName().str());
+        if (calleeName.find("new") != std::string::npos || calleeName == "malloc")
         {
-            std::string calleeName = llvm::demangle(callee->getName().str());
-            if (calleeName.find("new") != std::string::npos || calleeName == "malloc")
-            {
-                return CI->getArgOperand(0);
-            }
-            else if (calleeName == "realloc")
-            {
-                return CI->getArgOperand(1);
-            }
-            else if (calleeName == "calloc")
-            {
-                return IRB.CreateNUWMul(CI->getArgOperand(0), CI->getArgOperand(1));
-            }
+            return CI->getArgOperand(0);
+        }
+        else if (calleeName == "realloc")
+        {
+            return CI->getArgOperand(1);
+        }
+        else if (calleeName == "calloc")
+        {
+            return IRB.CreateNUWMul(CI->getArgOperand(0), CI->getArgOperand(1));
         }
     }
+
     return nullptr;
 }
 
@@ -126,11 +148,11 @@ void SensitiveLeakSan::add2SensitiveObjAndPoison(SVF::ObjPN *objPN)
     if (emplaceResult.second)
     {
         Value *obj = const_cast<Value *>(objPN->getValue());
-        if (Instruction *objI = dyn_cast<Instruction>(obj))
+        if (isa<Instruction>(obj))
         {
-            instrumentSensitivePoison(objI);
+            instrumentSensitiveInstObjPoison(objPN);
         }
-        // TODO: non-instruction obj like global variable need to be poisoned at runtime
+        // non-instruction obj like global variable need to be poisoned at runtime
         else if (GlobalVariable *objGV = dyn_cast<GlobalVariable>(obj))
         {
             uint64_t SizeInBytes = getTypeAllocaSize(objGV->getValueType());
@@ -202,10 +224,10 @@ void SensitiveLeakSan::getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set
     }
     else /* > 1 */
     {
-        // it seem svf can not get constant object
+        // SVF models ConstantObj as special ObjPN#1, so there is no individual ObjPN for string constant etc. .
         for (SVF::NodeID deepObjNodeID : ander->getPts(objPN->getId()))
         {
-            if (SVF::ObjPN *deepObjPN = dyn_cast<SVF::ObjPN>(pag->getPAGNode(deepObjNodeID)))
+            if (SVF::ObjPN *deepObjPN = SVF::SVFUtil::dyn_cast<SVF::ObjPN>(pag->getPAGNode(deepObjNodeID)))
             {
                 if (isa<SVF::DummyObjPN>(deepObjPN))
                     continue;
@@ -222,7 +244,7 @@ void SensitiveLeakSan::pushSensitiveObj(Value *annotatedPtr)
     std::unordered_set<SVF::ObjPN *> objSet;
     for (SVF::NodeID objPNID : ander->getPts(pag->getValueNode(annotatedPtr)))
     {
-        if (SVF::ObjPN *objPN = dyn_cast<SVF::ObjPN>(pag->getPAGNode(objPNID)))
+        if (SVF::ObjPN *objPN = SVF::SVFUtil::dyn_cast<SVF::ObjPN>(pag->getPAGNode(objPNID)))
             getNonPointerObjPNs(objPN, objSet);
     }
     assert(objSet.size() <= 1);
@@ -271,20 +293,23 @@ bool SensitiveLeakSan::isEncryptionFunction(Function *F)
 
 void SensitiveLeakSan::poisonSensitiveGlobalVariableAtRuntime()
 {
-    PoisonSensitiveGlobalModuleCtor = createSanitizerCtor(*M, "PoisonSensitiveGlobalModuleCtor");
-    IRBuilder<> IRB(PoisonSensitiveGlobalModuleCtor->getEntryBlock().getTerminator());
-
     size_t N = globalsToBePolluted.size();
-    ArrayType *ArrayOfGlobalStructTy =
-        ArrayType::get(globalsToBePolluted[0]->getType(), N);
-    auto AllGlobals = new GlobalVariable(
-        *M, ArrayOfGlobalStructTy, false, GlobalVariable::InternalLinkage,
-        ConstantArray::get(ArrayOfGlobalStructTy, globalsToBePolluted), "");
+    if (N > 0)
+    {
+        PoisonSensitiveGlobalModuleCtor = createSanitizerCtor(*M, "PoisonSensitiveGlobalModuleCtor");
+        IRBuilder<> IRB(PoisonSensitiveGlobalModuleCtor->getEntryBlock().getTerminator());
 
-    IRB.CreateCall(PoisonSensitiveGlobal,
-                   {IRB.CreatePointerCast(AllGlobals, IntptrTy),
-                    ConstantInt::get(IntptrTy, N)});
-    appendToGlobalCtors(*M, PoisonSensitiveGlobalModuleCtor, 103);
+        ArrayType *ArrayOfGlobalStructTy =
+            ArrayType::get(globalsToBePolluted[0]->getType(), N);
+        auto AllGlobals = new GlobalVariable(
+            *M, ArrayOfGlobalStructTy, false, GlobalVariable::InternalLinkage,
+            ConstantArray::get(ArrayOfGlobalStructTy, globalsToBePolluted), "");
+
+        IRB.CreateCall(PoisonSensitiveGlobal,
+                       {IRB.CreatePointerCast(AllGlobals, IntptrTy),
+                        ConstantInt::get(IntptrTy, N)});
+        appendToGlobalCtors(*M, PoisonSensitiveGlobalModuleCtor, 103);
+    }
 }
 
 void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
@@ -308,7 +333,7 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
                         std::unordered_set<SVF::ObjPN *> objSet;
                         for (SVF::NodeID objPNID : ander->getPts(pag->getValueNode(argOp)))
                         {
-                            if (SVF::ObjPN *objPN = dyn_cast<SVF::ObjPN>(pag->getPAGNode(objPNID)))
+                            if (SVF::ObjPN *objPN = SVF::SVFUtil::dyn_cast<SVF::ObjPN>(pag->getPAGNode(objPNID)))
                                 getNonPointerObjPNs(objPN, objSet);
                         }
                         for (auto obj : objSet)
@@ -460,7 +485,7 @@ void SensitiveLeakSan::getPtrValPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::V
     for (SVF::NodeID ptrValPNID : ander->getRevPts(objPN->getId()))
     {
         SVF::PAGNode *node = pag->getPAGNode(ptrValPNID);
-        if (SVF::ValPN *ptrValPN = dyn_cast<SVF::ValPN>(node))
+        if (SVF::ValPN *ptrValPN = SVF::SVFUtil::dyn_cast<SVF::ValPN>(node))
         {
             if (isa<SVF::DummyValPN>(ptrValPN))
                 continue;
@@ -726,7 +751,7 @@ void SensitiveLeakSan::pushPtObj2WorkList(Value *ptr)
         for (SVF::NodeID objPNID : ander->getPts(ptrValPNID))
         {
             SVF::PAGNode *PN = pag->getPAGNode(objPNID);
-            if (SVF::ObjPN *objPN = dyn_cast<SVF::ObjPN>(PN))
+            if (SVF::ObjPN *objPN = SVF::SVFUtil::dyn_cast<SVF::ObjPN>(PN))
             {
                 if (isa<SVF::DummyObjPN>(objPN))
                     continue;
@@ -746,28 +771,45 @@ void SensitiveLeakSan::PoisonObject(Value *objPtr, Value *objSize, IRBuilder<> &
     setNoSanitizeMetadata(memsetCI);
 }
 
+void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN)
+{
+    if (AllocaInst *AI = dyn_cast<AllocaInst>(const_cast<Value *>(objPN->getValue())))
+    {
+        SGXSanInstVisitor visitor(*AI->getFunction());
+        SmallVector<llvm::ReturnInst *> ReturnInstVec;
+        visitor.getRetInstVec(ReturnInstVec);
+        for (ReturnInst *RI : ReturnInstVec)
+        {
+            IRBuilder<> IRB(RI);
+            Value *obj = nullptr, *objSize = nullptr;
+            if (SVF::GepObjPN *gepObjPN = SVF::SVFUtil::dyn_cast<SVF::GepObjPN>(objPN))
+            {
+                auto inStructOffset = gepObjPN->getLocationSet().getOffset();
+                obj = IRB.CreateGEP(AI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
+                objSize = IRB.getInt64(getTypeAllocaSize(cast<PointerType>(obj->getType())->getElementType()));
+            }
+            else if (isa<SVF::FIObjPN>(objPN))
+            {
+                obj = AI;
+                objSize = IRB.getInt64(getTypeAllocaSize(AI->getAllocatedType()));
+            }
+            else
+                abort();
+            PoisonObject(obj, objSize, IRB, 0x0);
+        }
+    }
+}
+
 void SensitiveLeakSan::cleanStackObjectSensitiveShadow(Value *obj)
 {
     auto pts = ander->getPts(pag->getValueNode(obj));
     assert(pts.count() <= 1);
     for (auto objPNID : pts)
     {
-        SVF::PAGNode *objPN = pag->getPAGNode(objPNID);
+        SVF::ObjPN *objPN = cast<SVF::ObjPN>(pag->getPAGNode(objPNID));
         if (isa<SVF::DummyObjPN>(objPN))
             continue;
-        if (AllocaInst *AI = dyn_cast<AllocaInst>(const_cast<Value *>(objPN->getValue())))
-        {
-            SGXSanInstVisitor visitor(*AI->getFunction());
-            SmallVector<llvm::ReturnInst *> ReturnInstVec;
-            visitor.getRetInstVec(ReturnInstVec);
-            for (ReturnInst *RI : ReturnInstVec)
-            {
-                IRBuilder<> IRB(RI);
-                Value *objSize = getSensitiveObjSize(AI, IRB);
-                assert(objSize != nullptr);
-                PoisonObject(AI, objSize, IRB, 0x0);
-            }
-        }
+        cleanStackObjectSensitiveShadow(objPN);
     }
 }
 
