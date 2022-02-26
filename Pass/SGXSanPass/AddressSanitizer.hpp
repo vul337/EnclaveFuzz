@@ -59,6 +59,7 @@ public:
     bool isInterestingAlloca(const llvm::AllocaInst &AI);
     uint64_t getAllocaSizeInBytes(const llvm::AllocaInst &AI) const;
     bool ignoreAccess(llvm::Value *Ptr);
+    static llvm::Type *unpackArrayType(llvm::Type *type);
 
 private:
     friend class FunctionStackPoisoner;

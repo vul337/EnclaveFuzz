@@ -1,5 +1,6 @@
 #include "AddressSanitizer.hpp"
 #include "FunctionStackPoisoner.hpp"
+#include "PassCommon.hpp"
 #include <utility>
 #include <tuple>
 using namespace llvm;
@@ -657,7 +658,7 @@ void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
     IRB.CreateCall(GlobalWhitelistPropagate, IRB.CreateCast(val->getType()->isPointerTy() ? Instruction::PtrToInt : Instruction::ZExt, val, IRB.getInt64Ty()));
 }
 
-Type *unpackArrayType(Type *type)
+Type *AddressSanitizer::unpackArrayType(Type *type)
 {
     Type *elementType = nullptr;
     if (type->isPointerTy())
@@ -677,176 +678,6 @@ Type *unpackArrayType(Type *type)
         elementType = elementType->getArrayElementType();
     }
     return elementType;
-}
-
-static bool isValueNamePrefixedWith(Value *val, std::string prefix)
-{
-    return (val->getName().startswith(StringRef(prefix)) ? true : false);
-}
-
-static bool isValueNameEqualWith(Value *val, std::string name)
-{
-    return (val->getName().str() == name ? true : false);
-}
-
-static SmallVector<Value *> getValuesByStrInFunction(Function *F, bool (*cmp)(Value *, std::string), std::string str)
-{
-    SmallVector<Value *> valueVec;
-    for (auto &BB : *F)
-    {
-        for (auto &inst : BB)
-        {
-            if (Value *value = dyn_cast<Value>(&inst))
-            {
-                if (cmp(value, str))
-                {
-                    valueVec.emplace_back(value);
-                }
-            }
-        }
-    }
-    return valueVec;
-}
-
-static Value *getValueByStrInFunction(Function *F, bool (*cmp)(Value *, std::string), std::string str)
-{
-    for (auto &BB : *F)
-    {
-        for (auto &inst : BB)
-        {
-            if (Value *value = dyn_cast<Value>(&inst))
-            {
-                if (cmp(value, str))
-                {
-                    return value;
-                }
-            }
-        }
-    }
-    return nullptr;
-}
-
-static std::pair<int64_t, Value *> getLenAndValueByNameInEDL(Function *F, std::string lenPrefixedValueName)
-{
-    int64_t length = -1;
-    Value *lenValue = nullptr;
-    SmallVector<Value *> values = getValuesByStrInFunction(F, isValueNameEqualWith, lenPrefixedValueName);
-    assert(values.size() <= 1);
-    if (values.size() == 0)
-    {
-        goto exit;
-    }
-    // now values.size()==1
-    lenValue = values.front();
-    assert(lenValue != nullptr);
-    // find lenValue
-    for (auto user : lenValue->users())
-    {
-        if (StoreInst *SI = dyn_cast<StoreInst>(user))
-        {
-            if (ConstantInt *cInt = dyn_cast<ConstantInt>(SI->getOperand(0)))
-            {
-                length = cInt->getSExtValue();
-                assert(length > 0);
-                if (length <= 0)
-                {
-                    length = -1;
-                }
-                goto exit;
-            }
-        }
-    }
-exit:
-    return std::pair<int64_t, Value *>(length, lenValue);
-}
-
-// fix-me: implementation is tricky
-// if (int64_t) length is not -1, then (Value *) lenValue must be not nullptr
-static std::pair<int64_t, Value *> getLenAndValueByParamInEDL(Function *F, Value *param)
-{
-    int64_t length = -1;
-    Value *lenValue = nullptr;
-
-    StringRef operandLengthName = "";
-    std::pair<int64_t, llvm::Value *> lenAndValue;
-    if (!param->getName().startswith("_in_"))
-    {
-        while (isa<CastInst>(param))
-        {
-            param = cast<Instruction>(param)->getOperand(0);
-        }
-
-        if (Instruction *I = dyn_cast<Instruction>(param))
-        {
-            param = I->getOperand(0);
-            if (!param->getName().startswith("_in_"))
-                goto exit;
-        }
-        else
-            goto exit;
-    }
-
-    // now param prefixed with _in_
-    // then find _len_ prefixed value
-    lenAndValue = getLenAndValueByNameInEDL(F, "_len_" + param->getName().substr(4).str());
-    length = lenAndValue.first;
-    lenValue = lenAndValue.second;
-
-exit:
-    return std::pair<int64_t, Value *>(length, lenValue);
-}
-
-// param means passed parameter at real ecall (not ecall wrapper) instruction
-// Return:
-// ElementCnt   ElementSize LenValue
-//|-1           -1          nullptr             /* not a pointer or a function pointer */
-//|-1           >=1         nullptr             /* [user_check] pointer */
-//|-1           >=1         (Value *) _len_xxx  /* [in]/[out] pointer, but length is not a ConstantInt */
-//|>=1          >=1         (Value *) _len_xxx  /* [in]/[out] pointer, and length is a ConstantInt */
-static std::tuple<int, int, Value *> convertParamLenAndValue2Tuple(Value *param, Function *F, std::pair<int64_t, Value *> lenAndValue)
-{
-    int elementCnt = -1;
-    int elementSize = -1;
-
-    if (PointerType *pointerType = dyn_cast<PointerType>(param->getType()))
-    {
-        if (pointerType->getElementType()->isSized())
-        {
-            elementSize = F->getParent()->getDataLayout().getTypeAllocSize(pointerType->getElementType()).getFixedSize();
-            assert(elementSize >= 1);
-        }
-    }
-    if (elementSize != -1 && lenAndValue.first > 0 && lenAndValue.second != nullptr)
-    {
-        // this param is a (array-)pointer and has length, means [in]/[out]
-        assert(param->getType()->isPointerTy() && (elementSize != -1));
-        elementCnt = lenAndValue.first / elementSize;
-        assert(elementCnt >= 1);
-    }
-    // else: it's a user_check (array-)ptr/string/primitive variable
-    return std::tuple<int, int, Value *>(elementCnt, elementSize, lenAndValue.second);
-}
-
-Value *convertPointerLenAndValue2CountValue(Value *ptr, Instruction *insertPoint, std::pair<int64_t, Value *> lenAndValue)
-{
-    int elementCnt = -1, elementSz = -1;
-    Value *lenValue = nullptr;
-    Function *F = insertPoint->getFunction();
-    std::tie(elementCnt, elementSz, lenValue) = convertParamLenAndValue2Tuple(ptr, F, lenAndValue);
-    IRBuilder<> IRB(insertPoint);
-    if (elementCnt >= 1)
-    {
-        return IRB.getInt32(elementCnt);
-    }
-    else if (lenValue != nullptr)
-    {
-        return IRB.CreateIntCast(IRB.CreateExactSDiv(IRB.CreateLoad(lenValue), IRB.getInt64(elementSz)),
-                                 IRB.getInt32Ty(), true);
-    }
-    else
-    {
-        return IRB.getInt32(-1);
-    }
 }
 
 bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL,
