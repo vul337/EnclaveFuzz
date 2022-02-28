@@ -1,6 +1,5 @@
 #include "AddressSanitizer.hpp"
 #include "FunctionStackPoisoner.hpp"
-#include "PassCommon.hpp"
 #include <utility>
 #include <tuple>
 using namespace llvm;
@@ -847,7 +846,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, CallInst *
             Type *argType = arg.getType();
             if (argType->isPointerTy())
             {
-                std::string argName = arg.getName().str();
+                std::string argName = SGXSanGetValueName(&arg).str();
                 Value *ptrEleCnt = nullptr;
                 if (argName != "")
                 {

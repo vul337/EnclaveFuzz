@@ -1,9 +1,16 @@
-#ifndef SGXSAN_RT_ENCLAVE_HPP
-#define SGXSAN_RT_ENCLAVE_HPP
+#pragma once
 
 extern int asan_inited;
 
-void AsanInitFromRtl();
+#if defined(__cplusplus)
+extern "C"
+{
+#endif
+    void AsanInitFromRtl();
+    void __asan_init();
+#if defined(__cplusplus)
+}
+#endif
 
 #ifndef ENSURE_ASAN_INITED
 #define ENSURE_ASAN_INITED()        \
@@ -15,5 +22,3 @@ void AsanInitFromRtl();
         }                           \
     } while (0)
 #endif
-
-#endif //SGXSAN_RT_ENCLAVE_HPP

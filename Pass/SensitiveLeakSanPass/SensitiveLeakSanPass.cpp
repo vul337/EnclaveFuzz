@@ -23,7 +23,7 @@ namespace
     }; // end of struct SGXSanPass
 }
 
-char SensitiveLeakSanPass::ID = 1;
+char SensitiveLeakSanPass::ID = 0;
 static RegisterPass<SensitiveLeakSanPass> register_SensitiveLeakSanPass(
     "SensitiveLeakSanPass", "SensitiveLeakSanPass", false, false);
 

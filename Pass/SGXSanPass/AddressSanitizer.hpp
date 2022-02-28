@@ -13,7 +13,7 @@
 #include "llvm/ADT/Statistic.h"
 #include <assert.h>
 #include "SGXSanManifest.h"
-#include "ASanCommon.hpp"
+#include "PassCommon.hpp"
 
 #ifndef DEBUG_TYPE
 #define DEBUG_TYPE "sgxsan"

@@ -11,33 +11,65 @@ Value *stripCast(Value *val)
     return val;
 }
 
+// in case that link time llvm ir doesn't have value symbol name any more
+// it seems that GlobalVariable's symbol will not filted in link time?
+StringRef SGXSanGetValueName(Value *val)
+{
+    StringRef valName = val->getName();
+    if (valName.empty())
+    {
+        if (Instruction *I = dyn_cast<Instruction>(val))
+        {
+            if (MDNode *node = I->getMetadata("SGXSanInstName"))
+            {
+                valName = cast<MDString>(node->getOperand(0).get())->getString();
+            }
+        }
+        else if (Argument *arg = dyn_cast<Argument>(val))
+        {
+            if (MDNode *node = arg->getParent()->getMetadata("SGXSanArgName"))
+            {
+                valName = cast<MDString>(node->getOperand(arg->getArgNo()).get())->getString();
+            }
+        }
+        else if (GlobalVariable *GV = dyn_cast<GlobalVariable>(val))
+        {
+            if (MDNode *node = GV->getMetadata("SGXSanGlobalName"))
+            {
+                valName = cast<MDString>(node->getOperand(0).get())->getString();
+            }
+        }
+    }
+    return valName;
+}
+
 Value *getEDLInPrefixedValue(Value *val)
 {
     // directly first level
-    if (!val->getName().startswith("_in_"))
+    if (SGXSanGetValueName(val).startswith("_in_"))
+        return val;
+    else
     {
         val = stripCast(val);
         if (Instruction *I = dyn_cast<Instruction>(val))
         {
             val = I->getOperand(0);
             // second level
-            if (val->getName().startswith("_in_"))
+            if (SGXSanGetValueName(val).startswith("_in_"))
                 return val;
         }
         return nullptr;
     }
-    else
-        return val;
 }
 
 bool isValueNamePrefixedWith(Value *val, std::string prefix)
 {
-    return (val->getName().startswith(StringRef(prefix)) ? true : false);
+    return (SGXSanGetValueName(val).startswith(StringRef(prefix)) ? true : false);
 }
 
 bool isValueNameEqualWith(Value *val, std::string name)
 {
-    return (val->getName().str() == name ? true : false);
+    return (SGXSanGetValueName(val).str() == name ? true : false);
 }
 
 SmallVector<Value *> getValuesByStrInFunction(Function *F, bool (*cmp)(Value *, std::string), std::string str)
@@ -125,7 +157,7 @@ std::pair<int64_t, Value *> getLenAndValueByParamInEDL(Function *F, Value *param
     {
         // now param prefixed with _in_
         // then find _len_ prefixed value
-        lenAndValue = getLenAndValueByNameInEDL(F, "_len_" + param->getName().substr(4).str());
+        lenAndValue = getLenAndValueByNameInEDL(F, "_len_" + SGXSanGetValueName(param).substr(4).str());
         length = lenAndValue.first;
         lenValue = lenAndValue.second;
     }
@@ -185,4 +217,19 @@ Value *convertPointerLenAndValue2CountValue(Value *ptr, Instruction *insertPoint
     {
         return IRB.getInt32(-1);
     }
+}
+
+ShadowMapping getShadowMapping()
+{
+    ShadowMapping Mapping;
+    Mapping.Scale = 3;
+    Mapping.Offset = SGXSAN_SHADOW_MAP_BASE;
+    return Mapping;
+}
+
+uint64_t getRedzoneSizeForScale(int MappingScale)
+{
+    // Redzone used for stack and globals is at least 32 bytes.
+    // For scales 6 and 7, the redzone has to be 64 and 128 bytes respectively.
+    return std::max(32U, 1U << MappingScale);
 }

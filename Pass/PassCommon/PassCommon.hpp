@@ -2,8 +2,25 @@
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Metadata.h"
 
+#include "SGXSanManifest.h"
+
+#include <algorithm>
+#include <cstdint>
+
+/// This struct defines the shadow mapping using the rule:
+///   shadow = (mem >> Scale) ADD Offset.
+struct ShadowMapping
+{
+    int Scale;
+    uint64_t Offset;
+};
+
+ShadowMapping getShadowMapping();
+uint64_t getRedzoneSizeForScale(int MappingScale);
 llvm::Value *stripCast(llvm::Value *val);
+llvm::StringRef SGXSanGetValueName(llvm::Value *val);
 llvm::Value *getEDLInPrefixedValue(llvm::Value *val);
 bool isValueNamePrefixedWith(llvm::Value *val, std::string prefix);
 bool isValueNameEqualWith(llvm::Value *val, std::string name);

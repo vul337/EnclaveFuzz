@@ -19,6 +19,7 @@
 #include "SVF-FE/PAGBuilder.h"
 
 #include "SGXSanInstVisitor.hpp"
+#include "PassCommon.hpp"
 
 #include <unordered_set>
 #include <unordered_map>
@@ -41,7 +42,6 @@ public:
     llvm::Value *memToShadowPtr(llvm::Value *memPtr, llvm::IRBuilder<> &IRB);
 
     int getCallInstOperandPosition(llvm::CallInst *CI, llvm::Value *oprend, bool rawOperand = false);
-    int getFuncArgPosition(llvm::Argument *arg);
     void getDirectAndIndirectCalledFunction(llvm::CallInst *CI, llvm::SmallVector<llvm::Function *> &calleeVec);
     llvm::Instruction *findInstByName(llvm::Function *F, std::string InstName);
     void getPtrValPNs(SVF::ObjPN *obj, std::unordered_set<SVF::ValPN *> &oneLevelPtrs);

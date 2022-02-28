@@ -7,7 +7,7 @@
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Instrumentation.h"
 
-#include "ASanCommon.hpp"
+#include "PassCommon.hpp"
 
 #ifndef DEBUG_TYPE
 #define DEBUG_TYPE "sgxsan"

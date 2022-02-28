@@ -10,13 +10,15 @@ message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
 
 find_package(LLVM REQUIRED CONFIG)
 
-include_directories(${LLVM_INCLUDE_DIRS} ${LEONE_SVF_INSTALL_DIR}/include ../../SGXSanManifest)
+include_directories(${LLVM_INCLUDE_DIRS} ${LEONE_SVF_INSTALL_DIR}/include ../../SGXSanManifest ../PassCommon)
 
 # LLVM is normally built without RTTI. Be consistent with that.
 if(NOT LLVM_ENABLE_RTTI)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 endif()
 
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../PassCommon PassCommon)
+
 add_library(SensitiveLeakSanPass MODULE SensitiveLeakSanPass.cpp SensitiveLeakSan.cpp)
 
-target_link_libraries(SensitiveLeakSanPass ${LEONE_SVF_INSTALL_DIR}/Debug-build/lib/libSvf.a LLVMDemangle)
+target_link_libraries(SensitiveLeakSanPass ${LEONE_SVF_INSTALL_DIR}/Debug-build/lib/libSvf.a LLVMDemangle PassCommon)

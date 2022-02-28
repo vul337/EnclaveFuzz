@@ -64,7 +64,7 @@ void FunctionStackPoisoner::copyArgsPassedByValToAllocas()
 
             AllocaInst *AI = IRB.CreateAlloca(
                 Ty, nullptr,
-                (Arg.hasName() ? Arg.getName() : "Arg" + Twine(Arg.getArgNo())) +
+                (Arg.hasName() ? SGXSanGetValueName(&Arg) : "Arg" + Twine(Arg.getArgNo())) +
                     ".byval");
             AI->setAlignment(Alignment);
             Arg.replaceAllUsesWith(AI);
@@ -345,7 +345,7 @@ void FunctionStackPoisoner::processStaticAllocas()
     SVD.reserve(AllocaVec.size());
     for (AllocaInst *AI : AllocaVec)
     {
-        ASanStackVariableDescription D = {AI->getName().data(),
+        ASanStackVariableDescription D = {SGXSanGetValueName(AI).data(),
                                           ASan.getAllocaSizeInBytes(*AI),
                                           0,
                                           AI->getAlignment(),

@@ -16,7 +16,7 @@ uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
          kHighShadowBeg = 0, kHighShadowEnd = 0,
          kHighMemBeg = 0, kHighMemEnd = 0;
 
-int asan_inited;
+int asan_inited = 0;
 
 static void init_shadow_memory_out_enclave()
 {
@@ -30,7 +30,6 @@ static void init_shadow_memory_out_enclave()
 
 static void AsanInitInternal()
 {
-    assert(asan_inited == 0);
     if (LIKELY(asan_inited))
         return;
 
@@ -46,7 +45,7 @@ void AsanInitFromRtl()
     pthread_mutex_unlock(&sgxsan_init_mutex);
 }
 
-void __attribute__((constructor(101))) asan_ctor()
+void __asan_init()
 {
     // sgxsdk already ensure each ctor only run once
     AsanInitInternal();

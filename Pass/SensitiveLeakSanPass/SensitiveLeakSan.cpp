@@ -5,12 +5,6 @@ using namespace llvm;
 
 #define SGXSAN_SENSITIVE_OBJ_FLAG 0x20
 
-struct ShadowMapping
-{
-    int Scale;
-    uint64_t Offset;
-};
-
 ShadowMapping Mapping = {3, SGXSAN_SHADOW_MAP_BASE};
 
 Value *SensitiveLeakSan::memToShadow(Value *Shadow, IRBuilder<> &IRB)
@@ -338,7 +332,7 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
                         }
                         for (auto obj : objSet)
                         {
-                            StringRef argName = obj->getValue()->getName();
+                            StringRef argName = SGXSanGetValueName(const_cast<Value *>(obj->getValue()));
                             std::vector<std::string> plaintextParamKeywords = {"2encrypt", "unencrypt", "src", "source", "2seal", "unseal", "plain"};
                             bool isInterestingParam = false;
                             for (auto plaintextParamKeyword : plaintextParamKeywords)
@@ -511,19 +505,6 @@ int SensitiveLeakSan::getCallInstOperandPosition(CallInst *CI, Value *operand, b
     return -1;
 }
 
-int SensitiveLeakSan::getFuncArgPosition(Argument *arg)
-{
-    Function *func = arg->getParent();
-    for (unsigned int i = 0; i < func->arg_size(); i++)
-    {
-        if (func->getArg(i) == arg)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
 void SensitiveLeakSan::getDirectAndIndirectCalledFunction(CallInst *CI, SmallVector<Function *> &calleeVec)
 {
     Function *callee = CI->getCalledFunction();
@@ -554,7 +535,7 @@ Instruction *SensitiveLeakSan::findInstByName(Function *F, std::string InstName)
     {
         for (auto &I : BB)
         {
-            if (I.getName().str() == InstName)
+            if (SGXSanGetValueName(&I).str() == InstName)
             {
                 return &I;
             }
@@ -609,7 +590,7 @@ Value *SensitiveLeakSan::isArgPoisoned(Argument *arg)
     IRBuilder<> IRB(&firstFuncInsertPt);
     return IRB.CreateCall(query_thread_func_arg_shadow_stack,
                           {IRB.CreatePtrToInt(arg->getParent(), IRB.getInt64Ty()),
-                           IRB.getInt64(getFuncArgPosition(arg))});
+                           IRB.getInt64(arg->getArgNo())});
 }
 
 Value *SensitiveLeakSan::isCIRetPoisoned(CallInst *CI)

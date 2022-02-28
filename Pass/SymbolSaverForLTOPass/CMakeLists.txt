@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SGXSanPass)
+project(SymbolSaverForLTOPass)
 
 set(LEONE_LLVM_INSTALL_DIR "/opt/llvm")
 
@@ -9,15 +9,15 @@ message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
 
 find_package(LLVM REQUIRED CONFIG)
 
-include_directories(${LLVM_INCLUDE_DIRS} ../../SGXSanManifest ../PassCommon)
+include_directories(${LLVM_INCLUDE_DIRS} ../PassCommon ../../SGXSanManifest)
 
 # LLVM is normally built without RTTI. Be consistent with that.
 if(NOT LLVM_ENABLE_RTTI)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 endif()
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../PassCommon PassCommon)
+add_subdirectory(../PassCommon PassCommon)
 
-add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp FunctionStackPoisoner.cpp AdjustUSP.cpp ModuleAddressSanitizer.cpp)
+add_library(SymbolSaverForLTOPass MODULE SymbolSaverForLTOPass.cpp SymbolSaverForLTO.cpp)
 
-target_link_libraries(SGXSanPass PassCommon)
+target_link_libraries(SymbolSaverForLTOPass PassCommon)

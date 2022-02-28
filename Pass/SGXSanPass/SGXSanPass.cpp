@@ -60,7 +60,7 @@ namespace
     }; // end of struct SGXSanPass
 } // end of anonymous namespace
 
-char SGXSanPass::ID = 1;
+char SGXSanPass::ID = 0;
 static RegisterPass<SGXSanPass> register_sgxsan_pass("SGXSanPass", "SGXSanPass",
                                                      false /* Only looks at CFG */,
                                                      false /* Analysis Pass */);

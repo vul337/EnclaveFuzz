@@ -118,17 +118,17 @@ void ModuleAddressSanitizer::InstrumentGlobalsWithMetadataArray(
 static bool GlobalWasGeneratedByCompiler(GlobalVariable *G)
 {
     // Do not instrument @llvm.global_ctors, @llvm.used, etc.
-    if (G->getName().startswith("llvm."))
+    if (SGXSanGetValueName(G).startswith("llvm."))
         return true;
 
     // Do not instrument asan globals.
-    if (G->getName().startswith(kAsanGenPrefix) ||
-        G->getName().startswith(kSanCovGenPrefix) ||
-        G->getName().startswith(kODRGenPrefix))
+    if (SGXSanGetValueName(G).startswith(kAsanGenPrefix) ||
+        SGXSanGetValueName(G).startswith(kSanCovGenPrefix) ||
+        SGXSanGetValueName(G).startswith(kODRGenPrefix))
         return true;
 
     // Do not instrument gcov counter arrays.
-    if (G->getName() == "__llvm_gcov_ctr")
+    if (SGXSanGetValueName(G) == "__llvm_gcov_ctr")
         return true;
 
     return false;
@@ -264,7 +264,7 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
     for (size_t i = 0; i < n; i++)
     {
         GlobalVariable *G = GlobalsToChange[i];
-        StringRef NameForGlobal = G->getName();
+        StringRef NameForGlobal = SGXSanGetValueName(G);
         // Create string holding the global name (use global name from metadata
         // if it's available, otherwise just write the name of global variable).
         GlobalVariable *Name = createPrivateGlobalForString(
@@ -363,7 +363,7 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
     for (size_t i = 0; i < n; i++)
     {
         GlobalVariable *G = NewGlobals[i];
-        if (G->getName().empty())
+        if (SGXSanGetValueName(G).empty())
             continue;
         GlobalsToAddToUsedList.push_back(G);
     }
@@ -381,7 +381,9 @@ bool ModuleAddressSanitizer::instrumentModule(Module &M)
 
     // Create a module constructor. A destructor is created lazily because not all
     // platforms, and not all modules need it.
-    AsanCtorFunction = createSanitizerCtor(M, kAsanModuleCtorName);
+    std::tie(AsanCtorFunction, std::ignore) = createSanitizerCtorAndInitFunctions(M, kAsanModuleCtorName,
+                                                                                  kAsanInitName, /*InitArgTypes=*/{},
+                                                                                  /*InitArgs=*/{}, "");
 
     bool CtorComdat = true;
     if (ClGlobals)
