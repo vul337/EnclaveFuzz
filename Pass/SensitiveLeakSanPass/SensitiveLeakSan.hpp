@@ -57,6 +57,7 @@ public:
     uint64_t getPointerElementSize(llvm::Value *ptr);
     llvm::Value *getHeapObjSize(llvm::CallInst *obj, llvm::IRBuilder<> &IRB);
     void getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objs);
+    void getNonPointerObjPNs(llvm::Value *value, std::unordered_set<SVF::ObjPN *> &objs);
     llvm::Value *instrumentPoisonCheck(llvm::Value *src);
     llvm::Value *isLIPoisoned(llvm::LoadInst *src);
     llvm::Value *isArgPoisoned(llvm::Argument *src);
@@ -81,10 +82,17 @@ public:
     void initializeCallbacks();
     void cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN);
     llvm::Value *getStackOrHeapInstObjSize(llvm::Instruction *objI, llvm::IRBuilder<> &IRB);
+    void dumpPts(SVF::PAGNode *PN);
+    void dumpRevPts(SVF::PAGNode *PN);
+    void pushAndPopArgShadowFrameAroundCallInst(llvm::CallInst *CI);
+    void dump(SVF::PAGNode *PN);
+    void dump(llvm::Value *val);
+    static llvm::StringRef SGXSanGetPNName(SVF::PAGNode *PN);
+    bool isFunctionObjPN(SVF::PAGNode *PN);
 
 private:
     std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
-    std::unordered_set<llvm::Value *> poisonedInst;
+    std::unordered_set<llvm::Value *> poisonedInst, cleanedStackObjs;
     std::unordered_set<llvm::CallInst *> processedMemTransferInst;
     std::unordered_map<llvm::CallInst *, std::unordered_set<int>> poisonedCI;
     std::unordered_map<llvm::Value *, llvm::Value *> poisonCheckedValues;

@@ -20,7 +20,7 @@ namespace
 
         bool runOnModule(Module &M) override
         {
-            // errs() << "[SGXSan Pass] " << M.getName().str() << "\n";
+            errs() << "[SGXSanPass] " << M.getName().str() << "\n";
             bool Changed = false;
             ModuleAddressSanitizer MASan(M);
             MASan.instrumentModule(M);

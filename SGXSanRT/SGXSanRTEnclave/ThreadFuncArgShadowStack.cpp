@@ -60,10 +60,9 @@ void ThreadFuncArgShadowStack::poison_arg(uint64_t func_addr, int64_t arg_pos)
     if (stack_size == 0 ||
         thread_func_arg_shadow_stack->top().func_addr != func_addr)
     {
-        // no argument is poisoned, while only returned value is poisoned
-        // or the caller maybe uninstrumented since it's a third-party library's function
+        // the caller maybe uninstrumented since it's a third-party library's function
         // so there is no shadow stack frame for current function
-        push_frame(func_addr);
+        return;
     }
     FuncArgShadowTy &correct_top = thread_func_arg_shadow_stack->top();
     assert(correct_top.func_addr == func_addr);
@@ -100,9 +99,10 @@ bool ThreadFuncArgShadowStack::query_arg(uint64_t func_addr, int64_t arg_pos)
     if (stack_size == 0 ||
         thread_func_arg_shadow_stack->top().func_addr != func_addr)
     {
-        // the caller maybe uninstrumented since it's a third-party library's function
-        // so there is no shadow stack frame for current function
-        push_frame(func_addr);
+        // the caller maybe uninstrumented since it's a third-party library's function,
+        // or there is no inter-procedure shadow propagation at that caller-callee, but exists at other caller-callee pairs
+        // then there is no shadow stack frame for current function
+        return false;
     }
     FuncArgShadowTy &correct_top = thread_func_arg_shadow_stack->top();
     assert(correct_top.func_addr == func_addr);
@@ -112,8 +112,8 @@ bool ThreadFuncArgShadowStack::query_arg(uint64_t func_addr, int64_t arg_pos)
 
 bool ThreadFuncArgShadowStack::onetime_query_arg(uint64_t func_addr, int64_t arg_pos)
 {
-    bool is_poisoned = query_thread_func_arg_shadow_stack(func_addr, arg_pos);
-    unpoison_thread_func_arg_shadow_stack(func_addr, arg_pos);
+    bool is_poisoned = query_arg(func_addr, arg_pos);
+    unpoison_arg(func_addr, arg_pos);
     return is_poisoned;
 }
 

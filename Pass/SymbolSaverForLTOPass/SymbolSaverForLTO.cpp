@@ -17,6 +17,8 @@ void SymbolSaverForLTO::saveGlobalName2Metadata(Module &M)
         {
             auto node = MDNode::get(*C, MDString::get(*C, globalName));
             g.setMetadata("SGXSanGlobalName", node);
+            node = MDNode::get(*C, MDString::get(*C, "Annotation"));
+            g.setMetadata("NAME:" + globalName.str(), node);
         }
     }
 }
@@ -29,6 +31,7 @@ bool SymbolSaverForLTO::runOnModule(Module &M)
     {
         if (!F.isDeclaration())
         {
+            // errs() << "[SymbolSaverForLTOPass] " << F.getName().str() << "\n";
             saveArgName2Metadata(F);
             saveInstName2Metadata(F);
         }
@@ -40,13 +43,20 @@ bool SymbolSaverForLTO::runOnModule(Module &M)
 void SymbolSaverForLTO::saveArgName2Metadata(Function &F)
 {
     SmallVector<Metadata *> argNameMDs;
+    std::string argNames = "NAME:";
     for (Argument &arg : F.args())
     {
         argNameMDs.push_back(MDString::get(*C, arg.getName()));
+        argNames = argNames + arg.getName().str() + ";";
     }
 
     auto node = MDNode::get(*C, ArrayRef<Metadata *>(argNameMDs));
     F.setMetadata("SGXSanArgName", node);
+    if (argNames != "")
+    {
+        node = MDNode::get(*C, MDString::get(*C, "Annotation"));
+        F.setMetadata(argNames, node);
+    }
 }
 
 void SymbolSaverForLTO::saveInstName2Metadata(Function &F)
@@ -60,6 +70,8 @@ void SymbolSaverForLTO::saveInstName2Metadata(Function &F)
             {
                 auto node = MDNode::get(*C, MDString::get(*C, instName));
                 I.setMetadata("SGXSanInstName", node);
+                node = MDNode::get(*C, MDString::get(*C, "Annotation"));
+                I.setMetadata("NAME:" + instName.str(), node);
             }
         }
     }
