@@ -331,6 +331,8 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
         {
             if (isEncryptionFunction(callee))
             {
+                std::vector<std::string> plaintextParamKeywords = {"2encrypt", "unencrypt", "src", "source", "2seal", "unseal", "plain", "in", "key"};
+
                 for (int i = 0; i < CI->getNumArgOperands(); i++)
                 {
                     Value *argOp = CI->getArgOperand(i);
@@ -339,10 +341,9 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
 
                         std::unordered_set<SVF::ObjPN *> objSet;
                         getNonPointerObjPNs(argOp, objSet);
-                        for (auto obj : objSet)
+                        for (auto objPN : objSet)
                         {
-                            StringRef argName = SGXSanGetValueName(const_cast<Value *>(obj->getValue()));
-                            std::vector<std::string> plaintextParamKeywords = {"2encrypt", "unencrypt", "src", "source", "2seal", "unseal", "plain"};
+                            StringRef argName = SGXSanGetValueName(const_cast<Value *>(objPN->getValue()));
                             bool isInterestingParam = false;
                             for (auto plaintextParamKeyword : plaintextParamKeywords)
                             {
@@ -350,7 +351,32 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
                             }
                             if (isInterestingParam)
                             {
-                                add2SensitiveObjAndPoison(obj);
+                                add2SensitiveObjAndPoison(objPN);
+                            }
+                        }
+                    }
+                }
+                if (not callee->isDeclaration())
+                {
+                    for (Argument &arg : callee->args())
+                    {
+                        if (arg.getType()->isPointerTy())
+                        {
+                            StringRef argName = SGXSanGetValueName(&arg);
+                            bool isInterestingParam = false;
+                            for (auto plaintextParamKeyword : plaintextParamKeywords)
+                            {
+                                isInterestingParam = isInterestingParam || StringRefContainWord(argName, plaintextParamKeyword);
+                            }
+                            if (isInterestingParam)
+                            {
+                                Value *obj = CI->getArgOperand(arg.getArgNo());
+                                std::unordered_set<SVF::ObjPN *> objSet;
+                                getNonPointerObjPNs(obj, objSet);
+                                for (auto objPN : objSet)
+                                {
+                                    add2SensitiveObjAndPoison(objPN);
+                                }
                             }
                         }
                     }
@@ -449,6 +475,7 @@ void SensitiveLeakSan::initializeCallbacks()
 
     PoisonSensitiveGlobal = M->getOrInsertFunction(
         "PoisonSensitiveGlobal", IRB.getVoidTy(), IntptrTy, IntptrTy);
+    Abort = M->getOrInsertFunction("abort", IRB.getVoidTy());
 }
 
 SensitiveLeakSan::SensitiveLeakSan(Module &ArgM)
@@ -827,11 +854,18 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
     if (processedMemTransferInst.count(CI) == 0)
     {
         // current memory transfer instruction has never been instrumented
-        Value *isSrcPoisoned = isPtrPoisoned(insertPoint, srcPtr);
 
-        Instruction *sourceIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, insertPoint, false);
+        // we have to avoid 0-size in mem transfer call
+        IRBuilder<> IRB(insertPoint);
+        size = IRB.CreateIntCast(size, IRB.getInt64Ty(), false);
+        Instruction *term = SplitBlockAndInsertIfThen(IRB.CreateICmpNE(size, IRB.getInt64(0)), insertPoint, false);
+        IRB.SetInsertPoint(term);
 
-        IRBuilder<> IRB(sourceIsPoisonedTerm);
+        Value *isSrcPoisoned = isPtrPoisoned(term, srcPtr);
+
+        Instruction *sourceIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, term, false);
+
+        IRB.SetInsertPoint(sourceIsPoisonedTerm);
         CallInst *isDestInElrange = IRB.CreateCall(is_addr_in_elrange_ex,
                                                    {IRB.CreatePtrToInt(destPtr, IRB.getInt64Ty()),
                                                     IRB.getInt64(getPointerElementSize(destPtr))});
@@ -839,10 +873,13 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
         Instruction *dstIsInElrangeTerm = SplitBlockAndInsertIfThen(isDestInElrange, sourceIsPoisonedTerm, false);
 
         IRB.SetInsertPoint(dstIsInElrangeTerm);
-        Instruction *memcpyCI = IRB.CreateMemCpy(memToShadowPtr(destPtr, IRB), MaybeAlign(),
-                                                 memToShadowPtr(srcPtr, IRB), MaybeAlign(),
-                                                 RoundUpUDiv(IRB, size, SHADOW_GRANULARITY));
-        setNoSanitizeMetadata(memcpyCI);
+        // there is a situation that small-size src memory copied to large-size dst memory
+        // so directly copy shadow of src to dst may cause problem
+        PoisonObject(destPtr, size, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
+        // Instruction *memcpyCI = IRB.CreateMemCpy(memToShadowPtr(destPtr, IRB), MaybeAlign(),
+        //                                          memToShadowPtr(srcPtr, IRB), MaybeAlign(),
+        //                                          RoundUpUDiv(IRB, size, SHADOW_GRANULARITY));
+        // setNoSanitizeMetadata(memcpyCI);
         pushPtObj2WorkList(destPtr);
         cleanStackObjectSensitiveShadow(destPtr);
         // record this memory transfer CI has been instrumented
@@ -1038,13 +1075,13 @@ StringRef SensitiveLeakSan::SGXSanGetPNName(SVF::PAGNode *PN)
 }
 void SensitiveLeakSan::dump(SVF::PAGNode *PN)
 {
-    errs() << "==" << getBelongedFunctionName(PN) << "==" << SGXSanGetPNName(PN) << "\t";
+    errs() << "== " << getBelongedFunctionName(PN) << " == " << SGXSanGetPNName(PN) << " ==\t";
     PN->dump();
 }
 
 void SensitiveLeakSan::dump(Value *val)
 {
-    errs() << "==" << getBelongedFunctionName(val) << "==" << SGXSanGetValueName(val) << "\t";
+    errs() << "== " << getBelongedFunctionName(val) << " == " << SGXSanGetValueName(val) << " ==\t";
     val->dump();
 }
 

@@ -102,7 +102,7 @@ private:
         query_thread_func_arg_shadow_stack, clear_thread_func_arg_shadow_stack,
         push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
         sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
-        sgxsan_region_is_in_elrange_and_poisoned, PoisonSensitiveGlobal;
+        sgxsan_region_is_in_elrange_and_poisoned, PoisonSensitiveGlobal, Abort;
 
     llvm::Module *M;
     llvm::LLVMContext *C;

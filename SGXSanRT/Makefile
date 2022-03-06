@@ -1,5 +1,4 @@
 SGX_SDK ?= /opt/intel/sgxsdk
-SGX_MODE ?= HW
 SGX_DEBUG ?= 1
 SGX_PRERELEASE ?= 0
 EName ?= "enclave.signed.so"
