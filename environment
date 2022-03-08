@@ -1,0 +1,2 @@
+SGXSAN_DIR="$(realpath $(dirname ${BASH_SOURCE[0]}))"
+LINUX_SGX_DIR=$(realpath ${SGXSAN_DIR}/..)

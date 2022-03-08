@@ -5,3 +5,6 @@ cd Pass/SGXSanPass && ./build.sh
 cd ../SensitiveLeakSanPass && ./build.sh
 cd ../SymbolSaverForLTOPass && ./build.sh
 cd ../../SGXSanRT && make -j$(nproc) -s
+
+cd ..
+cp SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl output/SGXSanRTEnclave.edl

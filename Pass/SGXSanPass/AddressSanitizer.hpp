@@ -14,6 +14,7 @@
 #include <assert.h>
 #include "SGXSanManifest.h"
 #include "PassCommon.hpp"
+#include <unordered_set>
 
 #ifndef DEBUG_TYPE
 #define DEBUG_TYPE "sgxsan"
@@ -32,7 +33,7 @@ public:
     void instrumentMop(llvm::InterestingMemoryOperand &O, bool UseCalls);
     void instrumentGlobalPropageteWhitelist(llvm::StoreInst *SI);
     bool instrumentRealEcall(llvm::CallInst *CI, llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
-    bool instrumentOcallWrapper(llvm::Function &OcallWrapper, llvm::CallInst *sgx_ocall_inst, llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
+    bool instrumentOcallWrapper(llvm::Function &OcallWrapper, llvm::SmallVector<llvm::Instruction *, 8> &ReturnInstVec);
     bool instrumentParameterCheck(llvm::Value *operand, llvm::IRBuilder<> &IRB, const llvm::DataLayout &DL,
                                   int depth, llvm::Value *eleCnt = nullptr, llvm::Value *operandAddr = nullptr,
                                   bool checkCurrentLevelPtr = true);
@@ -89,6 +90,7 @@ private:
 #if (USE_SGXSAN_MALLOC)
     llvm::FunctionCallee SGXSanMalloc, SGXSanFree, SGXSanCalloc, SGXSanRealloc;
 #endif
+    std::unordered_set<llvm::Function *> TLSMgrInstrumentedEcall;
 };
 
 #endif // ADDRESS_SANITIZER_HPP

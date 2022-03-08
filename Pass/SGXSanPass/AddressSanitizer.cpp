@@ -771,15 +771,29 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
 
 bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction *, 8> &ReturnInstVec)
 {
+    assert(CI);
     if (CI == nullptr)
         return false;
-    auto &firstFuncInsertPoint = *CI->getFunction()->getEntryBlock().getFirstInsertionPt();
-    IRBuilder<> IRB(&firstFuncInsertPoint);
-    IRB.CreateCall(EnclaveTLSConstructorAtTBridgeBegin);
-    IRB.SetInsertPoint(CI);
+    Function *ecallWrapper = CI->getFunction();
+    // instrument `EnclaveTLSConstructorAtTBridgeBegin` and `EnclaveTLSDestructorAtTBridgeEnd` at function begin and end respectively
+    if (TLSMgrInstrumentedEcall.count(ecallWrapper) == 0)
+    {
+        auto &firstFuncInsertPoint = *ecallWrapper->getEntryBlock().getFirstInsertionPt();
+        IRBuilder<> IRB(&firstFuncInsertPoint);
+        IRB.CreateCall(EnclaveTLSConstructorAtTBridgeBegin);
+
+        for (auto RetInst : ReturnInstVec)
+        {
+            IRB.SetInsertPoint(RetInst);
+            IRB.CreateCall(EnclaveTLSDestructorAtTBridgeEnd);
+        }
+        TLSMgrInstrumentedEcall.emplace(ecallWrapper);
+    }
+    // instrument `OutAddrWhitelistActive` before RealEcall
+    IRBuilder<> IRB(CI);
     IRB.CreateCall(OutAddrWhitelistActive);
     const DataLayout &DL = CI->getModule()->getDataLayout();
-
+    // instrument `SGXSanEdgeCheck` for each actual parameter of RealEcall before RealEcall
     for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++)
     {
         IRB.SetInsertPoint(CI);
@@ -820,20 +834,17 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction
             instrumentParameterCheck(operand, IRB, DL, 0);
         }
     }
+    // instrument `OutAddrWhitelistDeactive` after RealEcall
     IRB.SetInsertPoint(CI->getNextNode());
     IRB.CreateCall(OutAddrWhitelistDeactive);
-    for (auto RetInst : ReturnInstVec)
-    {
-        IRB.SetInsertPoint(RetInst);
-        IRB.CreateCall(EnclaveTLSDestructorAtTBridgeEnd);
-    }
+
     return true;
 }
 
-bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, CallInst *sgx_ocall_inst, SmallVector<Instruction *, 8> &ReturnInstVec)
+bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *, 8> &ReturnInstVec)
 {
-    Instruction *insertPoint = &(*OcallWrapper.getBasicBlockList().begin()->begin());
-    IRBuilder<> IRB(insertPoint);
+    Instruction &firstFuncInsertPoint = *OcallWrapper.getEntryBlock().getFirstInsertionPt();
+    IRBuilder<> IRB(&firstFuncInsertPoint);
     IRB.CreateCall(OutAddrWhitelistDeactive);
 
     for (Instruction *RetInst : ReturnInstVec)
@@ -980,9 +991,9 @@ bool AddressSanitizer::instrumentFunction(Function &F)
 #if (USE_SGXSAN_MALLOC)
     SmallVector<CallInst *, 16> HeapCIToInstrument;
 #endif
-    CallInst *RealEcallInst = nullptr;
-    bool isOcallWrapper = false;
-    CallInst *sgx_ocall_inst = nullptr;
+    // there may be several `tail call` RealEcall when compiling with `-O2` flag
+    SmallVector<CallInst *, 16> RealEcallInsts;
+    SmallVector<CallInst *, 16> SGXOcallInsts;
     int NumAllocas = 0;
 
     // Fill the set of memory operations to instrument.
@@ -1033,15 +1044,12 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                     if (F.getName() == ("sgx_" /* ecall wrapper prefix */ + callee_name.str()))
                     {
                         // it's an ecall wrapper
-                        // should only one ecall in ecall wrapper
-                        assert(RealEcallInst == nullptr);
-                        RealEcallInst = CI;
+                        RealEcallInsts.push_back(CI);
                         isFuncAtEnclaveTBridge = true;
                     }
                     else if (callee_name == "sgx_ocall")
                     {
-                        isOcallWrapper = true;
-                        sgx_ocall_inst = CI;
+                        SGXOcallInsts.push_back(CI);
                         isFuncAtEnclaveTBridge = true;
                     }
                     else if (callee_name == "memcpy_s" || callee_name == "memset_s" || callee_name == "memmove_s")
@@ -1104,16 +1112,16 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     // FSP.runOnFunction() already save RetVec
     FSP.getRetInstVec(ReturnInstVec);
 
-    if (RealEcallInst != nullptr)
+    for (auto RealEcallInst : RealEcallInsts)
     {
         // when it is an ecall wrapper
         instrumentRealEcall(RealEcallInst, ReturnInstVec);
         FunctionModified = true;
     }
 
-    if (isOcallWrapper)
+    if (SGXOcallInsts.size() > 0)
     {
-        instrumentOcallWrapper(F, sgx_ocall_inst, ReturnInstVec);
+        instrumentOcallWrapper(F, ReturnInstVec);
         FunctionModified = true;
     }
 
