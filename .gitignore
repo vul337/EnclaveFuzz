@@ -1,4 +1,3 @@
 *.o
 SGXSanRT/*.a
-output/*.a
-output/*.so
+output/

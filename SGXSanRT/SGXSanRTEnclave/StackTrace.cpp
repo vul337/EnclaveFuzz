@@ -3,6 +3,7 @@
 #include "SGXSanStackTrace.hpp"
 #include "StackTrace.hpp"
 #include "SGXSanRTTBridge.hpp"
+#include "SGXInternal.hpp"
 
 // level == 0 means return address of function that called 'get_ret_addrs_in_stack'
 void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs, uint64_t base_addr, int level)
@@ -54,7 +55,7 @@ uint64_t get_last_return_address(uint64_t base_addr, int level)
             return ret_addr - base_addr;
         }
         bp = *(uint64_t *)bp;
-        if (!is_addr_in_elrange(bp))
+        if (!is_addr_in_elrange(bp) || (bp == (uint64_t)get_tcs()))
             break;
         ret_addr = *(uint64_t *)(bp + 8);
         if (!is_addr_in_elrange(ret_addr))

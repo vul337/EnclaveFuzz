@@ -26,3 +26,9 @@ int sgxsan_printf(const char *fmt, ...)
     sgxsan_ocall_print_string(buf);
     return (int)strnlen(buf, BUFSIZ - 1) + 1;
 }
+
+void print_shadow(void *ptr)
+{
+    uint64_t shadow_addr = ((((uint64_t)ptr - g_enclave_base) >> 3) + 0x7fff8000);
+    sgxsan_printf("[0x%lx]: 0x%x\n", shadow_addr, *(uint8_t *)shadow_addr);
+}

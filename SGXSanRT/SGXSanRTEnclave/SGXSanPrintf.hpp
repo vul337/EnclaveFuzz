@@ -9,9 +9,8 @@
 extern "C"
 {
 #endif
-
     int sgxsan_printf(const char *fmt, ...);
-
+    void print_shadow(void *ptr);
 #if defined(__cplusplus)
 }
 #endif

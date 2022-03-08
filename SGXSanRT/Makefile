@@ -1,6 +1,6 @@
 SGX_SDK ?= /opt/intel/sgxsdk
-SGX_DEBUG ?= 1
-SGX_PRERELEASE ?= 0
+SGX_DEBUG ?= 0
+SGX_PRERELEASE ?= 1
 EName ?= "enclave.signed.so"
 
 # current only support x64 arch
