@@ -114,6 +114,11 @@ bool SensitivePoisoner::get_layout_infos(layout_t *layout_start, layout_t *layou
 
 void SensitivePoisoner::collect_layout_infos()
 {
+    if (m_guard_list.size() != 0)
+    {
+        // already collected
+        return;
+    }
     get_layout_infos(g_global_data.layout_table, g_global_data.layout_table + g_global_data.layout_entry_num, 0);
 }
 
@@ -139,6 +144,7 @@ void SensitivePoisoner::show_layout_ex(std::string title, std::vector<std::pair<
         if (i < list2.size())
         {
             std::pair<uint64_t, uint32_t> ele2 = list2[i];
+            assert(ele2.first < ele1.first);
             PRINTF("\t\t[0x%lX...0x%lX, 0x%lX]=>[0x%lX...0x%lX, 0x%lX]\n",
                    ele2.first + base_addr,
                    ele1.first + base_addr,
@@ -160,7 +166,7 @@ void SensitivePoisoner::show_layout_ex(std::string title, std::vector<std::pair<
 
 bool SensitivePoisoner::shallow_poison_senitive()
 {
-    collect_layout_infos();
+    // collect_layout_infos();
 
     do_poison("Guard list", m_guard_list, g_enclave_base);
     do_poison("TCS list", m_tcs_list, g_enclave_base);
@@ -174,4 +180,24 @@ bool SensitivePoisoner::shallow_poison_senitive()
     show_layout_ex("STACK_DYN list", m_stack_dyn_min_list, m_stack_dyn_max_list, g_enclave_base);
 
     return true;
+}
+
+std::pair<uint64_t, uint64_t> SensitivePoisoner::getAddrBelongedStack(uint64_t addr)
+{
+    for (size_t i = 0; i < m_stack_min_list.size(); i++)
+    {
+        std::pair<uint64_t, uint32_t> stack_min = m_stack_min_list[i];
+        uint64_t stack_base_addr = stack_min.first + (stack_min.second << 12) - 1 + g_enclave_base;
+        uint64_t stack_max_addr = stack_min.first + g_enclave_base;
+        assert(stack_max_addr < stack_base_addr);
+        if (i < m_stack_max_list.size())
+            stack_max_addr = m_stack_max_list[i].first + g_enclave_base;
+        assert(stack_max_addr < stack_base_addr);
+
+        if (stack_max_addr <= addr and addr <= stack_base_addr)
+        {
+            return std::pair<uint64_t, uint64_t>(stack_max_addr, stack_base_addr);
+        }
+    }
+    return std::pair<uint64_t, uint64_t>(0, 0);
 }

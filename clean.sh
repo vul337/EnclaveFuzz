@@ -6,4 +6,4 @@ cd ../SymbolSaverForLTOPass && ./clean.sh
 cd ../../SGXSanRT && make clean
 
 cd ..
-rm -f ../output/SGXSanRTEnclave.edl
+rm -f output/SGXSanRTEnclave.edl

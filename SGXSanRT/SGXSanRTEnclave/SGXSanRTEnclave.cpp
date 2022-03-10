@@ -25,6 +25,7 @@ static void init_shadow_memory_out_enclave()
     kLowMemBeg = g_enclave_base;
     kLowMemEnd = g_enclave_base + g_enclave_size - 1;
     assert(kLowShadowBeg == SGXSAN_SHADOW_MAP_BASE);
+    SensitivePoisoner::collect_layout_infos();
     SensitivePoisoner::shallow_poison_senitive();
 }
 
