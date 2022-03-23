@@ -15,6 +15,7 @@ extern "C"
     bool is_addr_in_elrange(uint64_t addr);
     bool is_addr_in_elrange_ex(uint64_t addr, uint64_t size);
     bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8_t mask);
+    bool sgxsan_region_is_in_elrange_and_not_poisoned(uint64_t beg, uint64_t size, uint8_t mask);
 #if defined(__cplusplus)
 }
 #endif

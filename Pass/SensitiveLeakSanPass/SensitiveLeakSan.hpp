@@ -17,12 +17,15 @@
 #include "WPA/Andersen.h"
 #include "SABER/LeakChecker.h"
 #include "SVF-FE/PAGBuilder.h"
+#include "DDA/ContextDDA.h"
+#include "DDA/DDAClient.h"
 
 #include "SGXSanInstVisitor.hpp"
 #include "PassCommon.hpp"
 
 #include <unordered_set>
 #include <unordered_map>
+#include <regex>
 
 class SensitiveLeakSan
 {
@@ -64,9 +67,9 @@ public:
     llvm::Value *isCIRetPoisoned(llvm::CallInst *src);
     llvm::Value *isPtrPoisoned(llvm::Instruction *insertPoint, llvm::Value *ptr);
     static int getPointerLevel(llvm::Value *ptr);
-    void PoisonCIOperand(llvm::Value *isPoisoned, llvm::CallInst *CI, int operandPosition);
-    void PoisonSI(llvm::Value *isPoisoned, llvm::StoreInst *SI);
-    void PoisonRetShadow(llvm::Value *isPoisoned, llvm::ReturnInst *calleeRI);
+    void PoisonCIOperand(llvm::Value *src, llvm::Value *isPoisoned, llvm::CallInst *CI, int operandPosition);
+    void PoisonSI(llvm::Value *src, llvm::Value *isPoisoned, llvm::StoreInst *SI);
+    void PoisonRetShadow(llvm::Value *src, llvm::Value *isPoisoned, llvm::ReturnInst *calleeRI);
     static llvm::Value *stripCast(llvm::Value *v);
     void propagateShadow(llvm::Value *src);
     uint64_t getTypeAllocaSize(llvm::Type *type);
@@ -76,7 +79,7 @@ public:
     static bool StringRefContainWord(llvm::StringRef str, std::string word);
     static bool isEncryptionFunction(llvm::Function *F);
     void cleanStackObjectSensitiveShadow(llvm::Value *stackObject);
-    void PoisonObject(llvm::Value *objPtr, llvm::Value *objSize, llvm::IRBuilder<> &IRB, uint8_t poisonValue);
+    // void PoisonObject(llvm::Value *objPtr, llvm::Value *objSize, llvm::IRBuilder<> &IRB, uint8_t poisonValue);
     static void getNonCastUsers(llvm::Value *value, std::vector<llvm::User *> &users);
     void poisonSensitiveGlobalVariableAtRuntime();
     void initializeCallbacks();
@@ -85,10 +88,14 @@ public:
     void dumpPts(SVF::PAGNode *PN);
     void dumpRevPts(SVF::PAGNode *PN);
     void pushAndPopArgShadowFrameAroundCallInst(llvm::CallInst *CI);
+    std::string toString(SVF::PAGNode *PN);
+    std::string toString(llvm::Value *val);
     void dump(SVF::PAGNode *PN);
     void dump(llvm::Value *val);
     static llvm::StringRef SGXSanGetPNName(SVF::PAGNode *PN);
     bool isFunctionObjPN(SVF::PAGNode *PN);
+    void printStrAtRT(llvm::IRBuilder<> &IRB, std::string str);
+    void printSrcAtRT(llvm::IRBuilder<> &IRB, llvm::Value *src);
 
 private:
     std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
@@ -102,7 +109,8 @@ private:
         query_thread_func_arg_shadow_stack, clear_thread_func_arg_shadow_stack,
         push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
         sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
-        sgxsan_region_is_in_elrange_and_poisoned, PoisonSensitiveGlobal, Abort;
+        sgxsan_region_is_in_elrange_and_poisoned, sgxsan_region_is_in_elrange_and_not_poisoned,
+        PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, __sgxsan_poison_valid_shadow;
 
     llvm::Module *M;
     llvm::LLVMContext *C;
@@ -110,10 +118,12 @@ private:
 
     SVF::SVFModule *svfModule;
     SVF::PAG *pag;
+    // SVF::ContextDDA *ander;
     SVF::Andersen *ander;
     SVF::PTACallGraph *callgraph;
 
     SGXSanInstVisitor *instVisitor;
     llvm::SmallVector<llvm::Constant *> globalsToBePolluted;
     llvm::Function *PoisonSensitiveGlobalModuleCtor;
+    llvm::Constant *StrSpeicifier;
 };

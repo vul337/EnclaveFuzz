@@ -11,7 +11,7 @@ extern uint64_t g_enclave_base;
 extern uint64_t g_enclave_size;
 
 #ifndef MEM_TO_SHADOW
-#define MEM_TO_SHADOW(mem) (((mem - g_enclave_base) >> 3) + SGXSAN_SHADOW_MAP_BASE)
+#define MEM_TO_SHADOW(mem) ((((uint64_t)mem - g_enclave_base) >> 3) + SGXSAN_SHADOW_MAP_BASE)
 #endif
 
 #ifndef SHADOW_GRANULARITY
@@ -69,4 +69,4 @@ static inline uptr MemToShadow(uptr p)
     return MEM_TO_SHADOW(p);
 }
 
-#endif //SGXSAN_COMMON_SHADOW_MAP_HPP
+#endif // SGXSAN_COMMON_SHADOW_MAP_HPP

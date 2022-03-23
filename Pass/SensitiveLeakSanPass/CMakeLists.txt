@@ -21,4 +21,4 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../PassCommon PassCommon)
 
 add_library(SensitiveLeakSanPass MODULE SensitiveLeakSanPass.cpp SensitiveLeakSan.cpp)
 
-target_link_libraries(SensitiveLeakSanPass ${LEONE_SVF_INSTALL_DIR}/Debug-build/lib/libSvf.a LLVMDemangle PassCommon)
+target_link_libraries(SensitiveLeakSanPass ${LEONE_SVF_INSTALL_DIR}/Debug-build/lib/libSvf.a ${LEONE_SVF_INSTALL_DIR}/Debug-build/lib/CUDD/libCudd.a LLVMDemangle PassCommon)

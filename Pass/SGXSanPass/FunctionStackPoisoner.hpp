@@ -3,12 +3,13 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Transforms/Utils/ASanStackFrameLayout.h"
-#include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Instrumentation.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Analysis/ValueTracking.h"
 
 #include <string>
 #include <sstream>
@@ -42,8 +43,13 @@ public:
     void visitResumeInst(llvm::ResumeInst &RI);
     void visitCleanupReturnInst(llvm::CleanupReturnInst &CRI);
     void visitAllocaInst(llvm::AllocaInst &AI);
+    void visitIntrinsicInst(llvm::IntrinsicInst &II);
+    void visitCallBase(llvm::CallBase &CB);
     void initializeCallbacks(llvm::Module &M);
+    void processDynamicAllocas();
     void processStaticAllocas();
+    void poisonAlloca(llvm::Value *V, uint64_t Size,
+                      llvm::IRBuilder<> &IRB, bool DoPoison);
     llvm::Value *createAllocaForLayout(
         llvm::IRBuilder<> &IRB, const llvm::ASanStackFrameLayout &L, bool Dynamic);
     void copyToShadow(llvm::ArrayRef<uint8_t> ShadowMask,
@@ -58,6 +64,11 @@ public:
                             size_t Begin, size_t End,
                             llvm::IRBuilder<> &IRB,
                             llvm::Value *ShadowBase);
+    void createDynamicAllocasInitStorage();
+    void handleDynamicAllocaCall(llvm::AllocaInst *AI);
+    void unpoisonDynamicAllocas();
+    void unpoisonDynamicAllocasBeforeInst(llvm::Instruction *InstBefore,
+                                          llvm::Value *SavedStack);
 
 private:
     llvm::Function &F;
@@ -72,6 +83,28 @@ private:
     llvm::SmallVector<llvm::Instruction *, 8> RetVec;
     unsigned StackAlignment;
 
+    // Stores a place and arguments of poisoning/unpoisoning call for alloca.
+    struct AllocaPoisonCall
+    {
+        llvm::IntrinsicInst *InsBefore;
+        llvm::AllocaInst *AI;
+        uint64_t Size;
+        bool DoPoison;
+    };
+    llvm::SmallVector<AllocaPoisonCall, 8> DynamicAllocaPoisonCallVec;
+    llvm::SmallVector<AllocaPoisonCall, 8> StaticAllocaPoisonCallVec;
+    bool HasUntracedLifetimeIntrinsic = false;
+
+    llvm::SmallVector<llvm::AllocaInst *, 1> DynamicAllocaVec;
+    llvm::SmallVector<llvm::IntrinsicInst *, 1> StackRestoreVec;
+    llvm::AllocaInst *DynamicAllocaLayout = nullptr;
+    llvm::IntrinsicInst *LocalEscapeCall = nullptr;
+
+    bool HasInlineAsm = false;
+    bool HasReturnsTwiceCall = false;
+
     llvm::FunctionCallee AsanSetShadowFunc[0x100] = {};
+    llvm::FunctionCallee AsanPoisonStackMemoryFunc, AsanUnpoisonStackMemoryFunc;
+    llvm::FunctionCallee AsanAllocaPoisonFunc, AsanAllocasUnpoisonFunc;
 };
-#endif //FUNCTION_STACK_POISONER_HPP
+#endif // FUNCTION_STACK_POISONER_HPP

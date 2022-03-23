@@ -26,7 +26,7 @@ static const size_t kNumberOfAccessSizes = 5;
 class AddressSanitizer
 {
 public:
-    AddressSanitizer(llvm::Module &M);
+    AddressSanitizer(llvm::Module &M, bool UseAfterScope = false);
     bool instrumentFunction(llvm::Function &F);
     void initializeCallbacks(llvm::Module &M);
     void getInterestingMemoryOperands(llvm::Instruction *I, llvm::SmallVectorImpl<llvm::InterestingMemoryOperand> &Interesting, llvm::SmallVector<llvm::StoreInst *, 16> &GlobalVariableStoreInsts);
@@ -66,6 +66,7 @@ private:
     friend class FunctionStackPoisoner;
     llvm::LLVMContext *C;
     int LongSize;
+    bool UseAfterScope;
     llvm::Type *IntptrTy;
     ShadowMapping Mapping;
     llvm::FunctionCallee AsanHandleNoReturnFunc;
@@ -79,6 +80,7 @@ private:
     llvm::FunctionCallee AsanMemoryAccessCallbackSized[2];
 
     llvm::FunctionCallee AsanMemmove, AsanMemcpy, AsanMemset;
+    llvm::Value *LocalDynamicShadow = nullptr;
 
     llvm::DenseMap<const llvm::AllocaInst *, bool> ProcessedAllocas;
 

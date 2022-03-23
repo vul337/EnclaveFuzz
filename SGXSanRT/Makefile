@@ -1,6 +1,6 @@
 SGX_SDK ?= /opt/intel/sgxsdk
-SGX_DEBUG ?= 0
-SGX_PRERELEASE ?= 1
+SGX_DEBUG ?= 1
+SGX_PRERELEASE ?= 0
 EName ?= "enclave.signed.so"
 
 # current only support x64 arch
@@ -68,6 +68,7 @@ LibSGXSanRTEnclave := libSGXSanRTEnclave.a
 
 .PHONY: all
 all: $(LibSGXSanRTApp) $(LibSGXSanRTEnclave)
+	@cp SGXSanRTEnclave/SGXSanRTEnclave.edl ../output/SGXSanRTEnclave.edl
 
 ######## SGXSanRT App Objects ########
 
@@ -112,4 +113,4 @@ $(LibSGXSanRTEnclave): $(SGXSanRTEnclave_Cpp_Objects)
 .PHONY: clean
 clean:
 	@rm -f $(LibSGXSanRTApp) $(SGXSanRTApp_Cpp_Objects) $(LibSGXSanRTEnclave) $(SGXSanRTEnclave_Cpp_Objects)
-	@rm -f ../output/$(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTApp)
+	@rm -f ../output/$(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTApp) ../output/SGXSanRTEnclave.edl

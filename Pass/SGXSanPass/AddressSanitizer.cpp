@@ -95,24 +95,25 @@ static cl::opt<bool> ClUseElrangeGuard(
     cl::Hidden,
     cl::init(true));
 
+static cl::opt<bool> ClUseAfterScope(
+    "sgxsan-use-after-scope",
+    cl::desc("Check stack-use-after-scope"),
+    cl::Hidden,
+    cl::init(true));
+
 bool isFuncAtEnclaveTBridge = false;
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 
-AddressSanitizer::AddressSanitizer(Module &M)
+AddressSanitizer::AddressSanitizer(Module &M, bool UseAfterScope)
+    : UseAfterScope(UseAfterScope || ClUseAfterScope)
 {
     C = &(M.getContext());
     LongSize = M.getDataLayout().getPointerSizeInBits();
     IntptrTy = Type::getIntNTy(*C, LongSize);
     Mapping = getShadowMapping();
 }
-
-// 构建一个ShadowMemory
-// 写函数Pass，捕捉所有访存操作(Load/Store/内存操作库函数)并插桩代码检查对应的ShadowByte。具体被调用的检查代码在Runtime中实现。
-// 函数Pass中捕捉栈变量，将栈变量调整到函数开头，预先安插好所有的Redzone（栈变量），并进行Poison；函数返回前，将Redzone Unpoison。
-// 关于堆变量。在Runtime中需要Wrap一下Malloc/Free（Malloc时额外多分配Redzone），并对Redzone进行Poison/Unpoison。
-// 关于全局变量，模块Pass先提取好之前处理顶级声明时准备好的全局变量信息表。然后遍历全局变量，修改它以插入Redzone。将全局变量信息传给Runtime，让Runtime污染Redzone。
 
 void AddressSanitizer::initializeCallbacks(Module &M)
 {
