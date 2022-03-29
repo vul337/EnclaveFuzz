@@ -1,4 +1,5 @@
 #include <string>
+#include <mbusafecrt.h>
 #include "WhitelistCheck.hpp"
 #include "SGXSanPrintf.hpp"
 #include "PoisonCheck.hpp"
@@ -69,6 +70,7 @@ void WhitelistOfAddrOutEnclave::iter(bool is_global)
 
 std::pair<std::map<uint64_t, uint64_t>::iterator, bool> WhitelistOfAddrOutEnclave::add(uint64_t start, uint64_t size)
 {
+    assert(start >= g_enclave_base + g_enclave_size or start + size <= g_enclave_base);
     if (start == 0 || !m_whitelist)
     {
         return std::pair<std::map<uint64_t, uint64_t>::iterator, bool>(std::map<uint64_t, uint64_t>::iterator(), true);
@@ -97,6 +99,7 @@ std::tuple<uint64_t, uint64_t, bool> WhitelistOfAddrOutEnclave::query(uint64_t s
                                                                       bool enable_double_fetch_check,
                                                                       bool is_write)
 {
+    assert(start >= g_enclave_base + g_enclave_size or start + size <= g_enclave_base);
     if (!m_whitelist || (!m_whitelist_active))
     {
         return std::tuple<uint64_t, uint64_t, bool>(0, 1, false);
@@ -199,9 +202,12 @@ exit:
 
 bool WhitelistOfAddrOutEnclave::global_propagate(uint64_t addr)
 {
+    if (addr >= g_enclave_base and addr < g_enclave_base + g_enclave_size)
+        return true;
     uint64_t find_start, find_size;
     bool is_at_global;
     std::tie(find_start, find_size, is_at_global) = query(addr, 1);
+    assert(find_start >= g_enclave_base + g_enclave_size or find_start + find_size <= g_enclave_base);
     if (is_at_global == false && find_size != 0 /* return case 2 */)
     {
         // SGXSAN_TRACE("[Whitelist] [Thread] => 0x%lx => [~Global~]\n", addr);
@@ -238,13 +244,12 @@ void WhitelistOfAddrOutEnclave_add(uint64_t start, uint64_t size)
 
 void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size, bool is_write)
 {
-    // fix-me: it is better to annotate SensitiveLeakSan's load/store as noinstr
-    // if (start >= kLowShadowBeg && (start + size - 1) <= kLowShadowEnd)
-    //     return;
-    uint64_t find_start, find_size;
-    bool is_at_global;
-    std::tie(find_start, find_size, is_at_global) = WhitelistOfAddrOutEnclave::query(start, size, true, is_write);
-    SGXSAN_WARNING(find_size != 0, ("[SGXSan] Illegal access outside-enclave: " + std::to_string(start)).c_str());
+    uint64_t find_size;
+    std::tie(std::ignore, find_size, std::ignore) = WhitelistOfAddrOutEnclave::query(start, size, true, is_write);
+    size_t buf_size = 1024;
+    char buf[buf_size];
+    sprintf_s(buf, buf_size, "[SGXSan] Illegal access outside-enclave: 0x%lx", start);
+    SGXSAN_WARNING(find_size != 0, buf);
 }
 
 void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr)

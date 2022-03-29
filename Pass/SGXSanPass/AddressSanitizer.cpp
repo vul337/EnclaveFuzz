@@ -171,19 +171,17 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     EnclaveTLSConstructorAtTBridgeBegin = M.getOrInsertFunction("EnclaveTLSConstructorAtTBridgeBegin", IRB.getVoidTy());
     EnclaveTLSDestructorAtTBridgeEnd = M.getOrInsertFunction("EnclaveTLSDestructorAtTBridgeEnd", IRB.getVoidTy());
 
-    OutAddrWhitelistInit = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_init", IRB.getVoidTy());
-    OutAddrWhitelistDestroy = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_destroy", IRB.getVoidTy());
-    OutAddrWhitelistActive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_active", IRB.getVoidTy());
-    OutAddrWhitelistDeactive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
-    OutAddrWhitelistCheck = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
+    WhitelistOfAddrOutEnclave_active = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_active", IRB.getVoidTy());
+    WhitelistOfAddrOutEnclave_deactive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
+    WhitelistOfAddrOutEnclave_query = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
                                                   IRB.getVoidTy(), IRB.getInt64Ty(),
                                                   IRB.getInt64Ty(), IRB.getInt1Ty());
 
-    GlobalWhitelistPropagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
-                                                     IRB.getVoidTy(), IRB.getInt64Ty());
+    WhitelistOfAddrOutEnclave_global_propagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
+                                                                       IRB.getVoidTy(), IRB.getInt64Ty());
     // void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt)
-    SGXSanEdgeCheck = M.getOrInsertFunction("sgxsan_edge_check", IRB.getVoidTy(),
-                                            IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt32Ty());
+    sgxsan_edge_check = M.getOrInsertFunction("sgxsan_edge_check", IRB.getVoidTy(),
+                                              IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt32Ty());
     SGXSanMemcpyS = M.getOrInsertFunction("sgxsan_memcpy_s", IRB.getInt32Ty(), IRB.getInt8PtrTy(),
                                           IRB.getInt64Ty(), IRB.getInt8PtrTy(), IRB.getInt64Ty());
     SGXSanMemsetS = M.getOrInsertFunction("sgxsan_memset_s", IRB.getInt32Ty(), IRB.getInt8PtrTy(),
@@ -458,7 +456,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
             Value *ElseIfCond = IRB.CreateOr(CmpEndAddrULTEnclaveBase, CmpStartAddrUGTEnclaveEnd);
             Instruction *ElseIfTerm = SplitBlockAndInsertIfThen(ElseIfCond, ElseTI, false);
             IRB.SetInsertPoint(ElseIfTerm);
-            IRB.CreateCall(OutAddrWhitelistCheck, {AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3)), IRB.getInt1(IsWrite)});
+            IRB.CreateCall(WhitelistOfAddrOutEnclave_query, {AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3)), IRB.getInt1(IsWrite)});
         }
     }
 
@@ -655,7 +653,9 @@ void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
     IRBuilder<> IRB(SI);
     Value *val = SI->getValueOperand();
 
-    IRB.CreateCall(GlobalWhitelistPropagate, IRB.CreateCast(val->getType()->isPointerTy() ? Instruction::PtrToInt : Instruction::ZExt, val, IRB.getInt64Ty()));
+    IRB.CreateCall(WhitelistOfAddrOutEnclave_global_propagate, {val->getType()->isPointerTy()
+                                                                    ? IRB.CreatePtrToInt(val, IRB.getInt64Ty())
+                                                                    : IRB.CreateIntCast(val, IRB.getInt64Ty(), false)});
 }
 
 Type *AddressSanitizer::unpackArrayType(Type *type)
@@ -702,7 +702,7 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
         IRB.SetInsertPoint(PointerCheckTerm);
         if (checkCurrentLevelPtr)
         {
-            IRB.CreateCall(SGXSanEdgeCheck,
+            IRB.CreateCall(sgxsan_edge_check,
                            {IRB.CreatePointerCast(operand, IRB.getInt64Ty()),
                             IRB.getInt64(DL.getTypeAllocSize(pointerType->getElementType())),
                             (eleCnt == nullptr ? IRB.getInt32(-1) : eleCnt)});
@@ -790,11 +790,11 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction
         }
         TLSMgrInstrumentedEcall.emplace(ecallWrapper);
     }
-    // instrument `OutAddrWhitelistActive` before RealEcall
+    // instrument `WhitelistOfAddrOutEnclave_active` before RealEcall
     IRBuilder<> IRB(CI);
-    IRB.CreateCall(OutAddrWhitelistActive);
+    IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
     const DataLayout &DL = CI->getModule()->getDataLayout();
-    // instrument `SGXSanEdgeCheck` for each actual parameter of RealEcall before RealEcall
+    // instrument `sgxsan_edge_check` for each actual parameter of RealEcall before RealEcall
     for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++)
     {
         IRB.SetInsertPoint(CI);
@@ -835,9 +835,9 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction
             instrumentParameterCheck(operand, IRB, DL, 0);
         }
     }
-    // instrument `OutAddrWhitelistDeactive` after RealEcall
+    // instrument `WhitelistOfAddrOutEnclave_deactive` after RealEcall
     IRB.SetInsertPoint(CI->getNextNode());
-    IRB.CreateCall(OutAddrWhitelistDeactive);
+    IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
 
     return true;
 }
@@ -846,7 +846,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVecto
 {
     Instruction &firstFuncInsertPoint = *OcallWrapper.getEntryBlock().getFirstInsertionPt();
     IRBuilder<> IRB(&firstFuncInsertPoint);
-    IRB.CreateCall(OutAddrWhitelistDeactive);
+    IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
 
     for (Instruction *RetInst : ReturnInstVec)
     {
@@ -880,7 +880,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVecto
             }
         }
         IRB.SetInsertPoint(RetInst);
-        IRB.CreateCall(OutAddrWhitelistActive);
+        IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
     }
     return true;
 }

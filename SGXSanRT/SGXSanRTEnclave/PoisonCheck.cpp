@@ -54,12 +54,3 @@ bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8
     }
     return false;
 }
-
-bool sgxsan_region_is_in_elrange_and_not_poisoned(uint64_t beg, uint64_t size, uint8_t mask)
-{
-    if (is_addr_in_elrange_ex(beg, size))
-    {
-        return (sgxsan_region_is_poisoned(beg, size, mask) == 0);
-    }
-    return false;
-}

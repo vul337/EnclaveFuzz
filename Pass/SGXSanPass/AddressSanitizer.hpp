@@ -86,8 +86,9 @@ private:
 
     llvm::GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
 
-    llvm::FunctionCallee OutAddrWhitelistInit, OutAddrWhitelistDestroy, OutAddrWhitelistActive, OutAddrWhitelistDeactive,
-        OutAddrWhitelistCheck, GlobalWhitelistPropagate, SGXSanEdgeCheck, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
+    llvm::FunctionCallee WhitelistOfAddrOutEnclave_active, WhitelistOfAddrOutEnclave_deactive,
+        WhitelistOfAddrOutEnclave_query, WhitelistOfAddrOutEnclave_global_propagate,
+        sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
         EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd;
 #if (USE_SGXSAN_MALLOC)
     llvm::FunctionCallee SGXSanMalloc, SGXSanFree, SGXSanCalloc, SGXSanRealloc;

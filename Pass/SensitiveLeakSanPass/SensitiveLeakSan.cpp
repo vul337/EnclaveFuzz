@@ -46,30 +46,56 @@ void SensitiveLeakSan::instrumentSensitiveInstObjPoison(SVF::ObjPN *objPN)
     if (isFunctionObjPN(objPN))
         return;
     Instruction *objI = cast<Instruction>(const_cast<Value *>(objPN->getValue()));
-    IRBuilder<> IRB(objI->getNextNode());
-
-    Value *obj = nullptr, *objSize = nullptr;
-    if (SVF::GepObjPN *gepObjPN = SVF::SVFUtil::dyn_cast<SVF::GepObjPN>(objPN))
+    SmallVector<Instruction *> objLivePoints;
+    if (AllocaInst *objAI = dyn_cast<AllocaInst>(objI))
     {
-        auto inStructOffset = gepObjPN->getLocationSet().getOffset();
-        obj = IRB.CreateGEP(objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
-        objSize = IRB.getInt64(getTypeAllocaSize(cast<PointerType>(obj->getType())->getElementType()));
+        SmallDenseMap<AllocaInst *, SmallVector<IntrinsicInst *>> AILifeTimeStart;
+        instVisitor->getAILifeTimeStart(AILifeTimeStart);
+        for (auto start : AILifeTimeStart[objAI])
+        {
+            objLivePoints.push_back(start->getNextNode());
+        }
+        if (objLivePoints.size() == 0)
+        {
+            objLivePoints.push_back(objAI->getNextNode());
+        }
     }
-    else if (isa<SVF::FIObjPN>(objPN))
+    else if (CallInst *objCI = dyn_cast<CallInst>(objI))
     {
-        obj = objI;
-        objSize = getStackOrHeapInstObjSize(objI, IRB);
-        assert(objSize != nullptr);
+        objLivePoints.push_back(objCI->getNextNode());
     }
     else
+    {
         abort();
-    Value *objAddrInt = IRB.CreatePtrToInt(obj, IRB.getInt64Ty());
-    // IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n-[Collect]->\n" + toString(objPN)),
-    //                            objAddrInt,
-    //                            objSize});
-    // PoisonObject(obj, objSize, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
-    IRB.CreateCall(__sgxsan_poison_valid_shadow, {objAddrInt, objSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
-    cleanStackObjectSensitiveShadow(objPN);
+    }
+    assert(objLivePoints.size() >= 1);
+    for (auto insertPt : objLivePoints)
+    {
+        IRBuilder<> IRB(insertPt);
+
+        Value *obj = nullptr, *objSize = nullptr;
+        if (SVF::GepObjPN *gepObjPN = SVF::SVFUtil::dyn_cast<SVF::GepObjPN>(objPN))
+        {
+            auto inStructOffset = gepObjPN->getLocationSet().getOffset();
+            obj = IRB.CreateGEP(objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
+            objSize = IRB.getInt64(getTypeAllocaSize(cast<PointerType>(obj->getType())->getElementType()));
+        }
+        else if (isa<SVF::FIObjPN>(objPN))
+        {
+            obj = objI;
+            objSize = getStackOrHeapInstObjSize(objI, IRB);
+            assert(objSize != nullptr);
+        }
+        else
+            abort();
+        Value *objAddrInt = IRB.CreatePtrToInt(obj, IRB.getInt64Ty());
+        // IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n-[Collect]->\n" + toString(objPN)),
+        //                            objAddrInt,
+        //                            objSize});
+        // PoisonObject(obj, objSize, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
+        IRB.CreateCall(__sgxsan_poison_valid_shadow, {objAddrInt, objSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
+    }
+    // cleanStackObjectSensitiveShadow(objPN);
 }
 
 Value *SensitiveLeakSan::getStackOrHeapInstObjSize(Instruction *objI, IRBuilder<> &IRB)
@@ -475,7 +501,6 @@ void SensitiveLeakSan::includeSGXSanCheck()
     is_addr_in_elrange = M->getOrInsertFunction("is_addr_in_elrange", IRB.getInt1Ty(), IRB.getInt64Ty());
     is_addr_in_elrange_ex = M->getOrInsertFunction("is_addr_in_elrange_ex", IRB.getInt1Ty(), IRB.getInt64Ty(), IRB.getInt64Ty());
     sgxsan_region_is_in_elrange_and_poisoned = M->getOrInsertFunction("sgxsan_region_is_in_elrange_and_poisoned", IRB.getInt1Ty(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
-    sgxsan_region_is_in_elrange_and_not_poisoned = M->getOrInsertFunction("sgxsan_region_is_in_elrange_and_not_poisoned", IRB.getInt1Ty(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
 }
 
 void SensitiveLeakSan::initializeCallbacks()
@@ -795,7 +820,7 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI)
         // IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(SI)), dstPtrInt, dstMemSizeVal});
         IRB.CreateCall(__sgxsan_poison_valid_shadow, {dstPtrInt, dstMemSizeVal, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
         // PoisonObject(dstPtr, dstMemSizeVal, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
-        cleanStackObjectSensitiveShadow(dstPtr);
+        // cleanStackObjectSensitiveShadow(dstPtr);
         poisonedInst.emplace(SI);
     }
 }
@@ -834,7 +859,7 @@ void SensitiveLeakSan::pushPtObj2WorkList(Value *ptr)
     }
 }
 
-/* void SensitiveLeakSan::PoisonObject(Value *objPtr, Value *objSize, IRBuilder<> &IRB, uint8_t poisonValue)
+void SensitiveLeakSan::PoisonObject(Value *objPtr, Value *objSize, IRBuilder<> &IRB, uint8_t poisonValue)
 {
     assert(objPtr->getType()->isPointerTy());
     Value *shadowAddr = memToShadowPtr(objPtr, IRB);
@@ -848,17 +873,14 @@ void SensitiveLeakSan::pushPtObj2WorkList(Value *ptr)
     LoadInst *lastShadowByte = IRB.CreateLoad(lastShadowBytePtr);
     setNoSanitizeMetadata(lastShadowByte);
     Value *validShadow = IRB.CreateICmpULT(lastShadowByte, IRB.getInt8(0x8));
-    Instruction *thenTerm = nullptr, *elseTerm = nullptr;
-    SplitBlockAndInsertIfThenElse(validShadow, &(*IRB.GetInsertPoint()), &thenTerm, &elseTerm);
-    IRB.SetInsertPoint(thenTerm);
-    StoreInst *lastShadowByteSI = IRB.CreateStore(IRB.CreateAdd(lastShadowByte, IRB.getInt8(poisonValue)), lastShadowBytePtr);
+    StoreInst *lastShadowByteSI = IRB.CreateStore(IRB.CreateSelect(validShadow,
+                                                                   IRB.CreateAdd(lastShadowByte, IRB.getInt8(poisonValue)),
+                                                                   IRB.getInt8(poisonValue)),
+                                                  lastShadowBytePtr);
     setNoSanitizeMetadata(lastShadowByteSI);
-    IRB.SetInsertPoint(elseTerm);
-    lastShadowByteSI = IRB.CreateStore(IRB.getInt8(poisonValue), lastShadowBytePtr);
-    setNoSanitizeMetadata(lastShadowByteSI);
-} */
+}
 
-void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN)
+/* void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN)
 {
     if (isa<SVF::DummyObjPN>(objPN) || isFunctionObjPN(objPN))
         return;
@@ -902,7 +924,7 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(Value *obj)
         SVF::ObjPN *objPN = cast<SVF::ObjPN>(pag->getPAGNode(objPNID));
         cleanStackObjectSensitiveShadow(objPN);
     }
-}
+} */
 
 void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *insertPoint, Value *destPtr, Value *srcPtr, Value *size)
 {
@@ -946,10 +968,24 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
         //                                          RoundUpUDiv(IRB, size, SHADOW_GRANULARITY));
         // setNoSanitizeMetadata(memcpyCI);
         pushPtObj2WorkList(destPtr);
-        cleanStackObjectSensitiveShadow(destPtr);
+        // cleanStackObjectSensitiveShadow(destPtr);
         // record this memory transfer CI has been instrumented
         processedMemTransferInst.emplace(CI);
     }
+}
+
+bool SensitiveLeakSan::isMemsetS(CallInst *CI)
+{
+    Function *callee = CI->getCalledFunction();
+    if (callee)
+    {
+        StringRef calleeName = callee->getName();
+        if (calleeName.equals("memset_s"))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool SensitiveLeakSan::isSecureVersionMemTransferCI(CallInst *CI)
@@ -1016,6 +1052,29 @@ void SensitiveLeakSan::getNonCastUsers(Value *value, std::vector<User *> &users)
     }
 }
 
+void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned, CallInst *MSI, Value *dstPtr, Value *setSize)
+{
+    if (poisonedInst.count(MSI) == 0)
+    {
+        Instruction *srcIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, MSI, false);
+        IRBuilder<> IRB(srcIsPoisonedTerm);
+        Value *dstPtrInt = IRB.CreatePtrToInt(dstPtr, IRB.getInt64Ty());
+        assert(not isa<Function>(dstPtr));
+        CallInst *isDestInElrange = IRB.CreateCall(is_addr_in_elrange_ex, {dstPtrInt, setSize});
+
+        Instruction *destIsInElrangeTerm = SplitBlockAndInsertIfThen(isDestInElrange, srcIsPoisonedTerm, false);
+
+        IRB.SetInsertPoint(destIsInElrangeTerm);
+        // printSrcAtRT(IRB, src);
+        // printStrAtRT(IRB, "-[Memset]->\n");
+        // IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(MSI)), dstPtrInt, setSize});
+        IRB.CreateCall(__sgxsan_poison_valid_shadow, {dstPtrInt, setSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
+        // PoisonObject(dstPtr, setSize, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
+        // cleanStackObjectSensitiveShadow(dstPtr);
+        poisonedInst.emplace(MSI);
+    }
+}
+
 void SensitiveLeakSan::propagateShadow(Value *src)
 {
     // src maybe 'Function Argument'/LoadInst/'Return Value of CallInst'
@@ -1035,18 +1094,39 @@ void SensitiveLeakSan::propagateShadow(Value *src)
             }
             else if (CallInst *CI = dyn_cast<CallInst>(srcUser))
             {
-                llvm::SmallVector<Function *> calleeVec;
-                getDirectAndIndirectCalledFunction(CI, calleeVec);
-                for (Function *callee : calleeVec)
+                if (MemSetInst *MSI = dyn_cast<MemSetInst>(CI))
                 {
-                    if (callee->isDeclaration() || isEncryptionFunction(callee))
-                        continue;
-                    int opPos = getCallInstOperandPosition(CI, src);
-                    assert(opPos != -1);
-                    PoisonCIOperand(src, isSrcPoisoned, CI, opPos);
-                    if (!callee->isVarArg())
+                    if (stripCast(MSI->getArgOperand(1)) == src)
                     {
-                        propagateShadow(callee->getArg(opPos));
+                        PoisonMemsetDst(src, isSrcPoisoned, MSI, MSI->getArgOperand(0), MSI->getArgOperand(2));
+                        pushPtObj2WorkList(MSI->getArgOperand(0));
+                    }
+                }
+                else if (isMemsetS(CI))
+                {
+                    if (stripCast(CI->getArgOperand(2)) == src)
+                    {
+                        IRBuilder<> IRB(CI);
+                        Value *setSize = IRB.CreateSelect(IRB.CreateICmpSLT(CI->getArgOperand(1), CI->getArgOperand(3)), CI->getArgOperand(1), CI->getArgOperand(3));
+                        PoisonMemsetDst(src, isSrcPoisoned, CI, CI->getArgOperand(0), setSize);
+                        pushPtObj2WorkList(CI->getArgOperand(0));
+                    }
+                }
+                else
+                {
+                    llvm::SmallVector<Function *> calleeVec;
+                    getDirectAndIndirectCalledFunction(CI, calleeVec);
+                    for (Function *callee : calleeVec)
+                    {
+                        if (callee->isDeclaration() || isEncryptionFunction(callee))
+                            continue;
+                        int opPos = getCallInstOperandPosition(CI, src);
+                        assert(opPos != -1);
+                        PoisonCIOperand(src, isSrcPoisoned, CI, opPos);
+                        if (!callee->isVarArg())
+                        {
+                            propagateShadow(callee->getArg(opPos));
+                        }
                     }
                 }
             }

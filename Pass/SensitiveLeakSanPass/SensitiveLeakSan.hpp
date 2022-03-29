@@ -70,20 +70,22 @@ public:
     void PoisonCIOperand(llvm::Value *src, llvm::Value *isPoisoned, llvm::CallInst *CI, int operandPosition);
     void PoisonSI(llvm::Value *src, llvm::Value *isPoisoned, llvm::StoreInst *SI);
     void PoisonRetShadow(llvm::Value *src, llvm::Value *isPoisoned, llvm::ReturnInst *calleeRI);
+    void PoisonMemsetDst(llvm::Value *src, llvm::Value *isSrcPoisoned, llvm::CallInst *MSI, llvm::Value *dstPtr, llvm::Value *setSize);
     static llvm::Value *stripCast(llvm::Value *v);
     void propagateShadow(llvm::Value *src);
     uint64_t getTypeAllocaSize(llvm::Type *type);
     static bool isAnnotationIntrinsic(llvm::CallInst *CI);
     static std::string extractAnnotation(llvm::Value *annotationStrVal);
     static bool isSecureVersionMemTransferCI(llvm::CallInst *CI);
+    bool isMemsetS(llvm::CallInst *CI);
     static bool StringRefContainWord(llvm::StringRef str, std::string word);
     static bool isEncryptionFunction(llvm::Function *F);
-    void cleanStackObjectSensitiveShadow(llvm::Value *stackObject);
-    // void PoisonObject(llvm::Value *objPtr, llvm::Value *objSize, llvm::IRBuilder<> &IRB, uint8_t poisonValue);
+    // void cleanStackObjectSensitiveShadow(llvm::Value *stackObject);
+    void PoisonObject(llvm::Value *objPtr, llvm::Value *objSize, llvm::IRBuilder<> &IRB, uint8_t poisonValue);
     static void getNonCastUsers(llvm::Value *value, std::vector<llvm::User *> &users);
     void poisonSensitiveGlobalVariableAtRuntime();
     void initializeCallbacks();
-    void cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN);
+    // void cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN);
     llvm::Value *getStackOrHeapInstObjSize(llvm::Instruction *objI, llvm::IRBuilder<> &IRB);
     void dumpPts(SVF::PAGNode *PN);
     void dumpRevPts(SVF::PAGNode *PN);
@@ -109,7 +111,7 @@ private:
         query_thread_func_arg_shadow_stack, clear_thread_func_arg_shadow_stack,
         push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
         sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
-        sgxsan_region_is_in_elrange_and_poisoned, sgxsan_region_is_in_elrange_and_not_poisoned,
+        sgxsan_region_is_in_elrange_and_poisoned,
         PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, __sgxsan_poison_valid_shadow;
 
     llvm::Module *M;

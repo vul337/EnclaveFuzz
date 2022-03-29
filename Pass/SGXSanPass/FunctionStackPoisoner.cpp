@@ -274,18 +274,18 @@ Value *FunctionStackPoisoner::createAllocaForLayout(
     IRBuilder<> &IRB, const ASanStackFrameLayout &L, bool Dynamic)
 {
     AllocaInst *Alloca;
-    // if (Dynamic)
-    // {
-    //     Alloca = IRB.CreateAlloca(IRB.getInt8Ty(),
-    //                               ConstantInt::get(IRB.getInt64Ty(), L.FrameSize),
-    //                               "MyAlloca");
-    // }
-    // else
-    // {
-    Alloca = IRB.CreateAlloca(ArrayType::get(IRB.getInt8Ty(), L.FrameSize),
-                              nullptr, "MyAlloca");
-    assert(Alloca->isStaticAlloca());
-    // }
+    if (Dynamic)
+    {
+        Alloca = IRB.CreateAlloca(IRB.getInt8Ty(),
+                                  ConstantInt::get(IRB.getInt64Ty(), L.FrameSize),
+                                  "MyAlloca");
+    }
+    else
+    {
+        Alloca = IRB.CreateAlloca(ArrayType::get(IRB.getInt8Ty(), L.FrameSize),
+                                  nullptr, "MyAlloca");
+        assert(Alloca->isStaticAlloca());
+    }
     assert((ClRealignStack & (ClRealignStack - 1)) == 0);
     size_t FrameAlignment = std::max(L.FrameAlignment, (size_t)ClRealignStack);
     Alloca->setAlignment(Align(FrameAlignment));
