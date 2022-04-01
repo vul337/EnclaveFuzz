@@ -49,23 +49,18 @@ struct chunk
 
 void *MALLOC(size_t size)
 {
-	if (not asan_inited)
+	// PRINTF("\n[malloc] is_in_heap_operator_wrapper=%d\n", is_in_heap_operator_wrapper);
+	if (not asan_inited || is_in_heap_operator_wrapper)
 	{
 		return BACKEND_MALLOC(size);
 	}
-
-	if (is_in_heap_operator_wrapper)
-	{
-		return BACKEND_MALLOC(size);
-	}
-	is_in_heap_operator_wrapper = true;
-
-	uptr alignment = SHADOW_GRANULARITY;
-
 	// if (size == 0)
 	// {
 	// 	return nullptr;
 	// }
+	is_in_heap_operator_wrapper = true;
+
+	uptr alignment = SHADOW_GRANULARITY;
 
 	uptr rz_size = ComputeRZSize(size);
 	uptr rounded_size = RoundUpTo(size, alignment);
@@ -78,6 +73,7 @@ void *MALLOC(size_t size)
 
 	if (allocated == nullptr)
 	{
+		is_in_heap_operator_wrapper = false;
 		return nullptr;
 	}
 
@@ -117,21 +113,16 @@ void *MALLOC(size_t size)
 
 void FREE(void *ptr)
 {
-	if (not asan_inited)
+	// PRINTF("\n[free] is_in_heap_operator_wrapper %d\n", is_in_heap_operator_wrapper);
+	if (not asan_inited || is_in_heap_operator_wrapper)
 	{
 		BACKEND_FREE(ptr);
 		return;
 	}
-
-	if (is_in_heap_operator_wrapper)
-	{
-		BACKEND_FREE(ptr);
-		return;
-	}
-	is_in_heap_operator_wrapper = true;
-
 	if (ptr == nullptr)
 		return;
+
+	is_in_heap_operator_wrapper = true;
 
 	uptr user_beg = reinterpret_cast<uptr>(ptr);
 	uptr alignment = SHADOW_GRANULARITY;
