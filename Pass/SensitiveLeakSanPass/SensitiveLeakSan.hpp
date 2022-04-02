@@ -51,7 +51,7 @@ public:
     void add2SensitiveObjAndPoison(SVF::ObjPN *obj);
     static llvm::Value *RoundUpUDiv(llvm::IRBuilder<> &IRB, llvm::Value *size, uint64_t dividend);
     uint64_t RoundUpUDiv(uint64_t dividend, uint64_t divisor);
-    void pushPtObj2WorkList(llvm::Value *ptr);
+    void addPtObj2WorkList(llvm::Value *ptr);
     static llvm::StringRef getBelongedFunctionName(SVF::PAGNode *node);
     static llvm::StringRef getBelongedFunctionName(llvm::Value *val);
     void setNoSanitizeMetadata(llvm::Instruction *I);

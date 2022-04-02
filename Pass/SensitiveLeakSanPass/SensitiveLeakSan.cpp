@@ -170,10 +170,14 @@ std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal)
 
 void SensitiveLeakSan::add2SensitiveObjAndPoison(SVF::ObjPN *objPN)
 {
+    assert(objPN->hasValue());
+    Value *obj = const_cast<Value *>(objPN->getValue());
+    assert(obj->getType()->isPointerTy());
+    assert(getPointerLevel(obj) == 1);
+    assert(not isa<Function>(obj));
     auto emplaceResult = SensitiveObjs.emplace(objPN);
     if (emplaceResult.second)
     {
-        Value *obj = const_cast<Value *>(objPN->getValue());
         if (isa<Instruction>(obj))
         {
             instrumentSensitiveInstObjPoison(objPN);
@@ -197,6 +201,7 @@ void SensitiveLeakSan::add2SensitiveObjAndPoison(SVF::ObjPN *objPN)
 
 int SensitiveLeakSan::getPointerLevel(Value *ptr)
 {
+    assert(ptr);
     int level = 0;
     Type *type = ptr->getType();
     while (PointerType *ptrTy = dyn_cast<PointerType>(type))
@@ -221,6 +226,7 @@ void SensitiveLeakSan::getNonPointerObjPNs(Value *value, std::unordered_set<SVF:
 {
     if (isa<Function>(value))
         return;
+    assert(pag->hasValueNode(value));
     for (SVF::NodeID objPNID : ander->getPts(pag->getValueNode(value)))
     {
         if (SVF::ObjPN *objPN = SVF::SVFUtil::dyn_cast<SVF::ObjPN>(pag->getPAGNode(objPNID)))
@@ -230,7 +236,7 @@ void SensitiveLeakSan::getNonPointerObjPNs(Value *value, std::unordered_set<SVF:
 
 void SensitiveLeakSan::getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objs)
 {
-    assert(objPN != nullptr && objPN->isPointer());
+    assert(objPN && objPN->isPointer());
     if (isa<SVF::DummyObjPN>(objPN))
         return;
     Value *obj = const_cast<Value *>(objPN->getValue());
@@ -840,22 +846,17 @@ void SensitiveLeakSan::PoisonRetShadow(Value *src, Value *isPoisoned, ReturnInst
     }
 }
 
-void SensitiveLeakSan::pushPtObj2WorkList(Value *ptr)
+void SensitiveLeakSan::addPtObj2WorkList(Value *ptr)
 {
-    if (pag->hasValueNode(ptr))
+    assert(ptr->getType()->isPointerTy());
+    assert(getPointerLevel(ptr) == 1);
+    assert(not isa<Function>(ptr));
+    std::unordered_set<SVF::ObjPN *> objPNs;
+    getNonPointerObjPNs(ptr, objPNs);
+    for (auto objPN : objPNs)
     {
-        SVF::NodeID ptrValPNID = pag->getValueNode(ptr);
-        for (SVF::NodeID objPNID : ander->getPts(ptrValPNID))
-        {
-            SVF::PAGNode *PN = pag->getPAGNode(objPNID);
-            if (SVF::ObjPN *objPN = SVF::SVFUtil::dyn_cast<SVF::ObjPN>(PN))
-            {
-                if (isa<SVF::DummyObjPN>(objPN) || isFunctionObjPN(objPN))
-                    continue;
-                if (ProcessedList.count(objPN) == 0)
-                    WorkList.emplace(objPN);
-            }
-        }
+        if (ProcessedList.count(objPN) == 0)
+            WorkList.emplace(objPN);
     }
 }
 
@@ -967,7 +968,7 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
         //                                          memToShadowPtr(srcPtr, IRB), MaybeAlign(),
         //                                          RoundUpUDiv(IRB, size, SHADOW_GRANULARITY));
         // setNoSanitizeMetadata(memcpyCI);
-        pushPtObj2WorkList(destPtr);
+        addPtObj2WorkList(destPtr);
         // cleanStackObjectSensitiveShadow(destPtr);
         // record this memory transfer CI has been instrumented
         processedMemTransferInst.emplace(CI);
@@ -1090,7 +1091,7 @@ void SensitiveLeakSan::propagateShadow(Value *src)
             {
                 assert(stripCast(SI->getValueOperand()) == src);
                 PoisonSI(src, isSrcPoisoned, SI);
-                pushPtObj2WorkList(SI->getPointerOperand());
+                addPtObj2WorkList(SI->getPointerOperand());
             }
             else if (CallInst *CI = dyn_cast<CallInst>(srcUser))
             {
@@ -1099,7 +1100,7 @@ void SensitiveLeakSan::propagateShadow(Value *src)
                     if (stripCast(MSI->getArgOperand(1)) == src)
                     {
                         PoisonMemsetDst(src, isSrcPoisoned, MSI, MSI->getArgOperand(0), MSI->getArgOperand(2));
-                        pushPtObj2WorkList(MSI->getArgOperand(0));
+                        addPtObj2WorkList(MSI->getArgOperand(0));
                     }
                 }
                 else if (isMemsetS(CI))
@@ -1109,7 +1110,7 @@ void SensitiveLeakSan::propagateShadow(Value *src)
                         IRBuilder<> IRB(CI);
                         Value *setSize = IRB.CreateSelect(IRB.CreateICmpSLT(CI->getArgOperand(1), CI->getArgOperand(3)), CI->getArgOperand(1), CI->getArgOperand(3));
                         PoisonMemsetDst(src, isSrcPoisoned, CI, CI->getArgOperand(0), setSize);
-                        pushPtObj2WorkList(CI->getArgOperand(0));
+                        addPtObj2WorkList(CI->getArgOperand(0));
                     }
                 }
                 else
@@ -1125,7 +1126,11 @@ void SensitiveLeakSan::propagateShadow(Value *src)
                         PoisonCIOperand(src, isSrcPoisoned, CI, opPos);
                         if (!callee->isVarArg())
                         {
-                            propagateShadow(callee->getArg(opPos));
+                            auto arg = callee->getArg(opPos);
+                            if (getPointerLevel(arg) == getPointerLevel(src))
+                            {
+                                propagateShadow(arg);
+                            }
                         }
                     }
                 }
