@@ -9,7 +9,6 @@ class SensitivePoisoner
 public:
     static bool shallow_poison_senitive();
     static void collect_layout_infos();
-    static std::pair<uint64_t, uint64_t> getAddrBelongedStack(uint64_t addr);
 
 private:
     static bool get_layout_info(const uint64_t start_rva, layout_entry_t *layout);

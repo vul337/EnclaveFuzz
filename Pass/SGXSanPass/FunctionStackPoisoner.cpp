@@ -734,8 +734,8 @@ void FunctionStackPoisoner::processStaticAllocas()
         // Mark the current frame as retired.
         IRBRet.CreateStore(ConstantInt::get(IntptrTy, kRetiredStackFrameMagic),
                            BasePlus0);
-
-        copyToShadow(ShadowAfterScope, ShadowClean, IRBRet, ShadowBase);
+        // clean all shadowbyte of stack variables to avoid other places we may set shadowbyte for other purposes (e.g. in SensitiveLeakSan), but some alloca can't processed by asan may be unable to clean shadowbyte set at other places
+        copyToShadow(SmallVector<uint8_t, 64>(ShadowAfterScope.size(), 1) /* ShadowAfterScope */, ShadowClean, IRBRet, ShadowBase);
     }
 
     // We are done. Remove the old unused alloca instructions.

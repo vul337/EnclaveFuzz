@@ -1230,7 +1230,13 @@ std::string SensitiveLeakSan::toString(SVF::PAGNode *PN)
 
 std::string SensitiveLeakSan::toString(Value *val)
 {
-    return toString(pag->getPAGNode(pag->getValueNode(val)));
+    std::string str;
+    raw_string_ostream str_ostream(str);
+    val->print(str_ostream, true);
+    std::stringstream ss;
+    ss << "Func: " << getBelongedFunctionName(val).str() << "; Name: " << SGXSanGetValueName(val).str() << "\n"
+       << str;
+    return ss.str();
 }
 
 void SensitiveLeakSan::dump(SVF::PAGNode *PN)

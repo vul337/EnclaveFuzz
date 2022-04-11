@@ -4,7 +4,6 @@
 #include "StackTrace.hpp"
 #include "SGXSanRTTBridge.hpp"
 #include "SGXInternal.hpp"
-#include "SensitivePoisoner.hpp"
 #include <cstdlib>
 
 // level == 0 means return address of function that called 'get_ret_addrs_in_stack'
@@ -13,24 +12,18 @@ void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs, uint64_t base_addr
     level += 1;
     uint64_t ret_addr = (uint64_t)__builtin_return_address(0);
     uint64_t bp = (uint64_t)__builtin_frame_address(0);
-    SensitivePoisoner::collect_layout_infos();
-    auto stack_range = SensitivePoisoner::getAddrBelongedStack(bp);
-    // PRINTF("stack_range [0x%lx, 0x%lx]\n", stack_range.first, stack_range.second);
-    if (stack_range.first != 0 and stack_range.second != 0)
+    for (int i = 0; i - level < 50; i++)
     {
-        for (int i = 0; i - level < 50; i++)
+        if (i >= level)
         {
-            if (i >= level)
-            {
-                ret_addrs.emplace_back(ret_addr - base_addr);
-            }
-            bp = *(uint64_t *)bp;
-            if (bp < stack_range.first or stack_range.second < bp)
-                break;
-            ret_addr = *(uint64_t *)(bp + 8);
-            if (!is_addr_in_elrange(ret_addr))
-                break;
+            ret_addrs.emplace_back(ret_addr - base_addr);
         }
+        bp = *(uint64_t *)bp;
+        if (not is_stack_addr((void *)bp, sizeof(uintptr_t)))
+            break;
+        ret_addr = *(uint64_t *)(bp + 8);
+        if (!is_addr_in_elrange(ret_addr))
+            break;
     }
 }
 
@@ -56,24 +49,18 @@ uint64_t get_last_return_address(uint64_t base_addr, int level)
     level += 1;
     uint64_t ret_addr = (uint64_t)__builtin_return_address(0);
     uint64_t bp = (uint64_t)__builtin_frame_address(0);
-    SensitivePoisoner::collect_layout_infos();
-    auto stack_range = SensitivePoisoner::getAddrBelongedStack(bp);
-    // PRINTF("stack_range [0x%lx, 0x%lx]\n", stack_range.first, stack_range.second);
-    if (stack_range.first != 0 and stack_range.second != 0)
+    for (int i = 0; i - level < 50; i++)
     {
-        for (int i = 0; i - level < 50; i++)
+        if (i >= level)
         {
-            if (i >= level)
-            {
-                return ret_addr - base_addr;
-            }
-            bp = *(uint64_t *)bp;
-            if (bp < stack_range.first or stack_range.second < bp)
-                break;
-            ret_addr = *(uint64_t *)(bp + 8);
-            if (!is_addr_in_elrange(ret_addr))
-                break;
+            return ret_addr - base_addr;
         }
+        bp = *(uint64_t *)bp;
+        if (not is_stack_addr((void *)bp, sizeof(uintptr_t)))
+            break;
+        ret_addr = *(uint64_t *)(bp + 8);
+        if (!is_addr_in_elrange(ret_addr))
+            break;
     }
 
     return 0;

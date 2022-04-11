@@ -170,6 +170,7 @@ extern "C"
     thread_data_t *get_thread_data(void);
     size_t get_heap_size(void);
     const void *get_tcs(void);
+    bool is_stack_addr(void *address, size_t size);
 #if defined(__cplusplus)
 }
 #endif

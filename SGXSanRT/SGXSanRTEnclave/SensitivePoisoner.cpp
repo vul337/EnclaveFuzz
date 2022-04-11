@@ -181,23 +181,3 @@ bool SensitivePoisoner::shallow_poison_senitive()
 
     return true;
 }
-
-std::pair<uint64_t, uint64_t> SensitivePoisoner::getAddrBelongedStack(uint64_t addr)
-{
-    for (size_t i = 0; i < m_stack_min_list.size(); i++)
-    {
-        std::pair<uint64_t, uint32_t> stack_min = m_stack_min_list[i];
-        uint64_t stack_base_addr = stack_min.first + (stack_min.second << 12) - 1 + g_enclave_base;
-        uint64_t stack_max_addr = stack_min.first + g_enclave_base;
-        assert(stack_max_addr < stack_base_addr);
-        if (i < m_stack_max_list.size())
-            stack_max_addr = m_stack_max_list[i].first + g_enclave_base;
-        assert(stack_max_addr < stack_base_addr);
-
-        if (stack_max_addr <= addr and addr <= stack_base_addr)
-        {
-            return std::pair<uint64_t, uint64_t>(stack_max_addr, stack_base_addr);
-        }
-    }
-    return std::pair<uint64_t, uint64_t>(0, 0);
-}
