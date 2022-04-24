@@ -13,14 +13,21 @@ namespace
     struct SensitiveLeakSanPass : public ModulePass
     {
         static char ID;
+
         SensitiveLeakSanPass() : ModulePass(ID) {}
+
+        void getAnalysisUsage(AnalysisUsage &AU) const override
+        {
+            AU.addRequired<CFLSteensAAWrapperPass>();
+        }
 
         bool runOnModule(Module &M) override
         {
-            SensitiveLeakSan SLSan(M);
+            CFLSteensAAResult &AAResult = getAnalysis<CFLSteensAAWrapperPass>().getResult();
+            SensitiveLeakSan SLSan(M, AAResult);
             return SLSan.runOnModule();
-        };
-    }; // end of struct SGXSanPass
+        }
+    }; // end of struct SensitiveLeakSanPass
 }
 
 char SensitiveLeakSanPass::ID = 0;

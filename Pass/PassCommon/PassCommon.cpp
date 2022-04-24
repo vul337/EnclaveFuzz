@@ -233,3 +233,24 @@ uint64_t getRedzoneSizeForScale(int MappingScale)
     // For scales 6 and 7, the redzone has to be 64 and 128 bytes respectively.
     return std::max(32U, 1U << MappingScale);
 }
+
+StringRef getDirectCalleeName(Value *value)
+{
+    if (auto CI = dyn_cast<CallInst>(value))
+    {
+        if (auto callee = CI->getCalledFunction())
+        {
+            return callee->getName();
+        }
+    }
+    return "";
+}
+
+StringRef getParentFuncName(Value *value)
+{
+    if (auto I = dyn_cast<Instruction>(value))
+    {
+        return I->getFunction()->getName();
+    }
+    return "";
+}

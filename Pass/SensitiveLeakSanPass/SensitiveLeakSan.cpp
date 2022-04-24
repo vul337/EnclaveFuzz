@@ -3,6 +3,19 @@
 #include "llvm/Demangle/Demangle.h"
 using namespace llvm;
 
+#if (USE_SGXSAN_MALLOC)
+#define MALLOC_USABLE_SZIE_STR "sgxsan_malloc_usable_size"
+#else
+// fix-me: how about tcmalloc
+#define MALLOC_USABLE_SZIE_STR "malloc_usable_size"
+#endif
+
+static cl::opt<int> heapAllocatorsMaxCollectionTimes(
+    "heap-allocators-max-collection-times",
+    cl::desc("max times of collection heap allocator wrappers"),
+    cl::Hidden,
+    cl::init(5));
+
 #define SGXSAN_SENSITIVE_OBJ_FLAG 0x20
 
 ShadowMapping Mapping = {3, SGXSAN_SHADOW_MAP_BASE};
@@ -114,25 +127,27 @@ Value *SensitiveLeakSan::getStackOrHeapInstObjSize(Instruction *objI, IRBuilder<
 
 Value *SensitiveLeakSan::getHeapObjSize(CallInst *CI, IRBuilder<> &IRB)
 {
+    assert(CI->getFunctionType()->getReturnType()->isPointerTy());
+    return IRB.CreateCall(func_malloc_usable_size, {IRB.CreatePointerCast(CI, IRB.getInt8PtrTy())});
+    // std::string calleeName = llvm::demangle(getDirectCalleeName(CI).str());
+    // if (calleeName.find("new") != std::string::npos || calleeName == "malloc")
+    // {
+    //     return CI->getArgOperand(0);
+    // }
+    // else if (calleeName == "realloc")
+    // {
+    //     return CI->getArgOperand(1);
+    // }
+    // else if (calleeName == "calloc")
+    // {
+    //     return IRB.CreateNUWMul(CI->getArgOperand(0), CI->getArgOperand(1));
+    // }
+    // else
+    // {
+    //     abort();
+    // }
 
-    if (Function *callee = CI->getCalledFunction())
-    {
-        std::string calleeName = llvm::demangle(callee->getName().str());
-        if (calleeName.find("new") != std::string::npos || calleeName == "malloc")
-        {
-            return CI->getArgOperand(0);
-        }
-        else if (calleeName == "realloc")
-        {
-            return CI->getArgOperand(1);
-        }
-        else if (calleeName == "calloc")
-        {
-            return IRB.CreateNUWMul(CI->getArgOperand(0), CI->getArgOperand(1));
-        }
-    }
-
-    return nullptr;
+    // return nullptr;
 }
 
 std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal)
@@ -253,12 +268,9 @@ void SensitiveLeakSan::getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set
     {
         if (CallInst *CI = dyn_cast<CallInst>(obj))
         {
-            Function *callee = CI->getCalledFunction();
-            assert(callee); // assument svf-recognized callee is not an indirect callee
-            std::vector<std::string> allocs{"malloc", "calloc", "realloc"};
-            std::string calleeName = llvm::demangle(callee->getName().str());
-            if (not(calleeName.find("new") /* 'operator new[](...)' */ != std::string::npos ||
-                    std::find(allocs.begin(), allocs.end(), calleeName) != allocs.end()))
+
+            std::string calleeName = getDirectCalleeName(CI).str();
+            if (llvm::demangle(calleeName).find("new") == std::string::npos and heapAllocatorNames.count(calleeName) == 0)
             {
                 // not interesting CI, get next objPN
                 return;
@@ -299,17 +311,9 @@ void SensitiveLeakSan::pushSensitiveObj(Value *annotatedPtr)
 
 bool SensitiveLeakSan::isAnnotationIntrinsic(CallInst *CI)
 {
-    assert(CI != nullptr);
-    Function *callee = CI->getCalledFunction();
-    if (callee)
-    {
-        StringRef funcName = callee->getName();
-        if (funcName.contains("llvm") && funcName.contains("annotation"))
-        {
-            return true;
-        }
-    }
-    return false;
+    assert(CI);
+    auto calleeName = getDirectCalleeName(CI);
+    return calleeName.contains("llvm") && calleeName.contains("annotation");
 }
 
 bool SensitiveLeakSan::StringRefContainWord(StringRef str, std::string word)
@@ -367,14 +371,11 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj(Module &M)
         {
             if (isEncryptionFunction(callee))
             {
-                std::vector<std::string> plaintextParamKeywords = {"2encrypt", "unencrypt", "src", "source", "2seal", "unseal", "plain", "in", "key"};
-
                 for (int i = 0; i < CI->getNumArgOperands(); i++)
                 {
                     Value *argOp = CI->getArgOperand(i);
                     if (argOp->getType()->isPointerTy())
                     {
-
                         std::unordered_set<SVF::ObjPN *> objSet;
                         getNonPointerObjPNs(argOp, objSet);
                         for (auto objPN : objSet)
@@ -475,14 +476,14 @@ void SensitiveLeakSan::includeElrange()
 
 void SensitiveLeakSan::initSVF()
 {
+    collectHeapAllocators();
+    SVF::ExtAPI::getExtAPI()->registerDefinedFunc(heapAllocatorWrapperNames, SVF::ExtAPI::EFT_ALLOC);
+
     svfModule = SVF::LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(*M);
     SVF::PAGBuilder builder;
 
     pag = builder.build(svfModule);
-    // SVF::DDAClient *client = new SVF::DDAClient(svfModule);
-    // client->initialise(svfModule);
-    // ander = new SVF::ContextDDA(pag, client);
-    // ander->initialize();
+
     ander = SVF::AndersenWaveDiff::createAndersenWaveDiff(pag);
     callgraph = ander->getPTACallGraph();
 }
@@ -521,19 +522,133 @@ void SensitiveLeakSan::initializeCallbacks()
     print_ptr = M->getOrInsertFunction("print_ptr", Type::getVoidTy(*C), Type::getInt8PtrTy(*C), Type::getInt64Ty(*C), Type::getInt64Ty(*C));
     print_arg = M->getOrInsertFunction("print_arg", Type::getVoidTy(*C), Type::getInt8PtrTy(*C), Type::getInt64Ty(*C), Type::getInt64Ty(*C));
     __sgxsan_poison_valid_shadow = M->getOrInsertFunction("__sgxsan_poison_valid_shadow", IRB.getVoidTy(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
+    func_malloc_usable_size = M->getOrInsertFunction(MALLOC_USABLE_SZIE_STR, IRB.getInt64Ty(), IRB.getInt8PtrTy());
 }
 
-SensitiveLeakSan::SensitiveLeakSan(Module &ArgM)
+void SensitiveLeakSan::collectHeapAllocatorGlobalPtrs()
+{
+    for (GlobalVariable &GV : M->globals())
+    {
+        if (GV.hasInitializer())
+        {
+            Function *init = dyn_cast<Function>(GV.getInitializer());
+            if (init && heapAllocators.count(init))
+            {
+                heapAllocatorGlobalPtrs.insert(&GV);
+            }
+        }
+    }
+}
+
+// A function is a heap allocator wrapper if it allocates memory using malloc etc., and returns the same pointer.
+bool SensitiveLeakSan::isHeapAllocatorWrapper(Function &F)
+{
+    // A heap allocator wrapper can have multiple allocator calls on different conditional branches as well as multiple return instructions
+    std::vector<CallInst *> heapPtrs;
+    std::vector<ReturnInst *> retInsts;
+    if (!F.getFunctionType()->getReturnType()->isPointerTy())
+        return false;
+
+    for (BasicBlock &BB : F)
+        for (Instruction &I : BB)
+        {
+            if (CallInst *CallI = dyn_cast<CallInst>(&I))
+            {
+                Function *calleeFunc = CallI->getCalledFunction();
+                Value *calleeValue = CallI->getCalledOperand();
+                // Direct call
+                if (calleeFunc && heapAllocators.count(calleeFunc))
+                {
+                    heapPtrs.push_back(CallI);
+                }
+                // Indirect call, then find if the function pointer is a global pointer that point to heap allocator
+                else if (calleeFunc == nullptr)
+                {
+                    if (LoadInst *LoadI = dyn_cast<LoadInst>(calleeValue))
+                    {
+                        // TODO: deal with uninitialized heapAllocatorGlobalPtr
+                        GlobalVariable *GV = dyn_cast<GlobalVariable>(LoadI->getPointerOperand());
+                        if (GV && heapAllocatorGlobalPtrs.count(GV))
+                        {
+                            heapPtrs.push_back(CallI);
+                        }
+                    }
+                }
+            }
+            else if (ReturnInst *RetI = dyn_cast<ReturnInst>(&I))
+            {
+                retInsts.push_back(RetI);
+            }
+        }
+
+    // If this function doesn't call heap allocator
+    if (heapPtrs.size() == 0)
+    {
+        return false;
+    }
+
+    // For all return instructions, check whether returned values are in heapPtrs
+    for (ReturnInst *RetI : retInsts)
+    {
+        if (std::find_if(
+                heapPtrs.begin(),
+                heapPtrs.end(),
+                [&](CallInst *heapPtr)
+                { return AAResult->query(MemoryLocation(RetI->getOperand(0), MemoryLocation::UnknownSize), MemoryLocation(heapPtr, MemoryLocation::UnknownSize)); }) == heapPtrs.end())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void SensitiveLeakSan::collectHeapAllocators()
+{
+
+    for (auto funcName : heapAllocatorBaseNames)
+    {
+        if (Function *func = M->getFunction(funcName))
+        {
+            heapAllocators.insert(func);
+        }
+    }
+
+    for (int num = 0; num < heapAllocatorsMaxCollectionTimes; num++)
+    {
+        // Handle global function pointers
+        collectHeapAllocatorGlobalPtrs();
+        for (Function &F : *M)
+        {
+            if (isHeapAllocatorWrapper(F))
+            {
+                heapAllocators.insert(&F);
+            }
+        }
+    }
+    for (auto heapAllocator : heapAllocators)
+    {
+        auto funcName = heapAllocator->getName().str();
+        // errs() << "[HeapAllocator] " << funcName << "\n";
+        heapAllocatorNames.insert(funcName);
+        if (heapAllocatorBaseNames.count(funcName) == 0)
+        {
+            heapAllocatorWrapperNames.insert(funcName);
+        }
+    }
+}
+
+SensitiveLeakSan::SensitiveLeakSan(Module &ArgM, CFLSteensAAResult &AAResult)
 {
     M = &ArgM;
+    this->AAResult = &AAResult;
     C = &(M->getContext());
     int LongSize = M->getDataLayout().getPointerSizeInBits();
     IntptrTy = Type::getIntNTy(*C, LongSize);
     includeThreadFuncArgShadow();
     includeElrange();
     includeSGXSanCheck();
-    initSVF();
     initializeCallbacks();
+    initSVF();
     instVisitor = new SGXSanInstVisitor(*M);
 }
 
@@ -975,33 +1090,11 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
     }
 }
 
-bool SensitiveLeakSan::isMemsetS(CallInst *CI)
-{
-    Function *callee = CI->getCalledFunction();
-    if (callee)
-    {
-        StringRef calleeName = callee->getName();
-        if (calleeName.equals("memset_s"))
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool SensitiveLeakSan::isSecureVersionMemTransferCI(CallInst *CI)
 {
-    Function *callee = CI->getCalledFunction();
-    if (callee)
-    {
-        StringRef calleeName = callee->getName();
-        if (calleeName.equals("memcpy_s") ||
-            calleeName.equals("memmove_s"))
-        {
-            return true;
-        }
-    }
-    return false;
+    auto calleeName = getDirectCalleeName(CI);
+    return calleeName == "memcpy_s" ||
+           calleeName == "memmove_s";
 }
 
 void SensitiveLeakSan::doVFA(Value *work)
@@ -1028,8 +1121,7 @@ void SensitiveLeakSan::doVFA(Value *work)
             }
             else
             {
-                Function *callee = CI->getCalledFunction();
-                if (callee && callee->getName().contains("llvm.ptr.annotation"))
+                if (getDirectCalleeName(CI).contains("llvm.ptr.annotation"))
                 {
                     doVFA(CI);
                 }
@@ -1103,7 +1195,7 @@ void SensitiveLeakSan::propagateShadow(Value *src)
                         addPtObj2WorkList(MSI->getArgOperand(0));
                     }
                 }
-                else if (isMemsetS(CI))
+                else if (getDirectCalleeName(CI) == "memset_s")
                 {
                     if (stripCast(CI->getArgOperand(2)) == src)
                     {
@@ -1185,7 +1277,8 @@ bool SensitiveLeakSan::runOnModule()
         for (auto ptrValPN : ptrValPNs)
         {
             // dump(ptrValPN);
-            doVFA(const_cast<Value *>(ptrValPN->getValue()));
+            auto ptrVal = const_cast<Value *>(ptrValPN->getValue());
+            doVFA(ptrVal);
         }
         // errs() << "========= End of showing point-to set ==========\n";
     }
@@ -1239,14 +1332,19 @@ std::string SensitiveLeakSan::toString(Value *val)
     return ss.str();
 }
 
+void SensitiveLeakSan::dump(SVF::NodeID nodeID)
+{
+    dump(pag->getPAGNode(nodeID));
+}
+
 void SensitiveLeakSan::dump(SVF::PAGNode *PN)
 {
-    errs() << toString(PN) << "\n";
+    errs() << toString(PN) << "\n\n";
 }
 
 void SensitiveLeakSan::dump(Value *val)
 {
-    errs() << toString(val) << "\n";
+    errs() << toString(val) << "\n\n";
 }
 
 bool SensitiveLeakSan::isFunctionObjPN(SVF::PAGNode *PN)

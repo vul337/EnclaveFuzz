@@ -38,3 +38,7 @@ std::tuple<int, int, llvm::Value *> convertParamLenAndValue2Tuple(llvm::Value *p
 llvm::Value *convertPointerLenAndValue2CountValue(llvm::Value *ptr,
                                                   llvm::Instruction *insertPoint,
                                                   std::pair<int64_t, llvm::Value *> lenAndValue);
+// if value isn't a direct CallInst, it return empty ""
+llvm::StringRef getDirectCalleeName(llvm::Value *value);
+// it value isn't instrcution, return empty ""
+llvm::StringRef getParentFuncName(llvm::Value *value);

@@ -5,6 +5,9 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
+#include "llvm/Analysis/MemoryLocation.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
@@ -13,12 +16,15 @@
 #include "llvm/Support/CommandLine.h"
 
 #include "SVF-FE/LLVMUtil.h"
+#include "SVF-FE/PAGBuilder.h"
 #include "Graphs/SVFG.h"
 #include "WPA/Andersen.h"
+#include "WPA/FlowSensitiveTBHC.h"
 #include "SABER/LeakChecker.h"
-#include "SVF-FE/PAGBuilder.h"
 #include "DDA/ContextDDA.h"
 #include "DDA/DDAClient.h"
+#include "MemoryModel/ConditionalPT.h"
+#include "Util/DPItem.h"
 
 #include "SGXSanInstVisitor.hpp"
 #include "PassCommon.hpp"
@@ -31,7 +37,7 @@ class SensitiveLeakSan
 {
 
 public:
-    SensitiveLeakSan(llvm::Module &M);
+    SensitiveLeakSan(llvm::Module &M, llvm::CFLSteensAAResult &AAResult);
     void includeThreadFuncArgShadow();
     void includeElrange();
     void includeSGXSanCheck();
@@ -77,7 +83,6 @@ public:
     static bool isAnnotationIntrinsic(llvm::CallInst *CI);
     static std::string extractAnnotation(llvm::Value *annotationStrVal);
     static bool isSecureVersionMemTransferCI(llvm::CallInst *CI);
-    bool isMemsetS(llvm::CallInst *CI);
     static bool StringRefContainWord(llvm::StringRef str, std::string word);
     static bool isEncryptionFunction(llvm::Function *F);
     // void cleanStackObjectSensitiveShadow(llvm::Value *stackObject);
@@ -90,14 +95,18 @@ public:
     void dumpPts(SVF::PAGNode *PN);
     void dumpRevPts(SVF::PAGNode *PN);
     void pushAndPopArgShadowFrameAroundCallInst(llvm::CallInst *CI);
-    std::string toString(SVF::PAGNode *PN);
-    std::string toString(llvm::Value *val);
-    void dump(SVF::PAGNode *PN);
-    void dump(llvm::Value *val);
+    static std::string toString(SVF::PAGNode *PN);
+    static std::string toString(llvm::Value *val);
+    static void dump(SVF::PAGNode *PN);
+    static void dump(llvm::Value *val);
+    void dump(SVF::NodeID nodeID);
     static llvm::StringRef SGXSanGetPNName(SVF::PAGNode *PN);
     bool isFunctionObjPN(SVF::PAGNode *PN);
     void printStrAtRT(llvm::IRBuilder<> &IRB, std::string str);
     void printSrcAtRT(llvm::IRBuilder<> &IRB, llvm::Value *src);
+    void collectHeapAllocators();
+    void collectHeapAllocatorGlobalPtrs();
+    bool isHeapAllocatorWrapper(llvm::Function &F);
 
 private:
     std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
@@ -105,27 +114,32 @@ private:
     std::unordered_set<llvm::CallInst *> processedMemTransferInst;
     std::unordered_map<llvm::CallInst *, std::unordered_set<int>> poisonedCI;
     std::unordered_map<llvm::Value *, llvm::Value *> poisonCheckedValues;
-    llvm::GlobalVariable *SGXSanEnclaveBaseAddr, *SGXSanEnclaveSizeAddr, *ThreadFuncArgShadow;
+    llvm::GlobalVariable *SGXSanEnclaveBaseAddr = nullptr, *SGXSanEnclaveSizeAddr = nullptr, *ThreadFuncArgShadow = nullptr;
     llvm::FunctionCallee poison_thread_func_arg_shadow_stack,
         unpoison_thread_func_arg_shadow_stack, onetime_query_thread_func_arg_shadow_stack,
         query_thread_func_arg_shadow_stack, clear_thread_func_arg_shadow_stack,
         push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
         sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
         sgxsan_region_is_in_elrange_and_poisoned,
-        PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, __sgxsan_poison_valid_shadow;
+        PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, __sgxsan_poison_valid_shadow, func_malloc_usable_size;
 
-    llvm::Module *M;
-    llvm::LLVMContext *C;
-    llvm::Type *IntptrTy;
+    llvm::Module *M = nullptr;
+    llvm::LLVMContext *C = nullptr;
+    llvm::Type *IntptrTy = nullptr;
 
-    SVF::SVFModule *svfModule;
-    SVF::PAG *pag;
-    // SVF::ContextDDA *ander;
-    SVF::Andersen *ander;
-    SVF::PTACallGraph *callgraph;
+    SVF::SVFModule *svfModule = nullptr;
+    SVF::PAG *pag = nullptr;
+    SVF::Andersen *ander = nullptr;
+    SVF::PTACallGraph *callgraph = nullptr;
 
-    SGXSanInstVisitor *instVisitor;
+    SGXSanInstVisitor *instVisitor = nullptr;
     llvm::SmallVector<llvm::Constant *> globalsToBePolluted;
-    llvm::Function *PoisonSensitiveGlobalModuleCtor;
-    llvm::Constant *StrSpeicifier;
+    llvm::Function *PoisonSensitiveGlobalModuleCtor = nullptr;
+    llvm::Constant *StrSpeicifier = nullptr;
+    std::set<llvm::Function *> heapAllocators;
+    std::set<llvm::GlobalVariable *> heapAllocatorGlobalPtrs;
+    llvm::CFLSteensAAResult *AAResult = nullptr;
+    std::unordered_set<std::string> heapAllocatorBaseNames{"malloc", "calloc", "realloc"},
+        heapAllocatorWrapperNames, heapAllocatorNames,
+        plaintextParamKeywords = {"2encrypt", "unencrypt", "src", "source", "2seal", "unseal", "plain", "in", "key"};
 };
