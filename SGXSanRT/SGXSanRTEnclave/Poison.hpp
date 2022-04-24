@@ -19,7 +19,7 @@ extern "C"
     void __asan_unpoison_stack_memory(uptr addr, uptr size);
     void __asan_alloca_poison(uptr addr, uptr size);
     void __asan_allocas_unpoison(uptr addr, uptr size);
-    void __sgxsan_poison_valid_shadow(uptr addr, uptr size, uint8_t value);
+    void __sgxsan_shallow_poison_valid_shadow(uptr addr, uptr size, uint8_t value);
 #ifdef __cplusplus
 }
 #endif

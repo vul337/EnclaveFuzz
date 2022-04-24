@@ -121,7 +121,7 @@ private:
         push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
         sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
         sgxsan_region_is_in_elrange_and_poisoned,
-        PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, __sgxsan_poison_valid_shadow, func_malloc_usable_size;
+        PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, __sgxsan_shallow_poison_valid_shadow, func_malloc_usable_size;
 
     llvm::Module *M = nullptr;
     llvm::LLVMContext *C = nullptr;

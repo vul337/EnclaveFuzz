@@ -106,7 +106,7 @@ void SensitiveLeakSan::instrumentSensitiveInstObjPoison(SVF::ObjPN *objPN)
         //                            objAddrInt,
         //                            objSize});
         // PoisonObject(obj, objSize, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
-        IRB.CreateCall(__sgxsan_poison_valid_shadow, {objAddrInt, objSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
+        IRB.CreateCall(__sgxsan_shallow_poison_valid_shadow, {objAddrInt, objSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
     }
     // cleanStackObjectSensitiveShadow(objPN);
 }
@@ -521,7 +521,7 @@ void SensitiveLeakSan::initializeCallbacks()
     StrSpeicifier = IRB.CreateGlobalStringPtr("%s", "", 0, M);
     print_ptr = M->getOrInsertFunction("print_ptr", Type::getVoidTy(*C), Type::getInt8PtrTy(*C), Type::getInt64Ty(*C), Type::getInt64Ty(*C));
     print_arg = M->getOrInsertFunction("print_arg", Type::getVoidTy(*C), Type::getInt8PtrTy(*C), Type::getInt64Ty(*C), Type::getInt64Ty(*C));
-    __sgxsan_poison_valid_shadow = M->getOrInsertFunction("__sgxsan_poison_valid_shadow", IRB.getVoidTy(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
+    __sgxsan_shallow_poison_valid_shadow = M->getOrInsertFunction("__sgxsan_shallow_poison_valid_shadow", IRB.getVoidTy(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
     func_malloc_usable_size = M->getOrInsertFunction(MALLOC_USABLE_SZIE_STR, IRB.getInt64Ty(), IRB.getInt8PtrTy());
 }
 
@@ -939,7 +939,7 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI)
         // printSrcAtRT(IRB, src);
         // printStrAtRT(IRB, "-[Store]->\n");
         // IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(SI)), dstPtrInt, dstMemSizeVal});
-        IRB.CreateCall(__sgxsan_poison_valid_shadow, {dstPtrInt, dstMemSizeVal, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
+        IRB.CreateCall(__sgxsan_shallow_poison_valid_shadow, {dstPtrInt, dstMemSizeVal, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
         // PoisonObject(dstPtr, dstMemSizeVal, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
         // cleanStackObjectSensitiveShadow(dstPtr);
         poisonedInst.emplace(SI);
@@ -1012,7 +1012,7 @@ void SensitiveLeakSan::PoisonObject(Value *objPtr, Value *objSize, IRBuilder<> &
             {
                 IRBuilder<> IRB(RI);
                 Value *objSize = IRB.getInt64(getTypeAllocaSize(AI->getAllocatedType()));
-                IRB.CreateCall(__sgxsan_poison_valid_shadow, {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()),
+                IRB.CreateCall(__sgxsan_shallow_poison_valid_shadow, {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()),
                                                               objSize, IRB.getInt8(0x0)});
                 // PoisonObject(AI, objSize, IRB, 0x0);
                 cleanedStackObjs.emplace(obj);
@@ -1078,7 +1078,7 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
         // there is a situation that small-size src memory copied to large-size dst memory
         // so directly copy shadow of src to dst may cause problem
         // PoisonObject(destPtr, size, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
-        IRB.CreateCall(__sgxsan_poison_valid_shadow, {dstPtrInt, size, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
+        IRB.CreateCall(__sgxsan_shallow_poison_valid_shadow, {dstPtrInt, size, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
         // Instruction *memcpyCI = IRB.CreateMemCpy(memToShadowPtr(destPtr, IRB), MaybeAlign(),
         //                                          memToShadowPtr(srcPtr, IRB), MaybeAlign(),
         //                                          RoundUpUDiv(IRB, size, SHADOW_GRANULARITY));
@@ -1161,7 +1161,7 @@ void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned, CallIns
         // printSrcAtRT(IRB, src);
         // printStrAtRT(IRB, "-[Memset]->\n");
         // IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(MSI)), dstPtrInt, setSize});
-        IRB.CreateCall(__sgxsan_poison_valid_shadow, {dstPtrInt, setSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
+        IRB.CreateCall(__sgxsan_shallow_poison_valid_shadow, {dstPtrInt, setSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
         // PoisonObject(dstPtr, setSize, IRB, SGXSAN_SENSITIVE_OBJ_FLAG);
         // cleanStackObjectSensitiveShadow(dstPtr);
         poisonedInst.emplace(MSI);

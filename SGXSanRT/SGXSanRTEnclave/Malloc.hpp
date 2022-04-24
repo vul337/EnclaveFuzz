@@ -29,18 +29,19 @@ static inline uptr ComputeRZSize(uptr size)
     return 16 << ComputeRZLog(size);
 }
 
-#if (USE_SGXSAN_MALLOC)
 #if defined(__cplusplus)
 extern "C"
 {
 #endif
+#if (USE_SGXSAN_MALLOC)
     void *sgxsan_malloc(size_t size);
     void sgxsan_free(void *ptr);
     void *sgxsan_calloc(size_t n_elements, size_t elem_size);
     void *sgxsan_realloc(void *oldmem, size_t bytes);
     size_t sgxsan_malloc_usable_size(void *mem);
+#else
+size_t malloc_usable_size(void *mem);
+#endif
 #if defined(__cplusplus)
 }
-#endif
-
 #endif

@@ -103,22 +103,42 @@ void __asan_allocas_unpoison(uptr top, uptr bottom)
            (bottom - top) / SHADOW_GRANULARITY);
 }
 
-void __sgxsan_poison_valid_shadow(uptr addr, uptr size, uint8_t value)
+// only 'shallow-poison'/'0-unpoison' shadow which relative address is valid to access
+void __sgxsan_shallow_poison_valid_shadow(uptr addr, uptr size, uint8_t value)
 {
-    uptr shadow_addr = MEM_TO_SHADOW(addr);
-    uptr shadow_size = (size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
-    for (size_t i = 0; i < shadow_size; i++)
+    assert(size > 0);
+    if (value >= (uint8_t)0x80)
+        abort();
+    else
+        assert((value & 0x0F) == 0);
+
+    uptr addr_low_bits = addr % SHADOW_GRANULARITY;
+    uptr complement = 0;
+    if (addr_low_bits != 0)
     {
-        uint8_t shadow_value = ((uint8_t *)shadow_addr)[i];
-        if (shadow_value == value or shadow_value == kSGXSanSensitiveLayout or shadow_value >= 0x80)
-            continue;
-        else if (0 < shadow_value and shadow_value < 0x8)
+        complement = SHADOW_GRANULARITY - addr_low_bits;
+        uptr shadow_addr = MEM_TO_SHADOW(addr);
+        uint8_t shadow_value = *(uint8_t *)shadow_addr;
+        if (shadow_value != value and shadow_value != kSGXSanSensitiveLayout and shadow_value < (uint8_t)0x80 and ((shadow_value & 0x0F) == 0 or addr_low_bits + size <= (shadow_value & 0x0F)))
         {
-            ((uint8_t *)shadow_addr)[i] = value | shadow_value;
+            *(uint8_t *)shadow_addr = (uint8_t)((value & 0xF0) + (shadow_value & 0x0F));
         }
-        else
+    }
+    // maybe [addr, addr+size) is all related to one shadow
+    if (size > complement)
+    {
+        addr = addr + complement;
+        size = size - complement;
+        uptr shadow_addr = MEM_TO_SHADOW(addr);
+        // size may not be a multiple of SHADOW_GRANULARITY, which means number of tail bytes maybe < SHADOW_GRANULARITY
+        // since 8-in-1 shadow's poor expressiveness, we directly handle this end shadow-byte like other normal shadow-byte
+        uptr shadow_size = (size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
+        for (uptr i = 0; i < shadow_size; i++)
         {
-            ((uint8_t *)shadow_addr)[i] = value;
+            uint8_t shadow_value = ((uint8_t *)shadow_addr)[i];
+            if (shadow_value == value or shadow_value == kSGXSanSensitiveLayout or shadow_value >= (uint8_t)0x80)
+                continue;
+            ((uint8_t *)shadow_addr)[i] = (uint8_t)((value & 0xF0) + (shadow_value & 0x0F));
         }
     }
 }
