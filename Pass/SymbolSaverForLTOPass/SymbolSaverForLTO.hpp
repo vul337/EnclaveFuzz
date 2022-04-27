@@ -4,15 +4,18 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 
-class SymbolSaverForLTO
+namespace llvm
 {
-public:
-    SymbolSaverForLTO(llvm::Module &M);
-    bool runOnModule(llvm::Module &M);
-    void saveGlobalName2Metadata(llvm::Module &M);
-    void saveArgName2Metadata(llvm::Function &F);
-    void saveInstName2Metadata(llvm::Function &F);
+    class SymbolSaverForLTO
+    {
+    public:
+        SymbolSaverForLTO(Module &M);
+        bool runOnModule(Module &M);
+        void saveGlobalName2Metadata(Module &M);
+        void saveArgName2Metadata(Function &F);
+        void saveInstName2Metadata(Function &F);
 
-private:
-    llvm::LLVMContext *C;
-};
+    private:
+        LLVMContext *C;
+    };
+}

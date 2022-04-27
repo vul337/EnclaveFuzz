@@ -118,17 +118,17 @@ void ModuleAddressSanitizer::InstrumentGlobalsWithMetadataArray(
 static bool GlobalWasGeneratedByCompiler(GlobalVariable *G)
 {
     // Do not instrument @llvm.global_ctors, @llvm.used, etc.
-    if (SGXSanGetValueName(G).startswith("llvm."))
+    if (G->getName().startswith("llvm."))
         return true;
 
     // Do not instrument asan globals.
-    if (SGXSanGetValueName(G).startswith(kAsanGenPrefix) ||
-        SGXSanGetValueName(G).startswith(kSanCovGenPrefix) ||
-        SGXSanGetValueName(G).startswith(kODRGenPrefix))
+    if (G->getName().startswith(kAsanGenPrefix) ||
+        G->getName().startswith(kSanCovGenPrefix) ||
+        G->getName().startswith(kODRGenPrefix))
         return true;
 
     // Do not instrument gcov counter arrays.
-    if (SGXSanGetValueName(G) == "__llvm_gcov_ctr")
+    if (G->getName() == "__llvm_gcov_ctr")
         return true;
 
     return false;
@@ -264,7 +264,7 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
     for (size_t i = 0; i < n; i++)
     {
         GlobalVariable *G = GlobalsToChange[i];
-        StringRef NameForGlobal = SGXSanGetValueName(G);
+        StringRef NameForGlobal = G->getName();
         // Create string holding the global name (use global name from metadata
         // if it's available, otherwise just write the name of global variable).
         GlobalVariable *Name = createPrivateGlobalForString(
@@ -363,7 +363,7 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
     for (size_t i = 0; i < n; i++)
     {
         GlobalVariable *G = NewGlobals[i];
-        if (SGXSanGetValueName(G).empty())
+        if (G->getName().empty())
             continue;
         GlobalsToAddToUsedList.push_back(G);
     }

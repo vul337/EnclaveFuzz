@@ -13,33 +13,36 @@
 #define DEBUG_TYPE "sgxsan"
 #endif
 
-class ModuleAddressSanitizer
+namespace llvm
 {
-public:
-    ModuleAddressSanitizer(llvm::Module &M,
-                           bool UseOdrIndicator = false);
-    void initializeCallbacks(llvm::Module &M);
-    bool instrumentModule(llvm::Module &module);
-    static uint64_t GetCtorAndDtorPriority();
-    bool InstrumentGlobals(llvm::IRBuilder<> &IRB, llvm::Module &M,
-                           bool *CtorComdat);
-    uint64_t getRedzoneSizeForGlobal(uint64_t SizeInBytes) const;
-    uint64_t getMinRedzoneSizeForGlobal() const;
-    void InstrumentGlobalsWithMetadataArray(
-        llvm::IRBuilder<> &IRB, llvm::Module &M, llvm::ArrayRef<llvm::GlobalVariable *> ExtendedGlobals,
-        llvm::ArrayRef<llvm::Constant *> MetadataInitializers);
-    llvm::Instruction *CreateAsanModuleDtor(llvm::Module &M);
-    bool shouldInstrumentGlobal(llvm::GlobalVariable *G) const;
+    class ModuleAddressSanitizer
+    {
+    public:
+        ModuleAddressSanitizer(Module &M,
+                               bool UseOdrIndicator = false);
+        void initializeCallbacks(Module &M);
+        bool instrumentModule(Module &module);
+        static uint64_t GetCtorAndDtorPriority();
+        bool InstrumentGlobals(IRBuilder<> &IRB, Module &M,
+                               bool *CtorComdat);
+        uint64_t getRedzoneSizeForGlobal(uint64_t SizeInBytes) const;
+        uint64_t getMinRedzoneSizeForGlobal() const;
+        void InstrumentGlobalsWithMetadataArray(
+            IRBuilder<> &IRB, Module &M, ArrayRef<GlobalVariable *> ExtendedGlobals,
+            ArrayRef<Constant *> MetadataInitializers);
+        Instruction *CreateAsanModuleDtor(Module &M);
+        bool shouldInstrumentGlobal(GlobalVariable *G) const;
 
-private:
-    llvm::Function *AsanCtorFunction = nullptr;
-    llvm::Function *AsanDtorFunction = nullptr;
-    llvm::LLVMContext *C;
-    llvm::Type *IntptrTy;
-    ShadowMapping Mapping;
-    llvm::FunctionCallee AsanRegisterGlobals;
-    llvm::FunctionCallee AsanUnregisterGlobals;
+    private:
+        Function *AsanCtorFunction = nullptr;
+        Function *AsanDtorFunction = nullptr;
+        LLVMContext *C;
+        Type *IntptrTy;
+        ShadowMapping Mapping;
+        FunctionCallee AsanRegisterGlobals;
+        FunctionCallee AsanUnregisterGlobals;
 
-    bool UsePrivateAlias;
-    bool UseOdrIndicator;
-};
+        bool UsePrivateAlias;
+        bool UseOdrIndicator;
+    };
+}

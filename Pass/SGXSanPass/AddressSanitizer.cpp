@@ -858,7 +858,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVecto
             Type *argType = arg.getType();
             if (argType->isPointerTy())
             {
-                std::string argName = SGXSanGetValueName(&arg).str();
+                std::string argName = SGXSanGetName(&arg).str();
                 Value *ptrEleCnt = nullptr;
                 if (argName != "")
                 {

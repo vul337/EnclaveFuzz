@@ -82,10 +82,10 @@ void FunctionStackPoisoner::copyArgsPassedByValToAllocas()
             Type *Ty = Arg.getParamByValType();
             const Align Alignment =
                 DL.getValueOrABITypeAlignment(Arg.getParamAlign(), Ty);
-
+            auto argName = SGXSanGetName(&Arg);
             AllocaInst *AI = IRB.CreateAlloca(
                 Ty, nullptr,
-                (Arg.hasName() ? SGXSanGetValueName(&Arg) : "Arg" + Twine(Arg.getArgNo())) +
+                (!argName.empty() ? argName : "Arg" + Twine(Arg.getArgNo())) +
                     ".byval");
             AI->setAlignment(Alignment);
             Arg.replaceAllUsesWith(AI);
@@ -594,7 +594,7 @@ void FunctionStackPoisoner::processStaticAllocas()
     SVD.reserve(AllocaVec.size());
     for (AllocaInst *AI : AllocaVec)
     {
-        ASanStackVariableDescription D = {SGXSanGetValueName(AI).data(),
+        ASanStackVariableDescription D = {SGXSanGetName(AI).data(),
                                           ASan.getAllocaSizeInBytes(*AI),
                                           0,
                                           AI->getAlignment(),
@@ -734,8 +734,8 @@ void FunctionStackPoisoner::processStaticAllocas()
         // Mark the current frame as retired.
         IRBRet.CreateStore(ConstantInt::get(IntptrTy, kRetiredStackFrameMagic),
                            BasePlus0);
-        // clean all shadowbyte of stack variables to avoid other places we may set shadowbyte for other purposes (e.g. in SensitiveLeakSan), but some alloca can't processed by asan may be unable to clean shadowbyte set at other places
-        copyToShadow(SmallVector<uint8_t, 64>(ShadowAfterScope.size(), 1) /* ShadowAfterScope */, ShadowClean, IRBRet, ShadowBase);
+        // NOT-APPLY: clean all shadowbyte of stack variables to avoid other places we may set shadowbyte for other purposes (e.g. in SensitiveLeakSan), but some alloca can't processed by asan may be unable to clean shadowbyte set at other places
+        copyToShadow(/* SmallVector<uint8_t, 64>(ShadowAfterScope.size(), 1)  */ ShadowAfterScope, ShadowClean, IRBRet, ShadowBase);
     }
 
     // We are done. Remove the old unused alloca instructions.

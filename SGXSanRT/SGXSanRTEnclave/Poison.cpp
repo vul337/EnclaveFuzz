@@ -142,3 +142,78 @@ void __sgxsan_shallow_poison_valid_shadow(uptr addr, uptr size, uint8_t value)
         }
     }
 }
+
+// caller should ensure that shadow of target object is already valid(unpoisoned or shallow-poisoned)
+// addr may be not aligned to `SHADOW_GRANULARITY`
+void __sgxsan_shallow_poison_object(uptr addr, uptr size, uint8_t value, bool ignore_shadow_after_scope)
+{
+    assert(size > 0);
+    if (value >= (uint8_t)0x80)
+        abort();
+    else
+        assert((value & 0x0F) == 0);
+
+    uptr addr_low_bits = addr % SHADOW_GRANULARITY;
+    uptr complement = 0;
+    if (addr_low_bits != 0)
+    {
+        complement = SHADOW_GRANULARITY - addr_low_bits;
+        uptr shadow_addr = MEM_TO_SHADOW(addr);
+        uint8_t shadow_value = *(uint8_t *)shadow_addr;
+        if (shadow_value >= (uint8_t)0x80)
+        {
+            assert(shadow_value == 0xf8);
+            if (ignore_shadow_after_scope)
+            {
+                *(uint8_t *)shadow_addr = value;
+            }
+        }
+        else if (shadow_value != value and shadow_value != kSGXSanSensitiveLayout)
+        {
+            // maybe over-poisoned
+            if ((shadow_value & 0x0F) == 0)
+            {
+                *(uint8_t *)shadow_addr = value;
+            }
+            else if (addr_low_bits + size <= (shadow_value & 0x0F))
+            {
+                *(uint8_t *)shadow_addr = (uint8_t)(value + (shadow_value & 0x0F));
+                assert(size < complement);
+            }
+            else
+                abort();
+        }
+    }
+    // maybe [addr, addr+size) is all related to one shadow
+    if (size > complement)
+    {
+        addr = addr + complement;
+        size = size - complement;
+        uptr shadow_addr = MEM_TO_SHADOW(addr);
+        uptr shadow_size = (size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
+        assert(shadow_size >= 1);
+        // process middle shadow bytes
+        if (shadow_size > 2)
+        {
+            memset((void *)shadow_addr, value, shadow_size - 1);
+        }
+        else if (shadow_size == 2)
+        {
+            *(uint8_t *)shadow_addr = value;
+        }
+
+        // now process last shadow byte
+        shadow_addr += (shadow_size - 1);
+        uint8_t shadow_value = *(uint8_t *)shadow_addr;
+        if (shadow_value >= (uint8_t)0x80)
+        {
+            assert(shadow_value == 0xf8);
+            if (ignore_shadow_after_scope)
+            {
+                *(uint8_t *)shadow_addr = value;
+            }
+        }
+        else if (shadow_value != value and shadow_value != kSGXSanSensitiveLayout)
+            *(uint8_t *)shadow_addr = (uint8_t)(value + (shadow_value & 0x0F));
+    }
+}

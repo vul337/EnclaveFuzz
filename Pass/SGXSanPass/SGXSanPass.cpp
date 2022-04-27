@@ -30,15 +30,9 @@ namespace
             {
                 // errs() << "[SGXSanPass] [Function] " << F.getName().str() << "\n";
                 if (F.isDeclaration())
-                {
                     continue;
-                }
                 StringRef func_name = F.getName();
-                // since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte
-                // whether instrumented or not is not necessary
-                //
-                // cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery
-                // (e.g. sgxsan_memcpy_s will call WhitelistQuery)
+                assert(func_name != "sgxsan_printf");
                 if (func_name == "sgxsan_ocall_print_string" ||
                     func_name == "sgxsan_ocall_addr2line" ||
                     func_name == "sgxsan_ocall_addr2line_ex" ||
@@ -47,8 +41,9 @@ namespace
                 {
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                 }
-                else if ((func_name != "ocall_init_shadow_memory") and
-                         (func_name != "sgxsan_printf"))
+                // since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
+                // Cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery (e.g. sgxsan_memcpy_s will call WhitelistQuery).
+                else if (func_name != "ocall_init_shadow_memory")
                 {
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.

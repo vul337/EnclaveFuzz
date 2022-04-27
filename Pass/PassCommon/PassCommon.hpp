@@ -8,37 +8,45 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <string>
+#include <sstream>
 
-/// This struct defines the shadow mapping using the rule:
-///   shadow = (mem >> Scale) ADD Offset.
-struct ShadowMapping
+namespace llvm
 {
-    int Scale;
-    uint64_t Offset;
-};
+    /// This struct defines the shadow mapping using the rule:
+    ///   shadow = (mem >> Scale) ADD Offset.
+    struct ShadowMapping
+    {
+        int Scale;
+        uint64_t Offset;
+    };
 
-ShadowMapping getShadowMapping();
-uint64_t getRedzoneSizeForScale(int MappingScale);
-llvm::Value *stripCast(llvm::Value *val);
-llvm::StringRef SGXSanGetValueName(llvm::Value *val);
-llvm::Value *getEDLInPrefixedValue(llvm::Value *val);
-bool isValueNamePrefixedWith(llvm::Value *val, std::string prefix);
-bool isValueNameEqualWith(llvm::Value *val, std::string name);
-llvm::SmallVector<llvm::Value *> getValuesByStrInFunction(llvm::Function *F,
-                                                          bool (*cmp)(llvm::Value *, std::string),
-                                                          std::string str);
-llvm::Value *getValueByStrInFunction(llvm::Function *F,
-                                     bool (*cmp)(llvm::Value *, std::string),
-                                     std::string str);
-std::pair<int64_t, llvm::Value *> getLenAndValueByNameInEDL(llvm::Function *F, std::string lenPrefixedValueName);
-std::pair<int64_t, llvm::Value *> getLenAndValueByParamInEDL(llvm::Function *F, llvm::Value *param);
-std::tuple<int, int, llvm::Value *> convertParamLenAndValue2Tuple(llvm::Value *param,
-                                                                  llvm::Function *F,
-                                                                  std::pair<int64_t, llvm::Value *> lenAndValue);
-llvm::Value *convertPointerLenAndValue2CountValue(llvm::Value *ptr,
-                                                  llvm::Instruction *insertPoint,
-                                                  std::pair<int64_t, llvm::Value *> lenAndValue);
-// if value isn't a direct CallInst, it return empty ""
-llvm::StringRef getDirectCalleeName(llvm::Value *value);
-// it value isn't instrcution, return empty ""
-llvm::StringRef getParentFuncName(llvm::Value *value);
+    ShadowMapping getShadowMapping();
+    uint64_t getRedzoneSizeForScale(int MappingScale);
+    Value *stripCast(Value *val);
+    StringRef SGXSanGetName(Value *val);
+    Value *getEDLInPrefixedValue(Value *val);
+    bool isValueNamePrefixedWith(Value *val, std::string prefix);
+    bool isValueNameEqualWith(Value *val, std::string name);
+    SmallVector<Value *> getValuesByStrInFunction(Function *F,
+                                                  bool (*cmp)(Value *, std::string),
+                                                  std::string str);
+    Value *getValueByStrInFunction(Function *F,
+                                   bool (*cmp)(Value *, std::string),
+                                   std::string str);
+    std::pair<int64_t, Value *> getLenAndValueByNameInEDL(Function *F, std::string lenPrefixedValueName);
+    std::pair<int64_t, Value *> getLenAndValueByParamInEDL(Function *F, Value *param);
+    std::tuple<int, int, Value *> convertParamLenAndValue2Tuple(Value *param,
+                                                                Function *F,
+                                                                std::pair<int64_t, Value *> lenAndValue);
+    Value *convertPointerLenAndValue2CountValue(Value *ptr,
+                                                Instruction *insertPoint,
+                                                std::pair<int64_t, Value *> lenAndValue);
+    // if value isn't a direct CallInst, it return empty ""
+    StringRef getDirectCalleeName(Value *value);
+    // it value isn't instrcution, return empty ""
+    StringRef getParentFuncName(Value *value);
+    std::string toString(Value *val);
+    void dump(Value *val);
+    uint64_t getAllocaSizeInBytes(const AllocaInst &AI);
+}

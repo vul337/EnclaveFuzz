@@ -25,7 +25,8 @@ void SymbolSaverForLTO::saveGlobalName2Metadata(Module &M)
 
 bool SymbolSaverForLTO::runOnModule(Module &M)
 {
-    saveGlobalName2Metadata(M);
+    // global name will not be erased at link time, so needn't to do this
+    // saveGlobalName2Metadata(M);
 
     for (Function &F : M)
     {
