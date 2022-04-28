@@ -3,6 +3,37 @@
 #include "SGXSanCheck.h"
 #include "SGXSanDefs.h"
 
+#if (USE_SGXSAN_MALLOC)
+#define MALLOC sgxsan_malloc
+#define BACKEND_MALLOC malloc
+#define FREE sgxsan_free
+#define BACKEND_FREE free
+#define CALLOC sgxsan_calloc
+#define BACKEND_CALLOC calloc
+#define REALLOC sgxsan_realloc
+#define BACKEND_REALLOC realloc
+#define MALLOC_USABLE_SZIE sgxsan_malloc_usable_size
+#define BACKEND_MALLOC_USABLE_SZIE malloc_usable_size
+#else
+// fix-me: how about tcmalloc
+#define MALLOC malloc
+#define BACKEND_MALLOC dlmalloc
+#define FREE free
+#define BACKEND_FREE dlfree
+#define CALLOC calloc
+#define BACKEND_CALLOC dlcalloc
+#define REALLOC realloc
+#define BACKEND_REALLOC dlrealloc
+#define MALLOC_USABLE_SZIE malloc_usable_size
+#define BACKEND_MALLOC_USABLE_SZIE dlmalloc_usable_size
+#endif
+
+// #define DUMP_OPERATION
+#ifdef DUMP_OPERATION
+#define UPDATE_HEAP_USAGE update_heap_usage
+#else
+#define UPDATE_HEAP_USAGE(...)
+#endif
 // rz_log represent 2^(rz_log+4)
 static inline uptr ComputeRZLog(uptr user_requested_size)
 {
@@ -33,6 +64,7 @@ static inline uptr ComputeRZSize(uptr size)
 extern "C"
 {
 #endif
+    void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *mem), bool true_add_false_minus = true);
 #if (USE_SGXSAN_MALLOC)
     void *sgxsan_malloc(size_t size);
     void sgxsan_free(void *ptr);

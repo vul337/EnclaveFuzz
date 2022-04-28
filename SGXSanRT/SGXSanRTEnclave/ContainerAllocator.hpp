@@ -1,4 +1,4 @@
-/* 
+/*
  * Code is based on follow copyright
  * =======================================================
  * The following code example is taken from the book
@@ -17,8 +17,7 @@
 
 #include <stddef.h>
 #include "InternalDlmalloc.hpp"
-
-int call_newh();
+#include "Malloc.hpp"
 
 namespace SGXSan
 {
@@ -53,8 +52,8 @@ namespace SGXSan
         }
 
         /* constructors and destructor
-        * - nothing to do because the allocator has no state
-        */
+         * - nothing to do because the allocator has no state
+         */
         ContainerAllocator() noexcept
         {
         }
@@ -79,18 +78,18 @@ namespace SGXSan
         pointer allocate(size_type num, const void * = 0)
         {
             if (num > max_size())
-                throw std::bad_alloc();
+                abort();
 
             // replace malloc with dlmalloc, as we modified malloc which may call here
             pointer ret = (pointer)(dlmalloc(num * sizeof(T)));
-            // fix-me: will call_newh, std::bad_alloc call malloc?
+            UPDATE_HEAP_USAGE(ret, dlmalloc_usable_size);
+            int try_times = 3;
             while (ret == nullptr)
             {
-                if (!call_newh())
-                {
-                    throw std::bad_alloc();
-                }
+                if (try_times-- == 0)
+                    abort();
                 ret = (pointer)dlmalloc(num * sizeof(T));
+                UPDATE_HEAP_USAGE(ret, dlmalloc_usable_size);
             }
 
             return ret;
@@ -115,7 +114,10 @@ namespace SGXSan
         {
             (void)num;
             if (p)
+            {
+                UPDATE_HEAP_USAGE((void *)p, dlmalloc_usable_size, false);
                 dlfree((void *)p);
+            }
         }
     };
 
