@@ -27,6 +27,8 @@ public:
     static void init();
     static void destory();
     static void put(QuarantineElement qe);
+
+private:
     static void freeQuarantineElement(QuarantineElement qe);
     static void freeDirectly(QuarantineElement qe);
     static void freeOldestQuarantineElement();
@@ -35,8 +37,19 @@ public:
         return m_queue->empty();
     }
 
-private:
-    static __thread QuarantineQueueTy *m_queue;
-    static __thread size_t m_quarantine_cache_used_size;
-    static __thread size_t m_quarantine_cache_max_size;
+    static QuarantineQueueTy *m_queue;
+    static size_t m_quarantine_cache_used_size;
+    static size_t m_quarantine_cache_max_size;
 };
+
+// C Wrappers
+#if defined(__cplusplus)
+extern "C"
+{
+#endif
+    // atomicity implemented by tRTS initializer about global constructor
+    void QuarantineCacheInit() __attribute__((constructor));
+    void QuarantineCacheDestroy() __attribute__((destructor));
+#if defined(__cplusplus)
+}
+#endif

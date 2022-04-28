@@ -11,7 +11,6 @@ void EnclaveTLSConstructorAtTBridgeBegin()
     if (TLS_init_count == 0)
     {
         // root ecall
-        QuarantineCache::init();
         WhitelistOfAddrOutEnclave_init();
         init_thread_func_arg_shadow_stack();
     }
@@ -26,7 +25,6 @@ void EnclaveTLSDestructorAtTBridgeEnd()
         // root ecall
         WhitelistOfAddrOutEnclave_destroy();
         destroy_thread_func_arg_shadow_stack();
-        QuarantineCache::destory();
     }
     TLS_init_count--;
     assert(TLS_init_count >= 0);

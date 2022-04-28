@@ -11,7 +11,7 @@
 #include "InternalDlmalloc.hpp"
 #include "SGXSanPrintf.hpp"
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
 
 /* The maximum possible size_t value has all bits set */

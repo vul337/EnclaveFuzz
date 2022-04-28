@@ -6,10 +6,20 @@
 #include "SGXSanManifest.h"
 #include "SGXInternal.hpp"
 
-// Use SGXSan::Allocator avoid malloc-new-malloc's like infinitive loop
-__thread QuarantineQueueTy *QuarantineCache::m_queue;
-__thread size_t QuarantineCache::m_quarantine_cache_used_size;
-__thread size_t QuarantineCache::m_quarantine_cache_max_size;
+QuarantineQueueTy *QuarantineCache::m_queue;
+size_t QuarantineCache::m_quarantine_cache_used_size;
+size_t QuarantineCache::m_quarantine_cache_max_size;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void QuarantineCacheInit()
+{
+    QuarantineCache::init();
+}
+
+void QuarantineCacheDestroy()
+{
+    QuarantineCache::destory();
+}
 
 void QuarantineCache::init()
 {
@@ -20,7 +30,7 @@ void QuarantineCache::init()
     assert(m_queue != nullptr);
 
     m_quarantine_cache_used_size = 0;
-    m_quarantine_cache_max_size = get_heap_size() / 0x100;
+    m_quarantine_cache_max_size = get_heap_size() / 0x10;
 }
 
 void QuarantineCache::destory()
@@ -41,10 +51,11 @@ void QuarantineCache::destory()
 
 void QuarantineCache::put(QuarantineElement qe)
 {
+    pthread_mutex_lock(&mutex);
     if (m_queue == nullptr)
     {
         freeDirectly(qe);
-        return;
+        goto out;
     }
 
     // Consistency check
@@ -55,7 +66,7 @@ void QuarantineCache::put(QuarantineElement qe)
     if (qe.alloc_size > m_quarantine_cache_max_size)
     {
         freeDirectly(qe);
-        return;
+        goto out;
     }
 
     // pop queue util it can hold new element
@@ -70,6 +81,8 @@ void QuarantineCache::put(QuarantineElement qe)
 #endif
     m_queue->push_back(qe);
     m_quarantine_cache_used_size += qe.alloc_size;
+out:
+    pthread_mutex_unlock(&mutex);
 }
 
 void QuarantineCache::freeQuarantineElement(QuarantineElement qe)
