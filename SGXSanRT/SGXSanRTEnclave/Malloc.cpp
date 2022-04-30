@@ -47,16 +47,18 @@ void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *mem), 
 
 void *MALLOC(size_t size)
 {
+	if (size == 0)
+	{
+		SGXSAN_WARNING(size == 0, "Malloc 0 size");
+		return nullptr;
+	}
+
 	if (not asan_inited)
 	{
 		auto p = BACKEND_MALLOC(size);
 		UPDATE_HEAP_USAGE(p, BACKEND_MALLOC_USABLE_SZIE);
 		return p;
 	}
-	// if (size == 0)
-	// {
-	// 	return nullptr;
-	// }
 
 	uptr alignment = SHADOW_GRANULARITY;
 
@@ -118,6 +120,11 @@ void FREE(void *ptr)
 		return;
 
 	uptr user_beg = reinterpret_cast<uptr>(ptr);
+	if (*(uint8_t *)MEM_TO_SHADOW(user_beg) == kAsanHeapFreeMagic)
+	{
+		GET_CALLER_PC_BP_SP;
+		ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
+	}
 	uptr alignment = SHADOW_GRANULARITY;
 	CHECK(IsAligned(user_beg, alignment));
 

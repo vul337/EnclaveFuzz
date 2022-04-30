@@ -90,19 +90,18 @@ void PrintShadowMap(uptr addr)
 }
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
-                        uptr access_size, bool fatal, bool is_warning)
+                        uptr access_size, bool fatal, const char *msg)
 {
-    if (!fatal)
-        return;
     PRINTF("================ Error Report ================\n"
+           "[ERROR MESSAGE] %s\n"
            "  pc = 0x%lx\tbp   = 0x%lx\n"
            "  sp = 0x%lx\taddr = 0x%lx\n"
            "  is_write = %d\t\taccess_size = 0x%lx\n",
-           pc, bp, sp, addr, is_write, access_size);
+           msg, pc, bp, sp, addr, is_write, access_size);
     sgxsan_print_stack_trace();
     PrintShadowMap(addr);
     PRINTF("================= Report End =================\n");
-    if (!is_warning)
+    if (fatal)
         abort();
     return;
 }
@@ -127,6 +126,6 @@ void sgxsan_warning_detail(bool cond, const char *message, uint64_t addr, uint64
                "[SGXSan Warning] %s \n",
                message);
         GET_CALLER_PC_BP_SP;
-        ReportGenericError(pc, bp, sp, addr, 0, size, true, true);
+        ReportGenericError(pc, bp, sp, addr, 0, size, false);
     }
 }

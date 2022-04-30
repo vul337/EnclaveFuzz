@@ -147,7 +147,7 @@ static inline bool RangesOverlap(const char *offset1, uptr length1,
             (__bad = sgxsan_region_is_poisoned(__offset, __size)))                                       \
         {                                                                                                \
             GET_CALLER_PC_BP_SP;                                                                         \
-            ReportGenericError(pc, bp, sp, __bad, isWrite, __size, false);                               \
+            ReportGenericError(pc, bp, sp, __bad, isWrite, __size, true);                                \
         }                                                                                                \
     } while (0)
 
