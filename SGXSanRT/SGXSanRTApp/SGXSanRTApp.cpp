@@ -45,23 +45,24 @@ void PrintAddressSpaceLayout()
 
 void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 {
-	ABORT_ASSERT(signum == SIGSEGV, "Currently only regist SIGSEGV handler");
-
-	// process siginfo
-	uint64_t page_fault_addr = (uint64_t)siginfo->si_addr;
-	if ((void *)page_fault_addr == nullptr)
+	if (signum == SIGSEGV)
 	{
-		printf("[SGXSAN] Null-Pointer dereference\n");
-	}
-	else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
-			 ((g_enclave_base + g_enclave_size) <= page_fault_addr && page_fault_addr <= g_enclave_high_guard_end))
-	{
-		printf("[SGXSAN] Pointer dereference overflows enclave boundray\n");
-	}
-	else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
-			 ((g_enclave_base + g_enclave_size - 0x1000) <= page_fault_addr && page_fault_addr < (g_enclave_base + g_enclave_size)))
-	{
-		printf("[SGXSAN] Infer pointer dereference overflows enclave boundray, as mprotect's effort is page-granularity and si_addr only give page-granularity address\n");
+		// process siginfo
+		uint64_t page_fault_addr = (uint64_t)siginfo->si_addr;
+		if ((void *)page_fault_addr == nullptr)
+		{
+			printf("[SGXSAN] Null-Pointer dereference\n");
+		}
+		else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
+				 ((g_enclave_base + g_enclave_size) <= page_fault_addr && page_fault_addr <= g_enclave_high_guard_end))
+		{
+			printf("[SGXSAN] Pointer dereference overflows enclave boundray\n");
+		}
+		else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
+				 ((g_enclave_base + g_enclave_size - 0x1000) <= page_fault_addr && page_fault_addr < (g_enclave_base + g_enclave_size)))
+		{
+			printf("[SGXSAN] Infer pointer dereference overflows enclave boundray, as mprotect's effort is page-granularity and si_addr only give page-granularity address\n");
+		}
 	}
 
 	// call previous signal handler
@@ -70,7 +71,7 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 		signal(signum, SIG_DFL);
 		raise(signum);
 	}
-	//if there is old signal handler, we need transfer the signal to the old signal handler;
+	// if there is old signal handler, we need transfer the signal to the old signal handler;
 	else
 	{
 		// make sure signum to be masked if SA_NODEFER is not set
@@ -91,9 +92,9 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 
 		pthread_sigmask(SIG_SETMASK, &cur_set, NULL);
 
-		//If the g_old_sigact set SA_RESETHAND, it will break the chain which means
-		//g_old_sigact->next_old_sigact will not be called. Our signal handler does not
-		//responsable for that. We just follow what os do on SA_RESETHAND.
+		// If the g_old_sigact set SA_RESETHAND, it will break the chain which means
+		// g_old_sigact->next_old_sigact will not be called. Our signal handler does not
+		// responsable for that. We just follow what os do on SA_RESETHAND.
 		if (g_old_sigact[signum].sa_flags & SA_RESETHAND)
 			g_old_sigact[signum].sa_handler = SIG_DFL;
 	}
@@ -158,9 +159,9 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
 /* OCall functions */
 void sgxsan_ocall_print_string(const char *str)
 {
-	/* Proxy/Bridge will check the length and null-terminate 
-     * the input string to prevent buffer overflow. 
-     */
+	/* Proxy/Bridge will check the length and null-terminate
+	 * the input string to prevent buffer overflow.
+	 */
 	// printf("%s", str);
 	std::cerr << str;
 }

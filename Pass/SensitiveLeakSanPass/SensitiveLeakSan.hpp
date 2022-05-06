@@ -35,6 +35,13 @@
 
 namespace llvm
 {
+    enum SensitiveLevel
+    {
+        NOT_SENSITIVE = 0,
+        MAY_BE_SENSITIVE,
+        IS_SENSITIVE
+    };
+
     class SensitiveLeakSan
     {
     public:
@@ -47,16 +54,16 @@ namespace llvm
         void collectAndPoisonSensitiveObj();
         void doVFA(Value *work);
         void pushSensitiveObj(Value *annotatedVar);
-        void instrumentSensitiveInstObjPoison(SVF::ObjPN *objPN);
+        void poisonSensitiveStackOrHeapObj(SVF::ObjPN *objPN, std::pair<uint8_t *, size_t> *shadowBytesPair);
         Value *memToShadow(Value *Shadow, IRBuilder<> &IRB);
-        Value *memToShadowPtr(Value *memPtr, IRBuilder<> &IRB);
+        Value *memPtrToShadowPtr(Value *memPtr, IRBuilder<> &IRB);
 
         int getCallInstOperandPosition(CallInst *CI, Value *oprend, bool rawOperand = false);
         void getDirectAndIndirectCalledFunction(CallInst *CI, SmallVector<Function *> &calleeVec);
         Instruction *findInstByName(Function *F, std::string InstName);
         void getPtrValPNs(SVF::ObjPN *obj, std::unordered_set<SVF::ValPN *> &oneLevelPtrs);
-        void add2SensitiveObjAndPoison(SVF::ObjPN *obj);
-        static Value *RoundUpUDiv(IRBuilder<> &IRB, Value *size, uint64_t dividend);
+        void addAndPoisonSensitiveObj(SVF::ObjPN *obj, std::pair<uint8_t *, size_t> *shadowBytesPair = nullptr);
+        Value *RoundUpUDiv(IRBuilder<> &IRB, Value *size, uint64_t dividend);
         uint64_t RoundUpUDiv(uint64_t dividend, uint64_t divisor);
         void addPtObj2WorkList(Value *ptr);
         static StringRef getParentFuncName(SVF::PAGNode *node);
@@ -65,14 +72,14 @@ namespace llvm
                                           Value *srcPtr, Value *size);
         uint64_t getPointerElementSize(Value *ptr);
         Value *getHeapObjSize(CallInst *obj, IRBuilder<> &IRB);
-        void getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objs);
-        void getNonPointerObjPNs(Value *value, std::unordered_set<SVF::ObjPN *> &objs);
+        void getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objPNs);
+        void getNonPointerObjPNs(Value *value, std::unordered_set<SVF::ObjPN *> &objPNs);
         Value *instrumentPoisonCheck(Value *src);
         Value *isLIPoisoned(LoadInst *src);
         Value *isArgPoisoned(Argument *src);
         Value *isCIRetPoisoned(CallInst *src);
         Value *isPtrPoisoned(Instruction *insertPoint, Value *ptr);
-        static int getPointerLevel(Value *ptr);
+        static int getPointerLevel(const Value *ptr);
         void PoisonCIOperand(Value *src, Value *isPoisoned, CallInst *CI, int operandPosition);
         void PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI);
         void PoisonRetShadow(Value *src, Value *isPoisoned, ReturnInst *calleeRI);
@@ -82,7 +89,8 @@ namespace llvm
         static bool isAnnotationIntrinsic(CallInst *CI);
         static std::string extractAnnotation(Value *annotationStrVal);
         static bool isSecureVersionMemTransferCI(CallInst *CI);
-        static bool StringRefContainWord(StringRef str, std::string word);
+        static bool ContainWord(StringRef str, const std::string word);
+        static bool ContainWordExactly(StringRef str, const std::string word);
         static bool isEncryptionFunction(Function *F);
         static void getNonCastUsers(Value *value, std::vector<User *> &users);
         void poisonSensitiveGlobalVariableAtRuntime();
@@ -97,13 +105,22 @@ namespace llvm
         static void dump(SVF::PAGNode *PN);
         void dump(SVF::NodeID nodeID);
         static StringRef SGXSanGetName(SVF::PAGNode *PN);
-        bool isFunctionObjPN(SVF::PAGNode *PN);
         void printStrAtRT(IRBuilder<> &IRB, std::string str);
         void printSrcAtRT(IRBuilder<> &IRB, Value *src);
         void collectHeapAllocators();
         void collectHeapAllocatorGlobalPtrs();
         bool isHeapAllocatorWrapper(Function &F);
         bool hasObjectNode(Value *val);
+        void analyseModuleMetadata();
+        void analyseDIType(DIType *type);
+        DICompositeType *getDICompositeType(StructType *structTy);
+        StructType *getStructTypeOfHeapObj(SVF::ObjPN *heapObj);
+        bool isSensitive(StringRef str);
+        bool mayBeSensitive(StringRef str);
+        void getStructSensitiveShadow(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowMaskPair);
+        void ShallowPoisonAlignedObject(Value *objPtr, Value *objSize, IRBuilder<> &IRB, std::pair<uint8_t *, size_t> *shadowBytesPair);
+        SensitiveLevel getSensitiveLevel(StringRef str);
+        void addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLevel sensitiveLevel);
 
     private:
         std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
@@ -119,7 +136,8 @@ namespace llvm
             push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
             sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
             sgxsan_region_is_in_elrange_and_poisoned,
-            PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, __sgxsan_shallow_poison_object, func_malloc_usable_size;
+            PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, sgxsan_shallow_poison_object,
+            sgxsan_check_shadow_bytes_match_obj, func_malloc_usable_size;
 
         Module *M = nullptr;
         LLVMContext *C = nullptr;
@@ -139,6 +157,11 @@ namespace llvm
         CFLSteensAAResult *AAResult = nullptr;
         std::unordered_set<std::string> heapAllocatorBaseNames{"malloc", "calloc", "realloc"},
             heapAllocatorWrapperNames, heapAllocatorNames,
-            plaintextParamKeywords = {"2encrypt", "unencrypt", "src", "source", "2seal", "unseal", "plain", "in", "key"};
+            plaintextKeywords = {"2encrypt", "unencrypt", "2seal", "unseal", "plain"},
+            inputKeywords = {"source", "input"},
+            exactInputKeywords = {"src", "in"},
+            exactSecretKeywords = {"key"};
+        std::map<std::string, DICompositeType *> DICompositeTypeMap;
+        std::unordered_set<DIType *> processedDITypes;
     };
 }

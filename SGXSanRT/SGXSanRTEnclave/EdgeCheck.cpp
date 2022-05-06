@@ -6,7 +6,7 @@
 
 void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt)
 {
-    uint64_t min_size = len * (cnt <= 1 ? 1 : cnt);
+    uint64_t min_size = len * std::max(1, cnt);
     if (min_size < len)
     {
         // int overflow
@@ -21,7 +21,7 @@ void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt)
     }
     SGXSAN_ELRANGE_CHECK_MID
     // totally outside enclave, add to whitelist
-    WhitelistOfAddrOutEnclave_add(ptr, (cnt == -1) ? (1 << 12) : (len * cnt));
+    WhitelistOfAddrOutEnclave_add(ptr, (cnt == -1) ? (1 << 9) : (len * cnt));
     SGXSAN_ELRANGE_CHECK_END;
     return;
 }
