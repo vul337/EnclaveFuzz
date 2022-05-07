@@ -63,6 +63,8 @@ namespace llvm
         Instruction *findInstByName(Function *F, std::string InstName);
         void getPtrValPNs(SVF::ObjPN *obj, std::unordered_set<SVF::ValPN *> &oneLevelPtrs);
         void addAndPoisonSensitiveObj(SVF::ObjPN *obj, std::pair<uint8_t *, size_t> *shadowBytesPair = nullptr);
+        void addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLevel sensitiveLevel);
+        void addAndPoisonSensitiveObj(Value *obj);
         Value *RoundUpUDiv(IRBuilder<> &IRB, Value *size, uint64_t dividend);
         uint64_t RoundUpUDiv(uint64_t dividend, uint64_t divisor);
         void addPtObj2WorkList(Value *ptr);
@@ -102,8 +104,10 @@ namespace llvm
         void dumpRevPts(SVF::PAGNode *PN);
         void pushAndPopArgShadowFrameAroundCallInst(CallInst *CI);
         static std::string toString(SVF::PAGNode *PN);
+        static std::string toString(Value *val);
         static void dump(SVF::PAGNode *PN);
         void dump(SVF::NodeID nodeID);
+        static void dump(Value *val);
         static StringRef SGXSanGetName(SVF::PAGNode *PN);
         void printStrAtRT(IRBuilder<> &IRB, std::string str);
         void printSrcAtRT(IRBuilder<> &IRB, Value *src);
@@ -117,10 +121,11 @@ namespace llvm
         StructType *getStructTypeOfHeapObj(SVF::ObjPN *heapObj);
         bool isSensitive(StringRef str);
         bool mayBeSensitive(StringRef str);
-        void getStructSensitiveShadow(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowMaskPair);
+        void getStructSensitiveShadow(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowMaskPair, size_t offset);
         void ShallowPoisonAlignedObject(Value *objPtr, Value *objSize, IRBuilder<> &IRB, std::pair<uint8_t *, size_t> *shadowBytesPair);
         SensitiveLevel getSensitiveLevel(StringRef str);
-        void addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLevel sensitiveLevel);
+        StringRef getObjMeaningfulName(SVF::ObjPN *objPN);
+        static bool isTBridgeFunc(Function &F);
 
     private:
         std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
@@ -157,7 +162,7 @@ namespace llvm
         CFLSteensAAResult *AAResult = nullptr;
         std::unordered_set<std::string> heapAllocatorBaseNames{"malloc", "calloc", "realloc"},
             heapAllocatorWrapperNames, heapAllocatorNames,
-            plaintextKeywords = {"2encrypt", "unencrypt", "2seal", "unseal", "plain"},
+            plaintextKeywords = {"2encrypt", "unencrypt", "2seal", "unseal", "plain", "secret"},
             inputKeywords = {"source", "input"},
             exactInputKeywords = {"src", "in"},
             exactSecretKeywords = {"key"};

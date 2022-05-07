@@ -251,10 +251,38 @@ std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal)
     return annotation;
 }
 
+bool SensitiveLeakSan::isTBridgeFunc(Function &F)
+{
+    SmallVector<llvm::CallInst *> CallInstVec;
+    SGXSanInstVisitor *instVisitor = nullptr;
+    InstVisitorCache::getInstVisitor(&F, instVisitor);
+    instVisitor->getCallInstVec(CallInstVec);
+    for (auto CI : CallInstVec)
+    {
+        Function *callee = CI->getCalledFunction();
+        if (callee != nullptr)
+        {
+            StringRef callee_name = callee->getName();
+            assert(callee_name != "");
+            if (F.getName() == ("sgx_" /* ecall wrapper prefix */ + callee_name.str()))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN, std::pair<uint8_t *, size_t> *shadowBytesPair)
 {
     assert(objPN);
     auto memObj = objPN->getMemObj();
+    if (memObj->isHeap() or memObj->isStack())
+    {
+        auto parentFunc = cast<Instruction>(const_cast<Value *>(memObj->getRefVal()))->getFunction();
+        if (isTBridgeFunc(*parentFunc))
+            return;
+    }
     auto emplaceResult = SensitiveObjs.emplace(objPN);
     if (emplaceResult.second)
     {
@@ -412,13 +440,15 @@ bool SensitiveLeakSan::ContainWordExactly(StringRef str, const std::string word)
     std::regex wordRegex("([^0-9a-zA-Z]|^)" + word + "([^0-9a-zA-Z]|$)", std::regex_constants::icase);
     if (std::regex_search(str.str(), wordRegex))
         return true;
-    // get capitalized word
-    std::string capitalWord = word;
-    std::for_each(capitalWord.begin(), capitalWord.end(), [](char &c)
+    // get lowercase word
+    std::string lowercaseWord = word;
+    std::for_each(lowercaseWord.begin(), lowercaseWord.end(), [](char &c)
                   { c = std::tolower(c); });
+    // get capitalized word
+    std::string capitalWord = lowercaseWord;
     capitalWord[0] = std::toupper(capitalWord[0]);
     // Camel case naming
-    std::regex capitalWordRegex(capitalWord + "([^0-9a-zA-Z]|[A-Z]|$)");
+    std::regex capitalWordRegex("(^" + lowercaseWord + "|" + capitalWord + ")([^0-9a-zA-Z]|[A-Z]|$)");
     return std::regex_search(str.str(), capitalWordRegex);
 }
 
@@ -508,7 +538,7 @@ bool SensitiveLeakSan::isSensitive(StringRef str)
     return std::find_if(plaintextKeywords.begin(), plaintextKeywords.end(), [&](std::string keyword)
                         { return ContainWord(str, keyword); }) != plaintextKeywords.end() ||
            std::find_if(exactSecretKeywords.begin(), exactSecretKeywords.end(), [&](std::string keyword)
-                        { return ContainWord(str, keyword); }) != exactSecretKeywords.end();
+                        { return ContainWordExactly(str, keyword); }) != exactSecretKeywords.end();
 }
 
 bool SensitiveLeakSan::mayBeSensitive(StringRef str)
@@ -516,23 +546,45 @@ bool SensitiveLeakSan::mayBeSensitive(StringRef str)
     return std::find_if(inputKeywords.begin(), inputKeywords.end(), [&](std::string keyword)
                         { return ContainWord(str, keyword); }) != inputKeywords.end() ||
            std::find_if(exactInputKeywords.begin(), exactInputKeywords.end(), [&](std::string keyword)
-                        { return ContainWord(str, keyword); }) != exactInputKeywords.end();
+                        { return ContainWordExactly(str, keyword); }) != exactInputKeywords.end();
 }
 
-void SensitiveLeakSan::getStructSensitiveShadow(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowBytesPair)
+void SensitiveLeakSan::getStructSensitiveShadow(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowBytesPair, size_t offset)
 {
+    if (compositeTy->getTag() != dwarf::DW_TAG_structure_type)
+        return;
     for (auto ele : compositeTy->getElements())
     {
         auto *eleTy = cast<DIType>(ele);
         if (isSensitive(eleTy->getName()))
         {
-            size_t startBit = eleTy->getOffsetInBits();
+            size_t startBit = eleTy->getOffsetInBits() + offset;
             size_t endBit = startBit + eleTy->getSizeInBits() - 1;
             assert(endBit >= startBit);
             size_t startShadowByte = startBit / (8 * SHADOW_GRANULARITY);
             size_t endShadowByte = endBit / (8 * SHADOW_GRANULARITY);
             assert(endShadowByte <= shadowBytesPair->second);
             memset(shadowBytesPair->first + startShadowByte, SGXSAN_SENSITIVE_OBJ_FLAG, endShadowByte - startShadowByte + 1);
+        }
+        else if (auto derivedTy = dyn_cast<DIDerivedType>(eleTy))
+        {
+            assert(derivedTy->getTag() == dwarf::DW_TAG_member);
+            auto memOffset = derivedTy->getOffsetInBits();
+            if (auto baseTy = derivedTy->getBaseType())
+            {
+                auto _ty = dyn_cast<DIDerivedType>(baseTy);
+                while (_ty && _ty->getTag() == dwarf::DW_TAG_typedef)
+                {
+                    baseTy = _ty->getBaseType();
+                    _ty = baseTy ? dyn_cast<DIDerivedType>(baseTy) : nullptr;
+                }
+                if (baseTy)
+                {
+                    auto memCompositeType = dyn_cast<DICompositeType>(baseTy);
+                    if (memCompositeType && memCompositeType->getTag() == dwarf::DW_TAG_structure_type)
+                        getStructSensitiveShadow(memCompositeType, shadowBytesPair, memOffset);
+                }
+            }
         }
     }
 }
@@ -548,17 +600,54 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLeve
         if (objPN->getMemObj()->isHeap())
         {
             auto compositeTy = getDICompositeType(getStructTypeOfHeapObj(objPN));
-            if (compositeTy && not isSensitive(compositeTy->getName()) && compositeTy->getSizeInBits() != 0)
+            if (compositeTy && not isSensitive(compositeTy->getName()) && compositeTy->getSizeInBits() != 0 && compositeTy->getTag() == dwarf::DW_TAG_structure_type)
             {
                 size_t shadowBytesLen = (compositeTy->getSizeInBits() + 8 * SHADOW_GRANULARITY - 1) / (8 * SHADOW_GRANULARITY);
                 uint8_t shadowBytes[shadowBytesLen] = {0};
                 std::pair<uint8_t *, size_t> shadowBytesPair(shadowBytes, shadowBytesLen);
-                getStructSensitiveShadow(compositeTy, &shadowBytesPair);
+                getStructSensitiveShadow(compositeTy, &shadowBytesPair, 0);
                 addAndPoisonSensitiveObj(objPN, &shadowBytesPair);
                 return;
             }
         }
         addAndPoisonSensitiveObj(objPN);
+    }
+}
+
+StringRef SensitiveLeakSan::getObjMeaningfulName(SVF::ObjPN *objPN)
+{
+    StringRef objName = SGXSanGetName(objPN);
+    if (objPN->getMemObj()->isHeap())
+    {
+        auto obj = const_cast<Value *>(objPN->getValue());
+        assert(isa<CallInst>(obj));
+        std::vector<User *> users;
+        getNonCastUsers(obj, users);
+        for (auto user : users)
+        {
+            if (auto StoreI = dyn_cast<StoreInst>(user))
+            {
+                assert(stripCast(StoreI->getValueOperand()) == obj);
+                objName = ::SGXSanGetName(StoreI->getPointerOperand());
+                if (objName != "")
+                    break;
+            }
+        }
+    }
+    return objName;
+}
+
+void SensitiveLeakSan::addAndPoisonSensitiveObj(Value *obj)
+{
+    std::unordered_set<SVF::ObjPN *> objSet;
+    getNonPointerObjPNs(obj, objSet);
+    for (auto objPN : objSet)
+    {
+        auto objName = getObjMeaningfulName(objPN);
+        if (objName != "")
+        {
+            addAndPoisonSensitiveObj(objPN, getSensitiveLevel(objName));
+        }
     }
 }
 
@@ -576,37 +665,21 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj()
         {
             if (isEncryptionFunction(callee))
             {
-                for (int i = 0; i < CI->getNumArgOperands(); i++)
+                if (callee->isDeclaration())
                 {
-                    Value *argOp = CI->getArgOperand(i);
-                    std::unordered_set<SVF::ObjPN *> objSet;
-                    getNonPointerObjPNs(argOp, objSet);
-                    for (auto objPN : objSet)
+                    for (int i = 0; i < CI->getNumArgOperands(); i++)
                     {
-                        StringRef argName = SGXSanGetName(objPN);
-                        if (argName != "")
-                        {
-                            addAndPoisonSensitiveObj(objPN, getSensitiveLevel(argName));
-                        }
+                        addAndPoisonSensitiveObj(CI->getArgOperand(i));
                     }
                 }
-                if (not callee->isDeclaration())
+                else
                 {
                     for (Argument &arg : callee->args())
                     {
                         StringRef argName = ::SGXSanGetName(&arg);
-                        if (argName != "")
+                        if (argName != "" && getSensitiveLevel(argName) != NOT_SENSITIVE)
                         {
-                            auto sensitiveLevel = getSensitiveLevel(argName);
-                            if (sensitiveLevel == IS_SENSITIVE or sensitiveLevel == MAY_BE_SENSITIVE)
-                            {
-                                std::unordered_set<SVF::ObjPN *> objSet;
-                                getNonPointerObjPNs(CI->getArgOperand(arg.getArgNo()), objSet);
-                                for (auto objPN : objSet)
-                                {
-                                    addAndPoisonSensitiveObj(objPN, sensitiveLevel);
-                                }
-                            }
+                            addAndPoisonSensitiveObj(CI->getArgOperand(arg.getArgNo()));
                         }
                     }
                 }
@@ -1098,7 +1171,7 @@ void SensitiveLeakSan::printSrcAtRT(IRBuilder<> &IRB, Value *src)
 {
     if (LoadInst *LI = dyn_cast<LoadInst>(src))
     {
-        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n" + ::toString(LI)),
+        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n" + toString(LI)),
                                    IRB.CreatePtrToInt(LI->getPointerOperand(), IRB.getInt64Ty()),
                                    IRB.getInt64(M->getDataLayout().getTypeAllocSize(LI->getType()))});
     }
@@ -1106,13 +1179,13 @@ void SensitiveLeakSan::printSrcAtRT(IRBuilder<> &IRB, Value *src)
     {
         Value *funcAddrInt = IRB.CreatePtrToInt(arg->getParent(), IRB.getInt64Ty());
         auto pos = arg->getArgNo();
-        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr("\n" + ::toString(arg)), funcAddrInt, IRB.getInt64(pos)});
+        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr("\n" + toString(arg)), funcAddrInt, IRB.getInt64(pos)});
     }
     else if (CallInst *CI = dyn_cast<CallInst>(src))
     {
         Value *funcAddrInt = IRB.CreatePtrToInt(CI->getCalledOperand(), IRB.getInt64Ty());
         auto pos = -1;
-        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr("\n" + ::toString(CI)), funcAddrInt, IRB.getInt64(pos)});
+        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr("\n" + toString(CI)), funcAddrInt, IRB.getInt64(pos)});
     }
     else
     {
@@ -1135,7 +1208,7 @@ void SensitiveLeakSan::PoisonCIOperand(Value *src, Value *isPoisoned, CallInst *
 #ifdef DUMP_VALUE_FLOW
         printSrcAtRT(IRB, src);
         printStrAtRT(IRB, "-[" + std::to_string(operandPosition) + "th Arg]->\n");
-        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr(::toString(CI)), calleeAddrInt, IRB.getInt64(operandPosition)});
+        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr(toString(CI)), calleeAddrInt, IRB.getInt64(operandPosition)});
 #endif
         IRB.CreateCall(poison_thread_func_arg_shadow_stack, {calleeAddrInt, IRB.getInt64(operandPosition)});
         // record this argument's shadow has been poisoned
@@ -1173,7 +1246,7 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI)
 #ifdef DUMP_VALUE_FLOW
         printSrcAtRT(IRB, src);
         printStrAtRT(IRB, "-[Store]->\n");
-        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(::toString(SI)), dstPtrInt, dstMemSizeVal});
+        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(SI)), dstPtrInt, dstMemSizeVal});
 #endif
         IRB.CreateCall(sgxsan_shallow_poison_object, {dstPtrInt, dstMemSizeVal, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG), IRB.getInt1(false)});
         cleanStackObjectSensitiveShadow(dstPtr);
@@ -1191,7 +1264,7 @@ void SensitiveLeakSan::PoisonRetShadow(Value *src, Value *isPoisoned, ReturnInst
 #ifdef DUMP_VALUE_FLOW
         printSrcAtRT(IRB, src);
         printStrAtRT(IRB, "-[Return]->\n");
-        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr(::toString(calleeRI)), calleeAddrInt, IRB.getInt64(-1)});
+        IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr(toString(calleeRI)), calleeAddrInt, IRB.getInt64(-1)});
 #endif
         IRB.CreateCall(poison_thread_func_arg_shadow_stack, {calleeAddrInt, IRB.getInt64(-1)});
         poisonedInst.emplace(calleeRI);
@@ -1294,11 +1367,11 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
 
         IRB.SetInsertPoint(dstIsInElrangeTerm);
 #ifdef DUMP_VALUE_FLOW
-        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n" + ::toString(srcPtr)),
+        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n" + toString(srcPtr)),
                                    IRB.CreatePtrToInt(srcPtr, IRB.getInt64Ty()),
                                    IRB.CreateIntCast(size, IRB.getInt64Ty(), false)});
         printStrAtRT(IRB, "-[Mem Transfer]->\n");
-        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(::toString(destPtr)),
+        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(destPtr)),
                                    dstPtrInt,
                                    IRB.CreateIntCast(size, IRB.getInt64Ty(), false)});
 #endif
@@ -1388,7 +1461,7 @@ void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned, CallIns
 #ifdef DUMP_VALUE_FLOW
         printSrcAtRT(IRB, src);
         printStrAtRT(IRB, "-[Memset]->\n");
-        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(::toString(MSI)), dstPtrInt, setSize});
+        IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(MSI)), dstPtrInt, setSize});
 #endif
         IRB.CreateCall(sgxsan_shallow_poison_object, {dstPtrInt, setSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG), IRB.getInt1(false)});
         cleanStackObjectSensitiveShadow(dstPtr);
@@ -1577,4 +1650,14 @@ void SensitiveLeakSan::dump(SVF::NodeID nodeID)
 void SensitiveLeakSan::dump(SVF::PAGNode *PN)
 {
     errs() << toString(PN) << "\n\n";
+}
+
+std::string SensitiveLeakSan::toString(Value *val)
+{
+    return ::toString(val) + " " + SVF::SVFUtil::getSourceLoc(val);
+}
+
+void SensitiveLeakSan::dump(Value *val)
+{
+    errs() << toString(val) << "\n\n";
 }
