@@ -71,7 +71,7 @@ namespace llvm
         static StringRef getParentFuncName(SVF::PAGNode *node);
         void setNoSanitizeMetadata(Instruction *I);
         void propagateShadowInMemTransfer(CallInst *CI, Instruction *insertPoint, Value *destPtr,
-                                          Value *srcPtr, Value *size);
+                                          Value *srcPtr, Value *dstSize, Value *copyCnt);
         uint64_t getPointerElementSize(Value *ptr);
         Value *getHeapObjSize(CallInst *obj, IRBuilder<> &IRB);
         void getNonPointerObjPNs(SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objPNs);
@@ -80,7 +80,7 @@ namespace llvm
         Value *isLIPoisoned(LoadInst *src);
         Value *isArgPoisoned(Argument *src);
         Value *isCIRetPoisoned(CallInst *src);
-        Value *isPtrPoisoned(Instruction *insertPoint, Value *ptr);
+        Value *isPtrPoisoned(Instruction *insertPoint, Value *ptr, Value *size = nullptr);
         static int getPointerLevel(const Value *ptr);
         void PoisonCIOperand(Value *src, Value *isPoisoned, CallInst *CI, int operandPosition);
         void PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI);
@@ -121,7 +121,8 @@ namespace llvm
         StructType *getStructTypeOfHeapObj(SVF::ObjPN *heapObj);
         bool isSensitive(StringRef str);
         bool mayBeSensitive(StringRef str);
-        void getStructSensitiveShadow(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowMaskPair, size_t offset);
+        bool poisonStructSensitiveShadowOnTemp(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowMaskPair, size_t offset);
+        bool poisonSubfieldSensitiveShadowOnTemp(DIType *ty, std::pair<uint8_t *, size_t> *shadowBytesPair, size_t offset);
         void ShallowPoisonAlignedObject(Value *objPtr, Value *objSize, IRBuilder<> &IRB, std::pair<uint8_t *, size_t> *shadowBytesPair);
         SensitiveLevel getSensitiveLevel(StringRef str);
         StringRef getObjMeaningfulName(SVF::ObjPN *objPN);
@@ -142,7 +143,7 @@ namespace llvm
             sgxsan_region_is_poisoned, is_addr_in_elrange, is_addr_in_elrange_ex,
             sgxsan_region_is_in_elrange_and_poisoned,
             PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, sgxsan_shallow_poison_object,
-            sgxsan_check_shadow_bytes_match_obj, func_malloc_usable_size;
+            sgxsan_check_shadow_bytes_match_obj, sgxsan_shallow_shadow_copy_on_mem_transfer, func_malloc_usable_size;
 
         Module *M = nullptr;
         LLVMContext *C = nullptr;
@@ -162,7 +163,9 @@ namespace llvm
         CFLSteensAAResult *AAResult = nullptr;
         std::unordered_set<std::string> heapAllocatorBaseNames{"malloc", "calloc", "realloc"},
             heapAllocatorWrapperNames, heapAllocatorNames,
-            plaintextKeywords = {"2encrypt", "unencrypt", "2seal", "unseal", "plain", "secret"},
+            plaintextKeywords = {"2encrypt", "unencrypt", "2seal", "unseal", "plain", "secret", "decrypt"},
+            ciphertextKeywords = {"encrypt", "seal", "cipher", "2decrypt", "undecrypt"},
+            exactCiphertextKeywords = {"enc"},
             inputKeywords = {"source", "input"},
             exactInputKeywords = {"src", "in"},
             exactSecretKeywords = {"key"};

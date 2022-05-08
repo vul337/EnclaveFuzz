@@ -3,6 +3,7 @@
 #include "Poison.hpp"
 #include "SGXSanManifest.h"
 #include "SGXSanCommonPoison.hpp"
+#include "PoisonCheck.hpp"
 
 static const u64 kAllocaRedzoneSize = 32UL;
 static const u64 kAllocaRedzoneMask = 31UL;
@@ -226,4 +227,30 @@ void sgxsan_check_shadow_bytes_match_obj(uptr obj_addr, uptr obj_size, uptr shad
 {
     assert(obj_addr % SHADOW_GRANULARITY == 0);
     assert((obj_size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY >= shadow_bytes_len);
+}
+
+// we assume operated memory is valid, otherwise mem transfer operation before this call will abort
+void sgxsan_shallow_shadow_copy_on_mem_transfer(uptr dst_addr, uptr src_addr, uptr dst_size, uptr copy_cnt)
+{
+    // should already instrumented check at Pass-End
+    assert(dst_size != 0 && copy_cnt != 0 && sgxsan_region_is_in_elrange_and_poisoned(src_addr, copy_cnt, 0x20) &&
+           is_addr_in_elrange_ex(dst_addr, dst_size));
+
+    if (copy_cnt > dst_size)
+        copy_cnt = dst_size;
+
+    uint8_t *dst_shadow_addr = (uint8_t *)(MEM_TO_SHADOW(dst_addr));
+    uint8_t *src_shadow_addr = (uint8_t *)(MEM_TO_SHADOW(src_addr));
+    uptr dst_shadow_size = (dst_size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
+    uptr src_shadow_size = (copy_cnt + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
+    assert(src_shadow_size <= dst_shadow_size);
+
+    uint8_t last_dst_shadow_byte = dst_shadow_addr[dst_shadow_size - 1];
+    assert(last_dst_shadow_byte < 0x80);
+
+    memcpy(dst_shadow_addr, src_shadow_addr, src_shadow_size);
+
+    // there is a situation that small-size src memory copied to large-size dst memory
+    // so directly copy shadow of src to dst may cause problem
+    dst_shadow_addr[src_shadow_size - 1] = (uint8_t)((dst_shadow_addr[src_shadow_size - 1] & 0xF0) + (dst_shadow_size == src_shadow_size ? last_dst_shadow_byte & 0xF : 0));
 }

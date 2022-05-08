@@ -535,10 +535,15 @@ SensitiveLevel SensitiveLeakSan::getSensitiveLevel(StringRef str)
 
 bool SensitiveLeakSan::isSensitive(StringRef str)
 {
-    return std::find_if(plaintextKeywords.begin(), plaintextKeywords.end(), [&](std::string keyword)
-                        { return ContainWord(str, keyword); }) != plaintextKeywords.end() ||
-           std::find_if(exactSecretKeywords.begin(), exactSecretKeywords.end(), [&](std::string keyword)
-                        { return ContainWordExactly(str, keyword); }) != exactSecretKeywords.end();
+    return (std::find_if(plaintextKeywords.begin(), plaintextKeywords.end(), [&](std::string keyword)
+                         { return ContainWord(str, keyword); }) != plaintextKeywords.end() ||
+            std::find_if(exactSecretKeywords.begin(), exactSecretKeywords.end(), [&](std::string keyword)
+                         { return ContainWordExactly(str, keyword); }) != exactSecretKeywords.end()) &&
+           not(
+               std::find_if(ciphertextKeywords.begin(), ciphertextKeywords.end(), [&](std::string keyword)
+                            { return ContainWord(str, keyword); }) != ciphertextKeywords.end() ||
+               std::find_if(exactCiphertextKeywords.begin(), exactCiphertextKeywords.end(), [&](std::string keyword)
+                            { return ContainWordExactly(str, keyword); }) != exactCiphertextKeywords.end());
 }
 
 bool SensitiveLeakSan::mayBeSensitive(StringRef str)
@@ -549,44 +554,59 @@ bool SensitiveLeakSan::mayBeSensitive(StringRef str)
                         { return ContainWordExactly(str, keyword); }) != exactInputKeywords.end();
 }
 
-void SensitiveLeakSan::getStructSensitiveShadow(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowBytesPair, size_t offset)
+bool SensitiveLeakSan::poisonSubfieldSensitiveShadowOnTemp(DIType *ty, std::pair<uint8_t *, size_t> *shadowBytesPair, size_t offset)
+{
+    if (auto derivedTy = dyn_cast<DIDerivedType>(ty))
+    {
+        assert(derivedTy->getTag() == dwarf::DW_TAG_member);
+        auto memOffset = derivedTy->getOffsetInBits();
+        if (auto baseTy = derivedTy->getBaseType())
+        {
+            auto _ty = dyn_cast<DIDerivedType>(baseTy);
+            while (_ty && _ty->getTag() == dwarf::DW_TAG_typedef)
+            {
+                baseTy = _ty->getBaseType();
+                _ty = baseTy ? dyn_cast<DIDerivedType>(baseTy) : nullptr;
+            }
+            if (baseTy)
+            {
+                auto memCompositeType = dyn_cast<DICompositeType>(baseTy);
+                if (memCompositeType && memCompositeType->getTag() == dwarf::DW_TAG_structure_type)
+                    return poisonStructSensitiveShadowOnTemp(memCompositeType, shadowBytesPair, memOffset + offset);
+            }
+        }
+    }
+    return false;
+}
+
+bool SensitiveLeakSan::poisonStructSensitiveShadowOnTemp(DICompositeType *compositeTy, std::pair<uint8_t *, size_t> *shadowBytesPair, size_t offset)
 {
     if (compositeTy->getTag() != dwarf::DW_TAG_structure_type)
-        return;
+        return false;
+    bool hasPoisonedSensitive = false;
     for (auto ele : compositeTy->getElements())
     {
         auto *eleTy = cast<DIType>(ele);
         if (isSensitive(eleTy->getName()))
         {
-            size_t startBit = eleTy->getOffsetInBits() + offset;
-            size_t endBit = startBit + eleTy->getSizeInBits() - 1;
-            assert(endBit >= startBit);
-            size_t startShadowByte = startBit / (8 * SHADOW_GRANULARITY);
-            size_t endShadowByte = endBit / (8 * SHADOW_GRANULARITY);
-            assert(endShadowByte <= shadowBytesPair->second);
-            memset(shadowBytesPair->first + startShadowByte, SGXSAN_SENSITIVE_OBJ_FLAG, endShadowByte - startShadowByte + 1);
-        }
-        else if (auto derivedTy = dyn_cast<DIDerivedType>(eleTy))
-        {
-            assert(derivedTy->getTag() == dwarf::DW_TAG_member);
-            auto memOffset = derivedTy->getOffsetInBits();
-            if (auto baseTy = derivedTy->getBaseType())
+            if (poisonSubfieldSensitiveShadowOnTemp(eleTy, shadowBytesPair, offset) == false)
             {
-                auto _ty = dyn_cast<DIDerivedType>(baseTy);
-                while (_ty && _ty->getTag() == dwarf::DW_TAG_typedef)
-                {
-                    baseTy = _ty->getBaseType();
-                    _ty = baseTy ? dyn_cast<DIDerivedType>(baseTy) : nullptr;
-                }
-                if (baseTy)
-                {
-                    auto memCompositeType = dyn_cast<DICompositeType>(baseTy);
-                    if (memCompositeType && memCompositeType->getTag() == dwarf::DW_TAG_structure_type)
-                        getStructSensitiveShadow(memCompositeType, shadowBytesPair, memOffset);
-                }
+                size_t startBit = eleTy->getOffsetInBits() + offset;
+                size_t endBit = startBit + eleTy->getSizeInBits() - 1;
+                assert(endBit >= startBit);
+                size_t startShadowByte = startBit / (8 * SHADOW_GRANULARITY);
+                size_t endShadowByte = endBit / (8 * SHADOW_GRANULARITY);
+                assert(endShadowByte <= shadowBytesPair->second);
+                memset(shadowBytesPair->first + startShadowByte, SGXSAN_SENSITIVE_OBJ_FLAG, endShadowByte - startShadowByte + 1);
             }
+            hasPoisonedSensitive = true;
+        }
+        else
+        {
+            hasPoisonedSensitive = hasPoisonedSensitive || poisonSubfieldSensitiveShadowOnTemp(eleTy, shadowBytesPair, offset);
         }
     }
+    return hasPoisonedSensitive;
 }
 
 void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLevel sensitiveLevel)
@@ -600,14 +620,16 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLeve
         if (objPN->getMemObj()->isHeap())
         {
             auto compositeTy = getDICompositeType(getStructTypeOfHeapObj(objPN));
-            if (compositeTy && not isSensitive(compositeTy->getName()) && compositeTy->getSizeInBits() != 0 && compositeTy->getTag() == dwarf::DW_TAG_structure_type)
+            if (compositeTy && compositeTy->getSizeInBits() != 0 && compositeTy->getTag() == dwarf::DW_TAG_structure_type)
             {
                 size_t shadowBytesLen = (compositeTy->getSizeInBits() + 8 * SHADOW_GRANULARITY - 1) / (8 * SHADOW_GRANULARITY);
                 uint8_t shadowBytes[shadowBytesLen] = {0};
                 std::pair<uint8_t *, size_t> shadowBytesPair(shadowBytes, shadowBytesLen);
-                getStructSensitiveShadow(compositeTy, &shadowBytesPair, 0);
-                addAndPoisonSensitiveObj(objPN, &shadowBytesPair);
-                return;
+                if (poisonStructSensitiveShadowOnTemp(compositeTy, &shadowBytesPair, 0))
+                {
+                    addAndPoisonSensitiveObj(objPN, &shadowBytesPair);
+                    return;
+                }
             }
         }
         addAndPoisonSensitiveObj(objPN);
@@ -627,10 +649,12 @@ StringRef SensitiveLeakSan::getObjMeaningfulName(SVF::ObjPN *objPN)
         {
             if (auto StoreI = dyn_cast<StoreInst>(user))
             {
-                assert(stripCast(StoreI->getValueOperand()) == obj);
-                objName = ::SGXSanGetName(StoreI->getPointerOperand());
-                if (objName != "")
-                    break;
+                if (stripCast(StoreI->getValueOperand()) == obj)
+                {
+                    objName = ::SGXSanGetName(StoreI->getPointerOperand());
+                    if (objName != "")
+                        break;
+                }
             }
         }
     }
@@ -789,6 +813,7 @@ void SensitiveLeakSan::initializeCallbacks()
     print_arg = M->getOrInsertFunction("print_arg", Type::getVoidTy(*C), Type::getInt8PtrTy(*C), Type::getInt64Ty(*C), Type::getInt64Ty(*C));
     sgxsan_shallow_poison_object = M->getOrInsertFunction("sgxsan_shallow_poison_object", IRB.getVoidTy(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty(), IRB.getInt1Ty());
     sgxsan_check_shadow_bytes_match_obj = M->getOrInsertFunction("sgxsan_check_shadow_bytes_match_obj", IRB.getVoidTy(), IntptrTy, IntptrTy, IntptrTy);
+    sgxsan_shallow_shadow_copy_on_mem_transfer = M->getOrInsertFunction("sgxsan_shallow_shadow_copy_on_mem_transfer", IRB.getVoidTy(), IntptrTy, IntptrTy, IntptrTy, IntptrTy);
     func_malloc_usable_size = M->getOrInsertFunction(MALLOC_USABLE_SZIE_STR, IRB.getInt64Ty(), IRB.getInt8PtrTy());
 }
 
@@ -1082,13 +1107,13 @@ uint64_t SensitiveLeakSan::getPointerElementSize(Value *ptr)
     return M->getDataLayout().getTypeAllocSize(elemTy);
 }
 
-Value *SensitiveLeakSan::isPtrPoisoned(Instruction *insertPoint, Value *ptr)
+Value *SensitiveLeakSan::isPtrPoisoned(Instruction *insertPoint, Value *ptr, Value *size)
 {
     assert(isa<PointerType>(ptr->getType()));
     IRBuilder<> IRB(insertPoint);
     return IRB.CreateCall(sgxsan_region_is_in_elrange_and_poisoned,
                           {IRB.CreatePtrToInt(ptr, IRB.getInt64Ty()),
-                           IRB.getInt64(getPointerElementSize(ptr)),
+                           size ? IRB.CreateIntCast(size, IntptrTy, false) : IRB.getInt64(getPointerElementSize(ptr)),
                            IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
 }
 
@@ -1341,48 +1366,40 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(Value *obj)
     }
 }
 
-void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *insertPoint, Value *destPtr, Value *srcPtr, Value *size)
+void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *insertPoint, Value *destPtr, Value *srcPtr, Value *dstSize, Value *copyCnt)
 {
-    assert(not isa<Function>(destPtr));
-    assert(CI != nullptr);
+    assert(CI != nullptr && not isa<Function>(destPtr));
     if (processedMemTransferInst.count(CI) == 0)
     {
         // current memory transfer instruction has never been instrumented
 
-        // we have to avoid 0-size in mem transfer call
         IRBuilder<> IRB(insertPoint);
-        size = IRB.CreateIntCast(size, IRB.getInt64Ty(), false);
-        Instruction *term = SplitBlockAndInsertIfThen(IRB.CreateICmpNE(size, IRB.getInt64(0)), insertPoint, false);
-        IRB.SetInsertPoint(term);
 
-        Value *isSrcPoisoned = isPtrPoisoned(term, srcPtr);
+        copyCnt = IRB.CreateIntCast(copyCnt, IntptrTy, false);
+        dstSize = IRB.CreateIntCast(dstSize, IntptrTy, false);
+        // we have to avoid 0-size in mem transfer call
+        auto sizeNot0 = IRB.CreateAnd(IRB.CreateICmpNE(dstSize, ConstantInt::get(IntptrTy, 0)), IRB.CreateICmpNE(copyCnt, ConstantInt::get(IntptrTy, 0)));
+        Instruction *sizeNot0Term = SplitBlockAndInsertIfThen(sizeNot0, insertPoint, false);
 
-        Instruction *sourceIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, term, false);
+        Value *isSrcPoisoned = isPtrPoisoned(sizeNot0Term, srcPtr, copyCnt);
+        Instruction *sourceIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, sizeNot0Term, false);
 
         IRB.SetInsertPoint(sourceIsPoisonedTerm);
-        Value *dstPtrInt = IRB.CreatePtrToInt(destPtr, IRB.getInt64Ty());
-        CallInst *isDestInElrange = IRB.CreateCall(is_addr_in_elrange_ex, {dstPtrInt, IRB.getInt64(getPointerElementSize(destPtr))});
-
+        Value *dstPtrInt = IRB.CreatePtrToInt(destPtr, IntptrTy);
+        CallInst *isDestInElrange = IRB.CreateCall(is_addr_in_elrange_ex, {dstPtrInt, dstSize});
         Instruction *dstIsInElrangeTerm = SplitBlockAndInsertIfThen(isDestInElrange, sourceIsPoisonedTerm, false);
 
         IRB.SetInsertPoint(dstIsInElrangeTerm);
+        Value *srcPtrInt = IRB.CreatePtrToInt(srcPtr, IntptrTy);
 #ifdef DUMP_VALUE_FLOW
         IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n" + toString(srcPtr)),
-                                   IRB.CreatePtrToInt(srcPtr, IRB.getInt64Ty()),
-                                   IRB.CreateIntCast(size, IRB.getInt64Ty(), false)});
+                                   srcPtrInt, copyCnt});
         printStrAtRT(IRB, "-[Mem Transfer]->\n");
         IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(destPtr)),
-                                   dstPtrInt,
-                                   IRB.CreateIntCast(size, IRB.getInt64Ty(), false)});
+                                   dstPtrInt, dstSize});
 #endif
+        IRB.CreateCall(sgxsan_shallow_shadow_copy_on_mem_transfer, {dstPtrInt, srcPtrInt, dstSize, copyCnt});
 
-        // there is a situation that small-size src memory copied to large-size dst memory
-        // so directly copy shadow of src to dst may cause problem
-        IRB.CreateCall(sgxsan_shallow_poison_object, {dstPtrInt, size, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG), IRB.getInt1(false)});
-        // Instruction *memcpyCI = IRB.CreateMemCpy(memPtrToShadowPtr(destPtr, IRB), MaybeAlign(),
-        //                                          memPtrToShadowPtr(srcPtr, IRB), MaybeAlign(),
-        //                                          RoundUpUDiv(IRB, size, SHADOW_GRANULARITY));
-        // setNoSanitizeMetadata(memcpyCI);
         addPtObj2WorkList(destPtr);
         cleanStackObjectSensitiveShadow(destPtr);
         // record this memory transfer CI has been instrumented
@@ -1411,13 +1428,13 @@ void SensitiveLeakSan::doVFA(Value *work)
             if (MTI && MTI->getRawSource() == work)
             {
                 propagateShadowInMemTransfer(MTI, MTI->getNextNode(), MTI->getDest(),
-                                             MTI->getSource(), MTI->getOperand(2));
+                                             MTI->getSource(), MTI->getOperand(2), MTI->getOperand(2));
             }
             else if (isSecureVersionMemTransferCI(CI) && CI->getOperand(2) == work)
             {
                 propagateShadowInMemTransfer(CI, CI->getNextNode(),
                                              CI->getOperand(0), CI->getOperand(2),
-                                             CI->getOperand(1));
+                                             CI->getOperand(1), CI->getOperand(3));
             }
             else
             {
@@ -1563,7 +1580,7 @@ bool SensitiveLeakSan::runOnModule()
             continue;
         assert(func_name != "sgxsan_printf");
         IRBuilder<> IRB(&(F.front().front()));
-        printStrAtRT(IRB, "[RUN FUNC] " + func_name.str() + "\n");
+        printStrAtRT(IRB, "[RUN FUNC] " + func_name.str() + " " + SVF::SVFUtil::getSourceLoc(&F.front().front()) + "\n");
     }
 #endif
     collectAndPoisonSensitiveObj();
