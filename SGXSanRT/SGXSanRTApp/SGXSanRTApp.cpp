@@ -56,7 +56,7 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 		else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
 				 ((g_enclave_base + g_enclave_size) <= page_fault_addr && page_fault_addr <= g_enclave_high_guard_end))
 		{
-			printf("[SGXSAN] Pointer dereference overflows enclave boundray\n");
+			printf("[SGXSAN] Pointer dereference overflows enclave boundray (Overlapping memory access)\n");
 		}
 		else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
 				 ((g_enclave_base + g_enclave_size - 0x1000) <= page_fault_addr && page_fault_addr < (g_enclave_base + g_enclave_size)))

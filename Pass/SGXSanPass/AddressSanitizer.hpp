@@ -38,7 +38,6 @@ namespace llvm
         bool instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL,
                                       int depth, Value *eleCnt = nullptr, Value *operandAddr = nullptr,
                                       bool checkCurrentLevelPtr = true);
-        void replaceSGXSanIntrinName(Function &F);
         void instrumentAddress(Instruction *OrigIns, Instruction *InsertBefore, Value *Addr,
                                uint32_t TypeSize, bool IsWrite, Value *SizeArgument, bool UseCalls);
         void instrumentUnusualSizeOrAlignment(

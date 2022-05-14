@@ -7,6 +7,7 @@
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanRTTBridge.hpp"
 #include "SensitivePoisoner.hpp"
+#include "Malloc.hpp"
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -27,6 +28,7 @@ static void init_shadow_memory_out_enclave()
     assert(kLowShadowBeg == SGXSAN_SHADOW_MAP_BASE);
     SensitivePoisoner::collect_layout_infos();
     SensitivePoisoner::shallow_poison_senitive();
+    init_real_malloc_usable_size();
 }
 
 static void AsanInitInternal()

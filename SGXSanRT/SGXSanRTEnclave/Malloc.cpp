@@ -11,6 +11,9 @@
 #include "InternalDlmalloc.hpp"
 #include "SGXSanPrintf.hpp"
 
+#if (USE_SGXSAN_MALLOC)
+size_t (*real_malloc_usable_size)(void *) = nullptr;
+#endif
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
 
@@ -213,4 +216,29 @@ size_t MALLOC_USABLE_SZIE(void *mem)
 	size_t user_size = m->user_size;
 
 	return user_size;
+}
+
+size_t tc_malloc_size(void *ptr) __attribute__((weak));
+size_t tc_malloc_size(void *ptr)
+{
+	// dummy, should replaced by real tc_malloc_size when libsgx_tcmalloc.a is loaded
+	(void)ptr;
+	abort();
+	return 0;
+}
+
+void init_real_malloc_usable_size()
+{
+#if (USE_SGXSAN_MALLOC)
+	if ((void *)malloc == (void *)dlmalloc)
+	{
+		// Use dlmalloc series
+		real_malloc_usable_size = dlmalloc_usable_size;
+	}
+	else
+	{
+		// Use tcmalloc series
+		real_malloc_usable_size = tc_malloc_size;
+	}
+#endif
 }

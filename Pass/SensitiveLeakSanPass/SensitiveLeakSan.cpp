@@ -8,7 +8,7 @@ using namespace llvm;
 #if (USE_SGXSAN_MALLOC)
 #define MALLOC_USABLE_SZIE_STR "sgxsan_malloc_usable_size"
 #else
-// fix-me: how about tcmalloc
+// use our malloc series (which use dlmalloc as backend), and override original dlmalloc and tcmalloc libraries
 #define MALLOC_USABLE_SZIE_STR "malloc_usable_size"
 #endif
 

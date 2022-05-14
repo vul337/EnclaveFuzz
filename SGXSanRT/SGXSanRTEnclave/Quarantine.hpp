@@ -17,7 +17,7 @@ struct QuarantineElement
 #if (USE_SGXSAN_MALLOC)
 typedef std::deque<QuarantineElement> QuarantineQueueTy;
 #else
-// Use SGXSan::Allocator avoid malloc-new-malloc's like infinitive loop
+// Use SGXSan::ContainerAllocator(dlmalloc series as backend) avoid malloc-new-malloc's like infinitive loop
 typedef std::deque<QuarantineElement, SGXSan::ContainerAllocator<QuarantineElement>> QuarantineQueueTy;
 #endif
 

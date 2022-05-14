@@ -13,9 +13,10 @@
 #define REALLOC sgxsan_realloc
 #define BACKEND_REALLOC realloc
 #define MALLOC_USABLE_SZIE sgxsan_malloc_usable_size
-#define BACKEND_MALLOC_USABLE_SZIE malloc_usable_size
+extern size_t (*real_malloc_usable_size)(void *);
+#define BACKEND_MALLOC_USABLE_SZIE real_malloc_usable_size
 #else
-// fix-me: how about tcmalloc
+// use our malloc series (which use dlmalloc as backend), and override original dlmalloc and tcmalloc libraries
 #define MALLOC malloc
 #define BACKEND_MALLOC dlmalloc
 #define FREE free
@@ -65,6 +66,7 @@ extern "C"
 {
 #endif
     void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *mem), bool true_add_false_minus = true);
+    void init_real_malloc_usable_size();
 #if (USE_SGXSAN_MALLOC)
     void *sgxsan_malloc(size_t size);
     void sgxsan_free(void *ptr);

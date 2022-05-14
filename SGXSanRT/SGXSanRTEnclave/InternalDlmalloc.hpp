@@ -1,5 +1,4 @@
-#ifndef INTERN_DLMALLOC_HPP
-#define INTERN_DLMALLOC_HPP
+#pragma once
 
 #include <stddef.h>
 
@@ -14,6 +13,4 @@ extern "C"
     size_t dlmalloc_usable_size(void *mem);
 #if defined(__cplusplus)
 }
-#endif
-
 #endif
