@@ -17,7 +17,7 @@ void adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F)
 
     // get interesting callinst
     SmallVector<CallInst *> OcallocVec, OcfreeVec,
-        CallInstVec = InstVisitorCache::getInstVisitor(&F)->getCallInstVec();
+        CallInstVec = SGXSanInstVisitor::visitFunction(F).CallInstVec;
     for (auto CI : CallInstVec)
     {
         StringRef callee_name = getDirectCalleeName(CI);

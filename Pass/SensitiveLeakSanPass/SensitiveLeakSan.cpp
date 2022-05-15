@@ -119,7 +119,7 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(SVF::ObjPN *objPN, std::pai
     {
         // TODO: extend at next time
         assert(shadowBytesPair == nullptr);
-        auto AILifeTimeStart = InstVisitorCache::getInstVisitor(objAI->getFunction())->getAILifeTimeStart();
+        auto AILifeTimeStart = SGXSanInstVisitor::visitFunction(*(objAI->getFunction())).AILifeTimeStart;
         for (auto start : AILifeTimeStart[objAI])
         {
             objLivePoints.push_back(start->getNextNode());
@@ -251,7 +251,7 @@ std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal)
 
 bool SensitiveLeakSan::isTBridgeFunc(Function &F)
 {
-    auto CallInstVec = InstVisitorCache::getInstVisitor(&F)->getCallInstVec();
+    auto CallInstVec = SGXSanInstVisitor::visitFunction(F).CallInstVec;
     for (auto CI : CallInstVec)
     {
         StringRef callee_name = getDirectCalleeName(CI);
@@ -445,8 +445,8 @@ bool SensitiveLeakSan::ContainWordExactly(StringRef str, const std::string word)
 bool SensitiveLeakSan::isEncryptionFunction(Function *F)
 {
     StringRef funcName = F->getName();
-    return (ContainWord(funcName, "encrypt") && !ContainWord(funcName, "decrypt") && !ContainWord(funcName, "encrypted") ||
-            ContainWord(funcName, "seal") && !ContainWord(funcName, "unseal") && !ContainWord(funcName, "sealed"))
+    return ((ContainWord(funcName, "encrypt") && !ContainWord(funcName, "decrypt") && !ContainWord(funcName, "encrypted")) ||
+            (ContainWord(funcName, "seal") && !ContainWord(funcName, "unseal") && !ContainWord(funcName, "sealed")))
                ? true
                : false;
 }
@@ -667,7 +667,7 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(Value *obj)
 
 void SensitiveLeakSan::collectAndPoisonSensitiveObj()
 {
-    auto CallInstVec = InstVisitorCache::getInstVisitor(M)->getCallInstVec();
+    auto CallInstVec = SGXSanInstVisitor::visitModule(*M).CallInstVec;
     for (auto CI : CallInstVec)
     {
         SmallVector<Function *> calleeVec;
@@ -678,7 +678,7 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj()
             {
                 if (callee->isDeclaration())
                 {
-                    for (int i = 0; i < CI->getNumArgOperands(); i++)
+                    for (unsigned int i = 0; i < CI->getNumArgOperands(); i++)
                     {
                         addAndPoisonSensitiveObj(CI->getArgOperand(i));
                     }
@@ -827,9 +827,9 @@ bool SensitiveLeakSan::isHeapAllocatorWrapper(Function &F)
     if (!F.getFunctionType()->getReturnType()->isPointerTy())
         return false;
 
-    SGXSanInstVisitor *instVisitor = InstVisitorCache::getInstVisitor(&F);
-    auto CallInstVec = instVisitor->getCallInstVec();
-    auto RetInstVec = instVisitor->getRetInstVec();
+    auto &visitInfo = SGXSanInstVisitor::visitFunction(F);
+    auto CallInstVec = visitInfo.CallInstVec;
+    auto RetInstVec = visitInfo.ReturnInstVec;
 
     for (auto CallI : CallInstVec)
     {
@@ -1102,7 +1102,6 @@ Value *SensitiveLeakSan::isPtrPoisoned(Instruction *insertPoint, Value *ptr, Val
 Value *SensitiveLeakSan::isArgPoisoned(Argument *arg)
 {
     Instruction &firstFuncInsertPt = *arg->getParent()->begin()->begin();
-    assert(&firstFuncInsertPt != nullptr);
     IRBuilder<> IRB(&firstFuncInsertPt);
     return IRB.CreateCall(query_thread_func_arg_shadow_stack,
                           {IRB.CreatePtrToInt(arg->getParent(), IRB.getInt64Ty()),
@@ -1302,7 +1301,7 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN)
         // stack object must be a AllocInst
         if (AI && cleanedStackObjs.count(AI) == 0)
         {
-            auto ReturnInstVec = InstVisitorCache::getInstVisitor(AI->getFunction())->getRetInstVec();
+            auto ReturnInstVec = SGXSanInstVisitor::visitFunction(*(AI->getFunction())).ReturnInstVec;
             for (ReturnInst *RI : ReturnInstVec)
             {
                 IRBuilder<> IRB(RI);
@@ -1574,7 +1573,6 @@ bool SensitiveLeakSan::runOnModule()
     {
         // update work status
         SVF::ObjPN *workObjPN = *WorkList.begin();
-        Value *work = const_cast<Value *>(workObjPN->getValue());
         WorkList.erase(WorkList.begin());
         ProcessedList.emplace(workObjPN);
 

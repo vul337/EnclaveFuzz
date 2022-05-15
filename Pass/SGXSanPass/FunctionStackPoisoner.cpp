@@ -559,7 +559,6 @@ void FunctionStackPoisoner::processStaticAllocas()
         return;
     }
 
-    int StackMallocIdx = -1;
     DebugLoc EntryDebugLocation;
     if (auto SP = F.getSubprogram())
         EntryDebugLocation =
@@ -639,7 +638,6 @@ void FunctionStackPoisoner::processStaticAllocas()
 
     auto DescriptionString = ComputeASanStackFrameDescription(SVD);
     LLVM_DEBUG(dbgs() << DescriptionString << " --- " << L.FrameSize << "\n");
-    uint64_t LocalStackSize = L.FrameSize;
 
     Value *StaticAlloca = createAllocaForLayout(IRB, L, false);
 

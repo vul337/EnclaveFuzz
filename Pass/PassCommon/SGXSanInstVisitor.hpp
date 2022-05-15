@@ -7,39 +7,24 @@
 
 namespace llvm
 {
-    class SGXSanInstVisitor : public InstVisitor<SGXSanInstVisitor>
+    struct VisitInfo
     {
-    public:
-        SGXSanInstVisitor(BasicBlock &BB);
-        SGXSanInstVisitor(Function &F);
-        SGXSanInstVisitor(Module &M);
-        void visitReturnInst(ReturnInst &RI);
-        void visitResumeInst(ResumeInst &RI);
-        void visitCleanupReturnInst(CleanupReturnInst &CRI);
-        void visitCallInst(CallInst &CI);
-        void visitIntrinsicInst(IntrinsicInst &II);
-        SmallVector<ReturnInst *> getRetInstVec();
-        SmallVector<Instruction *> getBroadRetInstVec();
-        SmallVector<CallInst *> getCallInstVec();
-        std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> getAILifeTimeStart();
-
-    private:
-        SmallVector<ReturnInst *> mReturnInstVec;
-        SmallVector<Instruction *> mBroadReturnInstVec;
-        SmallVector<CallInst *> mCallInstVec;
-        std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> mAILifeTimeStart;
+        SmallVector<ReturnInst *> ReturnInstVec;
+        SmallVector<Instruction *> BroadReturnInstVec;
+        SmallVector<CallInst *> CallInstVec;
+        std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> AILifeTimeStart;
     };
 
-    class InstVisitorCache
+    class SGXSanInstVisitor
     {
     public:
-        static SGXSanInstVisitor *getInstVisitor(Module *M);
-        static SGXSanInstVisitor *getInstVisitor(Function *F);
+        static VisitInfo &visitBasicBlock(BasicBlock &BB);
+        static VisitInfo &visitFunction(Function &F);
+        static VisitInfo &visitModule(Module &M);
 
     private:
-        ~InstVisitorCache();
-
-        static std::unordered_map<Module *, SGXSanInstVisitor *> SGXSanInstVisitorModuleMap;
-        static std::unordered_map<Function *, SGXSanInstVisitor *> SGXSanInstVisitorFuncMap;
+        static std::map<BasicBlock *, VisitInfo> BasicBlockVisitInfoMap;
+        static std::map<Function *, VisitInfo> FunctionVisitInfoMap;
+        static std::map<Module *, VisitInfo> ModuleVisitInfoMap;
     };
 }

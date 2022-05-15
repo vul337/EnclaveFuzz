@@ -33,8 +33,8 @@ namespace llvm
         void getInterestingMemoryOperands(Instruction *I, SmallVectorImpl<InterestingMemoryOperand> &Interesting, SmallVector<StoreInst *, 16> &GlobalVariableStoreInsts);
         void instrumentMop(InterestingMemoryOperand &O, bool UseCalls);
         void instrumentGlobalPropageteWhitelist(StoreInst *SI);
-        bool instrumentRealEcall(CallInst *CI, SmallVector<Instruction *> &ReturnInstVec);
-        bool instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *> &ReturnInstVec);
+        bool instrumentRealEcall(CallInst *CI);
+        bool instrumentOcallWrapper(Function &OcallWrapper);
         bool instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL,
                                       int depth, Value *eleCnt = nullptr, Value *operandAddr = nullptr,
                                       bool checkCurrentLevelPtr = true);
@@ -61,6 +61,7 @@ namespace llvm
         uint64_t getAllocaSizeInBytes(const AllocaInst &AI) const;
         bool ignoreAccess(Value *Ptr);
         static Type *unpackArrayType(Type *type);
+        void __instrumentTLSMgr(Function *ecallWrapper);
 
     private:
         friend class FunctionStackPoisoner;

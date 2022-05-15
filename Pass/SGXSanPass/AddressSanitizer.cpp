@@ -730,11 +730,11 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     {
         Instruction *insertPoint = &(*IRB.GetInsertPoint());
         // struct type cannot GEP with phi
-        int index = 0;
-        for (Type *elementType : structType->elements())
+
+        for (size_t index = 0; index < structType->elements().size(); index++)
         {
             IRB.SetInsertPoint(insertPoint);
-            Value *element = IRB.CreateExtractValue(operand, index++);
+            Value *element = IRB.CreateExtractValue(operand, index);
             instrumentParameterCheck(element, IRB, DL, depth);
         }
         return true;
@@ -759,7 +759,7 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
         else
         {
             // rvalue case
-            for (int index = 0; index < arrayType->getNumElements(); index++)
+            for (uint64_t index = 0; index < arrayType->getNumElements(); index++)
             {
                 IRB.SetInsertPoint(insertPoint);
                 Value *element = IRB.CreateExtractValue(operand, index);
@@ -771,26 +771,32 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     return false;
 }
 
-bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction *> &ReturnInstVec)
+// instrument `EnclaveTLSConstructorAtTBridgeBegin` and `EnclaveTLSDestructorAtTBridgeEnd` at ecallWrapper function begin and end respectively
+void AddressSanitizer::__instrumentTLSMgr(Function *ecallWrapper)
 {
-    assert(CI);
-    if (CI == nullptr)
-        return false;
-    Function *ecallWrapper = CI->getFunction();
-    // instrument `EnclaveTLSConstructorAtTBridgeBegin` and `EnclaveTLSDestructorAtTBridgeEnd` at function begin and end respectively
+    assert(ecallWrapper);
     if (TLSMgrInstrumentedEcall.count(ecallWrapper) == 0)
     {
-        auto &firstFuncInsertPoint = *ecallWrapper->getEntryBlock().getFirstInsertionPt();
+        auto &firstFuncInsertPoint = ecallWrapper->front().front();
         IRBuilder<> IRB(&firstFuncInsertPoint);
         IRB.CreateCall(EnclaveTLSConstructorAtTBridgeBegin);
 
-        for (auto RetInst : ReturnInstVec)
+        for (auto RetInst : SGXSanInstVisitor::visitFunction(*ecallWrapper).BroadReturnInstVec)
         {
             IRB.SetInsertPoint(RetInst);
             IRB.CreateCall(EnclaveTLSDestructorAtTBridgeEnd);
         }
         TLSMgrInstrumentedEcall.emplace(ecallWrapper);
     }
+}
+
+bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
+{
+    if (CI == nullptr)
+        return false;
+
+    __instrumentTLSMgr(CI->getFunction());
+
     // instrument `WhitelistOfAddrOutEnclave_active` before RealEcall
     IRBuilder<> IRB(CI);
     IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
@@ -801,7 +807,7 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction
         IRB.SetInsertPoint(CI);
         Value *operand = CI->getOperand(i);
         // fix-me: currently find array is also passed as pointer
-        if (PointerType *pointerType = dyn_cast<PointerType>(operand->getType()))
+        if (isa<PointerType>(operand->getType()))
         {
             // Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)), CI, false);
             // maybe operand is a (array-)pointer and it has more then 1 element accroding to EDL Sementics
@@ -843,13 +849,13 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction
     return true;
 }
 
-bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *> &ReturnInstVec)
+bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
 {
     Instruction &firstFuncInsertPoint = *OcallWrapper.getEntryBlock().getFirstInsertionPt();
     IRBuilder<> IRB(&firstFuncInsertPoint);
     IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
 
-    for (Instruction *RetInst : ReturnInstVec)
+    for (auto RetInst : SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec)
     {
         const DataLayout &DL = (dyn_cast<Instruction>(RetInst))->getModule()->getDataLayout();
         for (Argument &arg : OcallWrapper.args())
@@ -1022,17 +1028,16 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     FunctionStackPoisoner FSP(F, *this);
     bool ChangedStack = FSP.runOnFunction();
 
-    auto BroadReturnInstVec = InstVisitorCache::getInstVisitor(&F)->getBroadRetInstVec();
     for (auto RealEcallInst : RealEcallInsts)
     {
         // when it is an ecall wrapper
-        instrumentRealEcall(RealEcallInst, BroadReturnInstVec);
+        instrumentRealEcall(RealEcallInst);
         FunctionModified = true;
     }
 
     if (SGXOcallInsts.size() > 0)
     {
-        instrumentOcallWrapper(F, BroadReturnInstVec);
+        instrumentOcallWrapper(F);
         FunctionModified = true;
     }
 

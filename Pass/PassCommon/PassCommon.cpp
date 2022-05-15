@@ -151,7 +151,6 @@ namespace llvm
         int64_t length = -1;
         Value *lenValue = nullptr;
 
-        StringRef operandLengthName = "";
         std::pair<int64_t, llvm::Value *> lenAndValue;
         param = getEDLInPrefixedValue(param);
         if (param)
@@ -163,7 +162,6 @@ namespace llvm
             lenValue = lenAndValue.second;
         }
 
-    exit:
         return std::pair<int64_t, Value *>(length, lenValue);
     }
 
