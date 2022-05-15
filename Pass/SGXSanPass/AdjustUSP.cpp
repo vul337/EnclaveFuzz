@@ -16,10 +16,8 @@ void adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F)
     FunctionCallee GetUSP = M->getOrInsertFunction("get_untrust_sp", IRB.getInt64Ty());
 
     // get interesting callinst
-    SmallVector<CallInst *> OcallocVec, OcfreeVec, CallInstVec;
-    SGXSanInstVisitor *instVisitor = nullptr;
-    InstVisitorCache::getInstVisitor(&F, instVisitor);
-    instVisitor->getCallInstVec(CallInstVec);
+    SmallVector<CallInst *> OcallocVec, OcfreeVec,
+        CallInstVec = InstVisitorCache::getInstVisitor(&F)->getCallInstVec();
     for (auto CI : CallInstVec)
     {
         StringRef callee_name = getDirectCalleeName(CI);

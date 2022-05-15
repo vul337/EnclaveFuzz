@@ -1,6 +1,7 @@
 #include "SensitiveLeakSan.hpp"
 #include "SGXSanManifest.h"
 #include "llvm/Demangle/Demangle.h"
+
 using namespace llvm;
 
 // #define DUMP_VALUE_FLOW
@@ -118,10 +119,7 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(SVF::ObjPN *objPN, std::pai
     {
         // TODO: extend at next time
         assert(shadowBytesPair == nullptr);
-        std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> AILifeTimeStart;
-        SGXSanInstVisitor *instVisitor = nullptr;
-        InstVisitorCache::getInstVisitor(M, instVisitor);
-        instVisitor->getAILifeTimeStart(AILifeTimeStart);
+        auto AILifeTimeStart = InstVisitorCache::getInstVisitor(objAI->getFunction())->getAILifeTimeStart();
         for (auto start : AILifeTimeStart[objAI])
         {
             objLivePoints.push_back(start->getNextNode());
@@ -197,7 +195,7 @@ Value *SensitiveLeakSan::getHeapObjSize(CallInst *CI, IRBuilder<> &IRB)
 {
     assert(CI->getFunctionType()->getReturnType()->isPointerTy());
     return IRB.CreateCall(func_malloc_usable_size, {IRB.CreatePointerCast(CI, IRB.getInt8PtrTy())});
-    // std::string calleeName = llvm::demangle(getDirectCalleeName(CI).str());
+    // std::string calleeName = demangle(getDirectCalleeName(CI).str());
     // if (calleeName.find("new") != std::string::npos || calleeName == "malloc")
     // {
     //     return CI->getArgOperand(0);
@@ -253,10 +251,7 @@ std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal)
 
 bool SensitiveLeakSan::isTBridgeFunc(Function &F)
 {
-    SmallVector<llvm::CallInst *> CallInstVec;
-    SGXSanInstVisitor *instVisitor = nullptr;
-    InstVisitorCache::getInstVisitor(&F, instVisitor);
-    instVisitor->getCallInstVec(CallInstVec);
+    auto CallInstVec = InstVisitorCache::getInstVisitor(&F)->getCallInstVec();
     for (auto CI : CallInstVec)
     {
         StringRef callee_name = getDirectCalleeName(CI);
@@ -672,13 +667,10 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(Value *obj)
 
 void SensitiveLeakSan::collectAndPoisonSensitiveObj()
 {
-    SmallVector<llvm::CallInst *> CallInstVec;
-    SGXSanInstVisitor *instVisitor = nullptr;
-    InstVisitorCache::getInstVisitor(M, instVisitor);
-    instVisitor->getCallInstVec(CallInstVec);
+    auto CallInstVec = InstVisitorCache::getInstVisitor(M)->getCallInstVec();
     for (auto CI : CallInstVec)
     {
-        SmallVector<llvm::Function *> calleeVec;
+        SmallVector<Function *> calleeVec;
         getDirectAndIndirectCalledFunction(CI, calleeVec);
         for (auto callee : calleeVec)
         {
@@ -835,12 +827,9 @@ bool SensitiveLeakSan::isHeapAllocatorWrapper(Function &F)
     if (!F.getFunctionType()->getReturnType()->isPointerTy())
         return false;
 
-    SmallVector<CallInst *> CallInstVec;
-    SmallVector<ReturnInst *> RetInstVec;
-    SGXSanInstVisitor *instVisitor = nullptr;
-    InstVisitorCache::getInstVisitor(&F, instVisitor);
-    instVisitor->getCallInstVec(CallInstVec);
-    instVisitor->getRetInstVec(RetInstVec);
+    SGXSanInstVisitor *instVisitor = InstVisitorCache::getInstVisitor(&F);
+    auto CallInstVec = instVisitor->getCallInstVec();
+    auto RetInstVec = instVisitor->getRetInstVec();
 
     for (auto CallI : CallInstVec)
     {
@@ -1313,10 +1302,7 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN)
         // stack object must be a AllocInst
         if (AI && cleanedStackObjs.count(AI) == 0)
         {
-            SGXSanInstVisitor *instVisitor = nullptr;
-            InstVisitorCache::getInstVisitor(AI->getFunction(), instVisitor);
-            SmallVector<llvm::ReturnInst *> ReturnInstVec;
-            instVisitor->getRetInstVec(ReturnInstVec);
+            auto ReturnInstVec = InstVisitorCache::getInstVisitor(AI->getFunction())->getRetInstVec();
             for (ReturnInst *RI : ReturnInstVec)
             {
                 IRBuilder<> IRB(RI);
@@ -1518,7 +1504,7 @@ void SensitiveLeakSan::propagateShadow(Value *src)
                 }
                 else
                 {
-                    llvm::SmallVector<Function *> calleeVec;
+                    SmallVector<Function *> calleeVec;
                     getDirectAndIndirectCalledFunction(CI, calleeVec);
                     for (Function *callee : calleeVec)
                     {

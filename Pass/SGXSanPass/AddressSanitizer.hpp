@@ -33,8 +33,8 @@ namespace llvm
         void getInterestingMemoryOperands(Instruction *I, SmallVectorImpl<InterestingMemoryOperand> &Interesting, SmallVector<StoreInst *, 16> &GlobalVariableStoreInsts);
         void instrumentMop(InterestingMemoryOperand &O, bool UseCalls);
         void instrumentGlobalPropageteWhitelist(StoreInst *SI);
-        bool instrumentRealEcall(CallInst *CI, SmallVector<Instruction *, 8> &ReturnInstVec);
-        bool instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *, 8> &ReturnInstVec);
+        bool instrumentRealEcall(CallInst *CI, SmallVector<Instruction *> &ReturnInstVec);
+        bool instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *> &ReturnInstVec);
         bool instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL,
                                       int depth, Value *eleCnt = nullptr, Value *operandAddr = nullptr,
                                       bool checkCurrentLevelPtr = true);
@@ -46,12 +46,12 @@ namespace llvm
         void declareExternElrangeSymbol(Module &M);
         Value *memToShadow(Value *Shadow, IRBuilder<> &IRB);
         Value *createSlowPathCmp(IRBuilder<> &IRB, Value *AddrLong,
-                                       Value *ShadowValue,
-                                       uint32_t TypeSize);
+                                 Value *ShadowValue,
+                                 uint32_t TypeSize);
         Instruction *generateCrashCode(Instruction *InsertBefore,
-                                             Value *Addr, bool IsWrite,
-                                             size_t AccessSizeIndex,
-                                             Value *SizeArgument);
+                                       Value *Addr, bool IsWrite,
+                                       size_t AccessSizeIndex,
+                                       Value *SizeArgument);
         void instrumentMemIntrinsic(MemIntrinsic *MI);
         void instrumentSecMemIntrinsic(CallInst *CI);
 #if (USE_SGXSAN_MALLOC)

@@ -1,5 +1,6 @@
 #include "AddressSanitizer.hpp"
 #include "FunctionStackPoisoner.hpp"
+#include "SGXSanInstVisitor.hpp"
 #include <utility>
 #include <tuple>
 using namespace llvm;
@@ -770,7 +771,7 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     return false;
 }
 
-bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction *, 8> &ReturnInstVec)
+bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction *> &ReturnInstVec)
 {
     assert(CI);
     if (CI == nullptr)
@@ -842,7 +843,7 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI, SmallVector<Instruction
     return true;
 }
 
-bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *, 8> &ReturnInstVec)
+bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper, SmallVector<Instruction *> &ReturnInstVec)
 {
     Instruction &firstFuncInsertPoint = *OcallWrapper.getEntryBlock().getFirstInsertionPt();
     IRBuilder<> IRB(&firstFuncInsertPoint);
@@ -1021,20 +1022,17 @@ bool AddressSanitizer::instrumentFunction(Function &F)
     FunctionStackPoisoner FSP(F, *this);
     bool ChangedStack = FSP.runOnFunction();
 
-    SmallVector<Instruction *, 8> ReturnInstVec;
-    // FSP.runOnFunction() already save RetVec
-    FSP.getRetInstVec(ReturnInstVec);
-
+    auto BroadReturnInstVec = InstVisitorCache::getInstVisitor(&F)->getBroadRetInstVec();
     for (auto RealEcallInst : RealEcallInsts)
     {
         // when it is an ecall wrapper
-        instrumentRealEcall(RealEcallInst, ReturnInstVec);
+        instrumentRealEcall(RealEcallInst, BroadReturnInstVec);
         FunctionModified = true;
     }
 
     if (SGXOcallInsts.size() > 0)
     {
-        instrumentOcallWrapper(F, ReturnInstVec);
+        instrumentOcallWrapper(F, BroadReturnInstVec);
         FunctionModified = true;
     }
 

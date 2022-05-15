@@ -40,7 +40,6 @@ namespace llvm
     public:
         FunctionStackPoisoner(Function &F, AddressSanitizer &ASan);
         bool runOnFunction();
-        void getRetInstVec(SmallVector<Instruction *, 8> &ReturnInstVec);
         void copyArgsPassedByValToAllocas();
         void visitReturnInst(ReturnInst &RI);
         void visitResumeInst(ResumeInst &RI);

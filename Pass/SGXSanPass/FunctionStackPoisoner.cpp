@@ -743,11 +743,6 @@ void FunctionStackPoisoner::processStaticAllocas()
         AI->eraseFromParent();
 }
 
-void FunctionStackPoisoner::getRetInstVec(SmallVector<Instruction *, 8> &ReturnInstVec)
-{
-    ReturnInstVec = this->RetVec;
-}
-
 bool FunctionStackPoisoner::runOnFunction()
 {
     if (!ClStack)

@@ -14,14 +14,18 @@ namespace llvm
         SGXSanInstVisitor(Function &F);
         SGXSanInstVisitor(Module &M);
         void visitReturnInst(ReturnInst &RI);
+        void visitResumeInst(ResumeInst &RI);
+        void visitCleanupReturnInst(CleanupReturnInst &CRI);
         void visitCallInst(CallInst &CI);
         void visitIntrinsicInst(IntrinsicInst &II);
-        void getRetInstVec(SmallVector<ReturnInst *> &ReturnInstVec);
-        void getCallInstVec(SmallVector<CallInst *> &CallInstVec);
-        void getAILifeTimeStart(std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> &AILifeTimeStart);
+        SmallVector<ReturnInst *> getRetInstVec();
+        SmallVector<Instruction *> getBroadRetInstVec();
+        SmallVector<CallInst *> getCallInstVec();
+        std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> getAILifeTimeStart();
 
     private:
         SmallVector<ReturnInst *> mReturnInstVec;
+        SmallVector<Instruction *> mBroadReturnInstVec;
         SmallVector<CallInst *> mCallInstVec;
         std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> mAILifeTimeStart;
     };
@@ -29,8 +33,8 @@ namespace llvm
     class InstVisitorCache
     {
     public:
-        static void getInstVisitor(Module *M, SGXSanInstVisitor *&instVisitor);
-        static void getInstVisitor(Function *F, SGXSanInstVisitor *&instVisitor);
+        static SGXSanInstVisitor *getInstVisitor(Module *M);
+        static SGXSanInstVisitor *getInstVisitor(Function *F);
 
     private:
         ~InstVisitorCache();

@@ -2,88 +2,104 @@
 
 using namespace llvm;
 
-SGXSanInstVisitor::SGXSanInstVisitor(llvm::BasicBlock &BB)
+SGXSanInstVisitor::SGXSanInstVisitor(BasicBlock &BB)
 {
     visit(BB);
 }
 
-SGXSanInstVisitor::SGXSanInstVisitor(llvm::Function &F)
+SGXSanInstVisitor::SGXSanInstVisitor(Function &F)
 {
     visit(F);
 }
 
-SGXSanInstVisitor::SGXSanInstVisitor(llvm::Module &M)
+SGXSanInstVisitor::SGXSanInstVisitor(Module &M)
 {
     visit(M);
 }
 
-void SGXSanInstVisitor::visitReturnInst(llvm::ReturnInst &RI)
+void SGXSanInstVisitor::visitReturnInst(ReturnInst &RI)
 {
     mReturnInstVec.push_back(&RI);
+    mBroadReturnInstVec.push_back(&RI);
 }
 
-void SGXSanInstVisitor::visitCallInst(llvm::CallInst &CI)
+void SGXSanInstVisitor::visitResumeInst(ResumeInst &RI)
+{
+    mBroadReturnInstVec.push_back(&RI);
+}
+
+void SGXSanInstVisitor::visitCleanupReturnInst(CleanupReturnInst &CRI)
+{
+    mBroadReturnInstVec.push_back(&CRI);
+}
+
+void SGXSanInstVisitor::visitCallInst(CallInst &CI)
 {
     mCallInstVec.push_back(&CI);
 }
 
-void SGXSanInstVisitor::visitIntrinsicInst(llvm::IntrinsicInst &II)
+void SGXSanInstVisitor::visitIntrinsicInst(IntrinsicInst &II)
 {
     // because `IntrinsicInst` is a derived class of `CallInst`,
     // `visitCallInst` will not catch this `II` any more
-    mCallInstVec.push_back(llvm::cast<llvm::CallInst>(&II));
+    mCallInstVec.push_back(cast<CallInst>(&II));
 
     auto ID = II.getIntrinsicID();
-    if (ID == llvm::Intrinsic::lifetime_start)
+    if (ID == Intrinsic::lifetime_start)
     {
-        llvm::AllocaInst *AI = findAllocaForValue(II.getArgOperand(1), true);
+        AllocaInst *AI = findAllocaForValue(II.getArgOperand(1), true);
         assert(AI);
         mAILifeTimeStart[AI].push_back(&II);
     }
 }
 
-void SGXSanInstVisitor::getRetInstVec(llvm::SmallVector<llvm::ReturnInst *> &ReturnInstVec)
+SmallVector<ReturnInst *> SGXSanInstVisitor::getRetInstVec()
 {
-    ReturnInstVec = mReturnInstVec;
+    return mReturnInstVec;
 }
 
-void SGXSanInstVisitor::getCallInstVec(llvm::SmallVector<llvm::CallInst *> &CallInstVec)
+SmallVector<Instruction *> SGXSanInstVisitor::getBroadRetInstVec()
 {
-    CallInstVec = mCallInstVec;
+    return mBroadReturnInstVec;
 }
 
-void SGXSanInstVisitor::getAILifeTimeStart(std::unordered_map<llvm::AllocaInst *, llvm::SmallVector<llvm::IntrinsicInst *>> &AILifeTimeStart)
+SmallVector<CallInst *> SGXSanInstVisitor::getCallInstVec()
 {
-    AILifeTimeStart = mAILifeTimeStart;
+    return mCallInstVec;
 }
 
-void InstVisitorCache::getInstVisitor(Module *M, SGXSanInstVisitor *&instVisitor)
+std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>> SGXSanInstVisitor::getAILifeTimeStart()
+{
+    return mAILifeTimeStart;
+}
+
+SGXSanInstVisitor *InstVisitorCache::getInstVisitor(Module *M)
 {
     auto it = SGXSanInstVisitorModuleMap.find(M);
     if (it != SGXSanInstVisitorModuleMap.end())
     {
-        instVisitor = it->second;
+        return it->second;
     }
     else
     {
         SGXSanInstVisitor *moduleInstVisitor = new SGXSanInstVisitor(*M);
         SGXSanInstVisitorModuleMap[M] = moduleInstVisitor;
-        instVisitor = moduleInstVisitor;
+        return moduleInstVisitor;
     }
 }
 
-void InstVisitorCache::getInstVisitor(Function *F, SGXSanInstVisitor *&instVisitor)
+SGXSanInstVisitor *InstVisitorCache::getInstVisitor(Function *F)
 {
     auto it = SGXSanInstVisitorFuncMap.find(F);
     if (it != SGXSanInstVisitorFuncMap.end())
     {
-        instVisitor = it->second;
+        return it->second;
     }
     else
     {
         SGXSanInstVisitor *funcInstVisitor = new SGXSanInstVisitor(*F);
         SGXSanInstVisitorFuncMap[F] = funcInstVisitor;
-        instVisitor = funcInstVisitor;
+        return funcInstVisitor;
     }
 }
 
