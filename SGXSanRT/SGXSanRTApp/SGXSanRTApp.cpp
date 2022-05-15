@@ -14,6 +14,8 @@
 #include <memory>
 #include <iostream>
 #include <unistd.h>
+#include <regex>
+
 #include "SGXSanManifest.h"
 #include "SGXSanRTUBridge.hpp"
 #include "SGXSanCommonShadowMap.hpp"
@@ -35,6 +37,8 @@ uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
 		 kHighMemBeg = 0, kHighMemEnd = 0;
 static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
+std::string sgxsan_exec(const char *cmd);
+
 void PrintAddressSpaceLayout()
 {
 	printf("|| `[%16p, %16p]` || Shadow    ||\n", (void *)kLowShadowBeg, (void *)kLowShadowEnd);
@@ -144,6 +148,18 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
 	// consistent with modification in psw/enclave_common/sgx_enclave_common.cpp:enclave_create_ex
 	g_enclave_low_guard_start = kLowMemBeg - page_size;
 	g_enclave_high_guard_end = kLowMemEnd + page_size;
+
+	// make sure 0 address is not accessible
+	auto result = sgxsan_exec("sysctl vm.mmap_min_addr");
+	std::regex mmap_min_addr_patten("vm.mmap_min_addr = ([0-9a-fA-F]+)");
+	std::smatch match;
+	if (std::regex_search(result, match, mmap_min_addr_patten))
+	{
+		auto mmap_min_addr_str = match[1].str();
+		auto mmap_min_addr = std::stoll(mmap_min_addr_str);
+		if (mmap_min_addr == 0)
+			ABORT_ASSERT(MAP_FAILED != mmap((void *)0, 0x10000, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0), "Failed to make 0 address not accessible");
+	}
 	// ABORT_ASSERT((MAP_FAILED != mmap((void *)g_enclave_low_guard_start, kLowMemBeg - g_enclave_low_guard_start, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) ||
 	//                  (MAP_FAILED != mmap((void *)(kLowMemEnd + 1), g_enclave_high_guard_end - kLowMemEnd, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)),
 	//              "ElrangeGuard unavailable");

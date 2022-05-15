@@ -259,15 +259,10 @@ bool SensitiveLeakSan::isTBridgeFunc(Function &F)
     instVisitor->getCallInstVec(CallInstVec);
     for (auto CI : CallInstVec)
     {
-        Function *callee = CI->getCalledFunction();
-        if (callee != nullptr)
+        StringRef callee_name = getDirectCalleeName(CI);
+        if (F.getName() == ("sgx_" /* ecall wrapper prefix */ + callee_name.str()))
         {
-            StringRef callee_name = callee->getName();
-            assert(callee_name != "");
-            if (F.getName() == ("sgx_" /* ecall wrapper prefix */ + callee_name.str()))
-            {
-                return true;
-            }
+            return true;
         }
     }
     return false;
@@ -837,41 +832,39 @@ bool SensitiveLeakSan::isHeapAllocatorWrapper(Function &F)
 {
     // A heap allocator wrapper can have multiple allocator calls on different conditional branches as well as multiple return instructions
     std::vector<CallInst *> heapPtrs;
-    std::vector<ReturnInst *> retInsts;
     if (!F.getFunctionType()->getReturnType()->isPointerTy())
         return false;
 
-    for (BasicBlock &BB : F)
-        for (Instruction &I : BB)
+    SmallVector<CallInst *> CallInstVec;
+    SmallVector<ReturnInst *> RetInstVec;
+    SGXSanInstVisitor *instVisitor = nullptr;
+    InstVisitorCache::getInstVisitor(&F, instVisitor);
+    instVisitor->getCallInstVec(CallInstVec);
+    instVisitor->getRetInstVec(RetInstVec);
+
+    for (auto CallI : CallInstVec)
+    {
+        Function *calleeFunc = getCalledFunctionStripPointerCast(CallI);
+        Value *calleeValue = CallI->getCalledOperand();
+        // Direct call
+        if (calleeFunc && heapAllocators.count(calleeFunc))
         {
-            if (CallInst *CallI = dyn_cast<CallInst>(&I))
+            heapPtrs.push_back(CallI);
+        }
+        // Indirect call, then find if the function pointer is a global pointer that point to heap allocator
+        else if (calleeFunc == nullptr)
+        {
+            if (LoadInst *LoadI = dyn_cast<LoadInst>(calleeValue))
             {
-                Function *calleeFunc = CallI->getCalledFunction();
-                Value *calleeValue = CallI->getCalledOperand();
-                // Direct call
-                if (calleeFunc && heapAllocators.count(calleeFunc))
+                // TODO: deal with uninitialized heapAllocatorGlobalPtr
+                GlobalVariable *GV = dyn_cast<GlobalVariable>(LoadI->getPointerOperand());
+                if (GV && heapAllocatorGlobalPtrs.count(GV))
                 {
                     heapPtrs.push_back(CallI);
                 }
-                // Indirect call, then find if the function pointer is a global pointer that point to heap allocator
-                else if (calleeFunc == nullptr)
-                {
-                    if (LoadInst *LoadI = dyn_cast<LoadInst>(calleeValue))
-                    {
-                        // TODO: deal with uninitialized heapAllocatorGlobalPtr
-                        GlobalVariable *GV = dyn_cast<GlobalVariable>(LoadI->getPointerOperand());
-                        if (GV && heapAllocatorGlobalPtrs.count(GV))
-                        {
-                            heapPtrs.push_back(CallI);
-                        }
-                    }
-                }
-            }
-            else if (ReturnInst *RetI = dyn_cast<ReturnInst>(&I))
-            {
-                retInsts.push_back(RetI);
             }
         }
+    }
 
     // If this function doesn't call heap allocator
     if (heapPtrs.size() == 0)
@@ -880,7 +873,7 @@ bool SensitiveLeakSan::isHeapAllocatorWrapper(Function &F)
     }
 
     // For all return instructions, check whether returned values are in heapPtrs
-    for (ReturnInst *RetI : retInsts)
+    for (ReturnInst *RetI : RetInstVec)
     {
         if (std::find_if(
                 heapPtrs.begin(),
@@ -1048,7 +1041,7 @@ int SensitiveLeakSan::getCallInstOperandPosition(CallInst *CI, Value *operand, b
 
 void SensitiveLeakSan::getDirectAndIndirectCalledFunction(CallInst *CI, SmallVector<Function *> &calleeVec)
 {
-    Function *callee = CI->getCalledFunction();
+    Function *callee = getCalledFunctionStripPointerCast(CI);
     if (callee == nullptr)
     {
         // it's an indirect call

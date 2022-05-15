@@ -49,4 +49,5 @@ namespace llvm
     std::string toString(Value *val);
     void dump(Value *val);
     uint64_t getAllocaSizeInBytes(const AllocaInst &AI);
+    Function *getCalledFunctionStripPointerCast(CallInst *CallI);
 }

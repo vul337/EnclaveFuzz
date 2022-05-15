@@ -21,6 +21,9 @@ namespace
         bool runOnModule(Module &M) override
         {
             errs() << "[SGXSanPass] " << M.getName().str() << "\n";
+            // std::error_code EC;
+            // raw_fd_stream f(M.getName().str() + ".dump", EC);
+            // M.print(f, nullptr);
             bool Changed = false;
             ModuleAddressSanitizer MASan(M);
             MASan.instrumentModule(M);

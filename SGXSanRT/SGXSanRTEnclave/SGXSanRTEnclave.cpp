@@ -22,7 +22,10 @@ int asan_inited = 0;
 static void init_shadow_memory_out_enclave()
 {
     // only use LowMem and LowShadow
-    ocall_init_shadow_memory(g_enclave_base, g_enclave_size, &kLowShadowBeg, &kLowShadowEnd);
+    if (SGX_SUCCESS != ocall_init_shadow_memory(g_enclave_base, g_enclave_size, &kLowShadowBeg, &kLowShadowEnd))
+    {
+        abort();
+    }
     kLowMemBeg = g_enclave_base;
     kLowMemEnd = g_enclave_base + g_enclave_size - 1;
     assert(kLowShadowBeg == SGXSAN_SHADOW_MAP_BASE);

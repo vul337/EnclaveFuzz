@@ -145,7 +145,7 @@ namespace llvm
     }
 
     // fix-me: implementation is tricky
-    // if (int64_t) length is not -1, then (Value *) lenValue must be not nullptr
+    // if (int64_t) length is not -1, then (Value *) lenValue must not be nullptr
     std::pair<int64_t, Value *> getLenAndValueByParamInEDL(Function *F, Value *param)
     {
         int64_t length = -1;
@@ -239,7 +239,7 @@ namespace llvm
     {
         if (auto CI = dyn_cast<CallInst>(value))
         {
-            if (auto callee = CI->getCalledFunction())
+            if (auto callee = getCalledFunctionStripPointerCast(CI))
             {
                 return callee->getName();
             }
@@ -289,5 +289,21 @@ namespace llvm
         uint64_t SizeInBytes =
             AI.getModule()->getDataLayout().getTypeAllocSize(Ty);
         return SizeInBytes * ArraySize;
+    }
+
+    Function *getCalledFunctionStripPointerCast(CallInst *CallI)
+    {
+        if (Function *callee = CallI->getCalledFunction())
+        {
+            return callee;
+        }
+        else if (Value *calledOp = CallI->getCalledOperand())
+        {
+            if (auto callee = dyn_cast<Function>(calledOp->stripPointerCasts()))
+            {
+                return callee;
+            }
+        }
+        return nullptr;
     }
 }

@@ -174,8 +174,8 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     WhitelistOfAddrOutEnclave_active = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_active", IRB.getVoidTy());
     WhitelistOfAddrOutEnclave_deactive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
     WhitelistOfAddrOutEnclave_query = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
-                                                  IRB.getVoidTy(), IRB.getInt64Ty(),
-                                                  IRB.getInt64Ty(), IRB.getInt1Ty());
+                                                            IRB.getVoidTy(), IRB.getInt64Ty(),
+                                                            IRB.getInt64Ty(), IRB.getInt1Ty());
 
     WhitelistOfAddrOutEnclave_global_propagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
                                                                        IRB.getVoidTy(), IRB.getInt64Ty());
@@ -247,9 +247,9 @@ void AddressSanitizer::getInterestingMemoryOperands(
     }
     else if (auto CI = dyn_cast<CallInst>(I))
     {
-        auto *F = CI->getCalledFunction();
-        if (F && (F->getName().startswith("llvm.masked.load.") ||
-                  F->getName().startswith("llvm.masked.store.")))
+        auto calleeName = getDirectCalleeName(CI);
+        if (calleeName.startswith("llvm.masked.load.") ||
+            calleeName.startswith("llvm.masked.store."))
         {
             // bool IsWrite = F->getName().startswith("llvm.masked.store.");
             // // Masked store has an initial operand for the value.
@@ -594,9 +594,7 @@ void AddressSanitizer::instrumentMemIntrinsic(MemIntrinsic *MI)
 // Instrument memset_s/memmove_s/memcpy_s
 void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI)
 {
-    Function *callee = CI->getCalledFunction();
-    assert(callee);
-    StringRef callee_name = callee->getName();
+    StringRef callee_name = getDirectCalleeName(CI);
     IRBuilder<> IRB(CI);
     CallInst *tempCI = nullptr;
     if (callee_name == "memcpy_s")
@@ -614,6 +612,8 @@ void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI)
         tempCI = IRB.CreateCall(SGXSanMemmoveS, {CI->getOperand(0), CI->getOperand(1),
                                                  CI->getOperand(2), CI->getOperand(3)});
     }
+    else
+        abort();
     CI->replaceAllUsesWith(tempCI);
     CI->eraseFromParent();
 }
@@ -622,9 +622,7 @@ void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI)
 // Instrument malloc/free/calloc/realloc
 void AddressSanitizer::instrumentHeapCall(CallInst *CI)
 {
-    Function *callee = CI->getCalledFunction();
-    assert(callee);
-    StringRef callee_name = callee->getName();
+    StringRef callee_name = getDirectCalleeName(CI);
     IRBuilder<> IRB(CI);
     CallInst *tempCI = nullptr;
     if (callee_name == "malloc")
@@ -643,6 +641,8 @@ void AddressSanitizer::instrumentHeapCall(CallInst *CI)
     {
         tempCI = IRB.CreateCall(SGXSanRealloc, {CI->getOperand(0), CI->getOperand(1)});
     }
+    else
+        abort();
     CI->replaceAllUsesWith(tempCI);
     CI->eraseFromParent();
 }
@@ -954,33 +954,28 @@ bool AddressSanitizer::instrumentFunction(Function &F)
             }
             if (CallInst *CI = dyn_cast<CallInst>(&Inst))
             {
-                Function *callee = CI->getCalledFunction();
-                if (callee != nullptr)
+                StringRef callee_name = getDirectCalleeName(CI);
+                if (F.getName() == ("sgx_" /* ecall wrapper prefix */ + callee_name.str()))
                 {
-                    StringRef callee_name = callee->getName();
-                    assert(callee_name != "");
-                    if (F.getName() == ("sgx_" /* ecall wrapper prefix */ + callee_name.str()))
-                    {
-                        // it's an ecall wrapper
-                        RealEcallInsts.push_back(CI);
-                        isFuncAtEnclaveTBridge = true;
-                    }
-                    else if (callee_name == "sgx_ocall")
-                    {
-                        SGXOcallInsts.push_back(CI);
-                        isFuncAtEnclaveTBridge = true;
-                    }
-                    else if (callee_name == "memcpy_s" || callee_name == "memset_s" || callee_name == "memmove_s")
-                    {
-                        SecIntrinToInstrument.push_back(CI);
-                    }
-#if (USE_SGXSAN_MALLOC)
-                    else if (callee_name == "malloc" || callee_name == "free" || callee_name == "calloc" || callee_name == "realloc")
-                    {
-                        HeapCIToInstrument.push_back(CI);
-                    }
-#endif
+                    // it's an ecall wrapper
+                    RealEcallInsts.push_back(CI);
+                    isFuncAtEnclaveTBridge = true;
                 }
+                else if (callee_name == "sgx_ocall")
+                {
+                    SGXOcallInsts.push_back(CI);
+                    isFuncAtEnclaveTBridge = true;
+                }
+                else if (callee_name == "memcpy_s" || callee_name == "memset_s" || callee_name == "memmove_s")
+                {
+                    SecIntrinToInstrument.push_back(CI);
+                }
+#if (USE_SGXSAN_MALLOC)
+                else if (callee_name == "malloc" || callee_name == "free" || callee_name == "calloc" || callee_name == "realloc")
+                {
+                    HeapCIToInstrument.push_back(CI);
+                }
+#endif
             }
 
             if (NumInsnsPerBB >= ClMaxInsnsToInstrumentPerBB)

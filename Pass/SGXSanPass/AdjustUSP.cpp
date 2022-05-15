@@ -1,6 +1,8 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
 #include "AdjustUSP.hpp"
+#include "PassCommon.hpp"
+#include "SGXSanInstVisitor.hpp"
 #include <assert.h>
 
 using namespace llvm;
@@ -14,28 +16,20 @@ void adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F)
     FunctionCallee GetUSP = M->getOrInsertFunction("get_untrust_sp", IRB.getInt64Ty());
 
     // get interesting callinst
-    SmallVector<CallInst *, 8> OcallocVec, OcfreeVec;
-    for (auto &BB : F)
+    SmallVector<CallInst *> OcallocVec, OcfreeVec, CallInstVec;
+    SGXSanInstVisitor *instVisitor = nullptr;
+    InstVisitorCache::getInstVisitor(&F, instVisitor);
+    instVisitor->getCallInstVec(CallInstVec);
+    for (auto CI : CallInstVec)
     {
-        for (auto &I : BB)
+        StringRef callee_name = getDirectCalleeName(CI);
+        if (callee_name == "sgx_ocalloc")
         {
-            if (CallInst *CI = dyn_cast<CallInst>(&I))
-            {
-                Function *callee = CI->getCalledFunction();
-                if (callee != nullptr)
-                {
-                    StringRef callee_name = callee->getName();
-                    assert(callee_name != "");
-                    if (callee_name == "sgx_ocalloc")
-                    {
-                        OcallocVec.push_back(CI);
-                    }
-                    else if (callee_name == "sgx_ocfree")
-                    {
-                        OcfreeVec.push_back(CI);
-                    }
-                }
-            }
+            OcallocVec.push_back(CI);
+        }
+        else if (callee_name == "sgx_ocfree")
+        {
+            OcfreeVec.push_back(CI);
         }
     }
 
