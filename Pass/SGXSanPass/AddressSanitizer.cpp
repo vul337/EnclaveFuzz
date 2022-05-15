@@ -894,6 +894,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
 
 bool AddressSanitizer::instrumentFunction(Function &F)
 {
+    // errs() << "[SGXSan] Processing " << F.getName() << " ...\n";
     isFuncAtEnclaveTBridge = false;
     if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
         return false;
