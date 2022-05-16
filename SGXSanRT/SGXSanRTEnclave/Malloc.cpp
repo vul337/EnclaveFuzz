@@ -5,7 +5,7 @@
 #include "PoisonCheck.hpp"
 #include "Malloc.hpp"
 #include "SGXSanCommonPoison.hpp"
-#include "SGXSanCommonErrorReport.hpp"
+#include "ErrorReport.hpp"
 #include "SGXSanRTEnclave.hpp"
 #include "Quarantine.hpp"
 #include "InternalDlmalloc.hpp"

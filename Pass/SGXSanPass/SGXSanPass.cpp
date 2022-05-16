@@ -34,19 +34,15 @@ namespace
                 // errs() << "[SGXSanPass] [Function] " << F.getName().str() << "\n";
                 if (F.isDeclaration())
                     continue;
+
+                std::set<std::string> OCallsOnlyAdjustUSP{"sgxsan_ocall_print_string", "sgxsan_ocall_addr2line", "sgxsan_ocall_addr2line_ex", "sgxsan_ocall_addr2func_name", "sgxsan_ocall_depcit_distribute", "sgxsan_ocall_get_mmap_infos"};
                 StringRef func_name = F.getName();
-                assert(func_name != "sgxsan_printf");
-                if (func_name == "sgxsan_ocall_print_string" ||
-                    func_name == "sgxsan_ocall_addr2line" ||
-                    func_name == "sgxsan_ocall_addr2line_ex" ||
-                    func_name == "sgxsan_ocall_addr2func_name" ||
-                    func_name == "sgxsan_ocall_depcit_distribute")
+                if (std::find(OCallsOnlyAdjustUSP.begin(), OCallsOnlyAdjustUSP.end(), func_name.str()) != OCallsOnlyAdjustUSP.end())
                 {
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                 }
-                // since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
-                // Cauze WhitelistQuery will call sgxsan_printf, so we shouldn't instrument sgxsan_printf with WhitelistQuery (e.g. sgxsan_memcpy_s will call WhitelistQuery).
-                else if (func_name != "ocall_init_shadow_memory")
+                // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
+                else if (func_name != "sgxsan_ocall_init_shadow_memory")
                 {
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.

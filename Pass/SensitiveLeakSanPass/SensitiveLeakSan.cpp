@@ -1551,12 +1551,10 @@ bool SensitiveLeakSan::runOnModule()
     {
         if (F.isDeclaration())
             continue;
+        std::set<std::string> OCallsIgnore{"sgxsan_ocall_print_string", "sgxsan_ocall_addr2line", "sgxsan_ocall_addr2line_ex", "sgxsan_ocall_addr2func_name", "sgxsan_ocall_depcit_distribute", "sgxsan_ocall_init_shadow_memory", "sgxsan_ocall_get_mmap_infos"};
         StringRef func_name = F.getName();
-        if (func_name == "sgxsan_ocall_print_string" || func_name == "sgxsan_ocall_addr2line" ||
-            func_name == "sgxsan_ocall_addr2line_ex" || func_name == "sgxsan_ocall_addr2func_name" ||
-            func_name == "sgxsan_ocall_depcit_distribute" || func_name == "ocall_init_shadow_memory")
+        if (std::find(OCallsIgnore.begin(), OCallsIgnore.end(), func_name.str()) != OCallsIgnore.end())
             continue;
-        assert(func_name != "sgxsan_printf");
         IRBuilder<> IRB(&(F.front().front()));
         printStrAtRT(IRB, "[RUN FUNC] " + func_name.str() + " " + SVF::SVFUtil::getSourceLoc(&F.front().front()) + "\n");
     }

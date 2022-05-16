@@ -21,8 +21,21 @@
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoison.hpp"
 #include "SGXSanDefs.h"
-#include "PrintfSpeicification.h"
 #include "SGXSanStackTrace.hpp"
+
+#define PRINTF printf
+
+struct SGXSanMMapInfo
+{
+	uint64_t start = 0;
+	uint64_t end = 0;
+	bool is_readable = false;
+	bool is_writable = false;
+	bool is_executable = false;
+	bool is_shared = false;
+	bool is_private = false;
+	// char description[64] = {0};
+};
 
 // pass string to ENCLAVE_FILENAME (https://stackoverflow.com/questions/54602025/how-to-pass-a-string-from-a-make-file-into-a-c-program)
 #define _xstr(s) _str(s)
@@ -120,7 +133,7 @@ void reg_sgxsan_sigaction()
 
 // create shadow memory outside enclave for elrange
 // because shadow is independent of elrange, we just need one block of memory for shadow, and don't need consider shadow gap.
-void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow_beg_ptr, uptr *shadow_end_ptr)
+void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow_beg_ptr, uptr *shadow_end_ptr)
 {
 	g_enclave_base = enclave_base;
 	g_enclave_size = enclave_size;
@@ -156,7 +169,7 @@ void ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow
 	if (std::regex_search(result, match, mmap_min_addr_patten))
 	{
 		auto mmap_min_addr_str = match[1].str();
-		auto mmap_min_addr = std::stoll(mmap_min_addr_str);
+		auto mmap_min_addr = std::stoll(mmap_min_addr_str, nullptr, 0);
 		if (mmap_min_addr == 0)
 			ABORT_ASSERT(MAP_FAILED != mmap((void *)0, 0x10000, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0), "Failed to make 0 address not accessible");
 	}
@@ -178,7 +191,6 @@ void sgxsan_ocall_print_string(const char *str)
 	/* Proxy/Bridge will check the length and null-terminate
 	 * the input string to prevent buffer overflow.
 	 */
-	// printf("%s", str);
 	std::cerr << str;
 }
 
@@ -273,4 +285,51 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size
 		   << "}";
 	}
 	return;
+}
+
+void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real_size)
+{
+	SGXSanMMapInfo *infos = (SGXSanMMapInfo *)mmap_infos;
+	size_t max_cnt = max_size / sizeof(SGXSanMMapInfo);
+	assert(max_size % sizeof(SGXSanMMapInfo) == 0);
+
+	std::fstream f("/proc/self/maps", std::ios::in);
+	std::string line;
+	size_t real_cnt = 0;
+	while (std::getline(f, line) && real_cnt < max_cnt)
+	{
+		std::regex map_pattern("([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
+		std::smatch match;
+		if (std::regex_search(line, match, map_pattern))
+		{
+			try
+			{
+				SGXSanMMapInfo &info = infos[real_cnt];
+				info.start = std::stoll(match[1].str(), nullptr, 16);
+				info.end = std::stoll(match[2].str(), nullptr, 16);
+				info.is_readable = match[3] == "r";
+				info.is_writable = match[4] == "w";
+				info.is_executable = match[5] == "x";
+				info.is_shared = match[6] == "s";
+				info.is_private = match[6] == "p";
+				// std::string remained = match[7];
+				// std::regex remained_pattern("([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*):([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*)[ ]+([\\S]*)");
+				// std::smatch remained_match;
+				// if (std::regex_search(remained, remained_match, remained_pattern))
+				// {
+				// 	auto description = remained_match[5].str();
+				// 	auto cpLen = std::min(description.length(), (size_t)63);
+				// 	memcpy(info.description, description.c_str(), cpLen);
+				// 	info.description[cpLen] = 0;
+				// }
+				real_cnt++;
+			}
+			catch (const std::exception &e)
+			{
+				std::cerr << "MMap line can't recognize:\n\t" << line << "\n";
+			}
+		}
+	}
+
+	*real_size = real_cnt * sizeof(SGXSanMMapInfo);
 }

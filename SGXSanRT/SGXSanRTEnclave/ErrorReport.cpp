@@ -7,8 +7,7 @@
 #include "SGXSanCommonShadowMap.hpp"
 #include "PoisonCheck.hpp"
 #include "SGXSanStackTrace.hpp"
-
-#include "SGXSanCommonErrorReport.hpp"
+#include "ErrorReport.hpp"
 
 // -------------------------- Run-time entry ------------------- {{{1
 // exported functions

@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include "SGXSanDefs.h"
 #include "SGXSanRTEnclave.hpp"
-#include "SGXSanCommonErrorReport.hpp"
+#include "ErrorReport.hpp"
 #include "PoisonCheck.hpp"
 #include "MemIntrinsics.hpp"
 #include "WhitelistCheck.hpp"

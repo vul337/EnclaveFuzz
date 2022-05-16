@@ -1,5 +1,4 @@
-#ifndef SGXSAN_DEFS_H
-#define SGXSAN_DEFS_H
+#pragma once
 
 #include "SGXSanInt.h"
 #include "SGXSanManifest.h"
@@ -36,7 +35,7 @@
 #define SGXSAN_WARNING(cond, msg)                    \
     do                                               \
     {                                                \
-        if (!(cond))                                 \
+        if ((cond))                                  \
         {                                            \
             PRINTF("[SGXSan Warning] %s \n", (msg)); \
             sgxsan_print_stack_trace();              \
@@ -44,12 +43,4 @@
     } while (0)
 #endif
 
-#ifndef SGXSAN_TRACE
-#if (SGXSAN_DEBUG)
-#define SGXSAN_TRACE PRINTF
-#else
-#define SGXSAN_TRACE
-#endif
-#endif
-
-#endif //SGXSAN_DEFS_H
+#define SGXSAN_TRACE(...) /* PRINTF */

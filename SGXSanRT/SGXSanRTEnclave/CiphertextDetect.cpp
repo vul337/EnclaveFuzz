@@ -152,10 +152,8 @@ void check_output_hybrid(uint64_t addr, uint64_t size)
         }
         history.emplace_back(status);
 
-        if (last_known_status != Unknown && status != Unknown && last_known_status != status)
-        {
-            SGXSAN_WARNING(false, "Output is plaintext ciphertext hybridization");
-        }
+        SGXSAN_WARNING(last_known_status != Unknown && status != Unknown && last_known_status != status,
+                       "Output is plaintext ciphertext hybridization");
     }
     pthread_rwlock_unlock(&rwlock_output_history);
 }

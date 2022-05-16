@@ -68,7 +68,8 @@ LibSGXSanRTEnclave := libSGXSanRTEnclave.a
 
 .PHONY: all
 all: $(LibSGXSanRTApp) $(LibSGXSanRTEnclave)
-	@cp SGXSanRTEnclave/SGXSanRTEnclave.edl ../output/SGXSanRTEnclave.edl
+	@rm -f ../output/SGXSanRTEnclave.edl
+	@ln -s ../SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl ../output/SGXSanRTEnclave.edl
 
 ######## SGXSanRT App Objects ########
 

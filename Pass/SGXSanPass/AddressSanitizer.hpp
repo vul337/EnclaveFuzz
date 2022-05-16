@@ -90,7 +90,7 @@ namespace llvm
         FunctionCallee WhitelistOfAddrOutEnclave_active, WhitelistOfAddrOutEnclave_deactive,
             WhitelistOfAddrOutEnclave_query, WhitelistOfAddrOutEnclave_global_propagate,
             sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
-            EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd;
+            EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd, get_mmap_infos, is_pointer_readable;
 #if (USE_SGXSAN_MALLOC)
         FunctionCallee SGXSanMalloc, SGXSanFree, SGXSanCalloc, SGXSanRealloc;
 #endif

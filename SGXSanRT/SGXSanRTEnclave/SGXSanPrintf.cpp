@@ -31,17 +31,17 @@ int sgxsan_printf(const char *fmt, ...)
 void print_shadow(void *ptr)
 {
     uint64_t shadow_addr = MEM_TO_SHADOW((uint64_t)ptr);
-    sgxsan_printf("[0x%lx =Shadow=> 0x%lx =Value=> 0x%x]\n", ptr, shadow_addr, *(uint8_t *)shadow_addr);
+    PRINTF("[0x%lx =Shadow=> 0x%lx =Value=> 0x%x]\n", ptr, shadow_addr, *(uint8_t *)shadow_addr);
 }
 
 void print_ptr(char *info, uint64_t addr, uint64_t size)
 {
     assert(addr && size);
     uint64_t shadow_addr = MEM_TO_SHADOW(addr);
-    sgxsan_printf("%s\n[Addr: 0x%lx(0x%lx) =Shadow=> 0x%lx]\n", info, addr, size, shadow_addr);
+    PRINTF("%s\n[Addr: 0x%lx(0x%lx) =Shadow=> 0x%lx]\n", info, addr, size, shadow_addr);
 }
 
 void print_arg(char *info, uint64_t func_addr, int64_t pos)
 {
-    sgxsan_printf("%s\n[Arg: 0x%lx(%ld)]\n", info, func_addr, pos);
+    PRINTF("%s\n[Arg: 0x%lx(%ld)]\n", info, func_addr, pos);
 }

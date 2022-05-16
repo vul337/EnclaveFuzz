@@ -84,12 +84,12 @@ void ThreadFuncArgShadowStack::show_arg_shadow(uint64_t func_addr)
     FuncArgShadowTy &top = thread_func_arg_shadow_stack->top();
     assert(top.func_addr == func_addr);
     std::unordered_set<int64_t> &arg_shadow = top.arg_shadow;
-    sgxsan_printf("[ Argument Shadow of 0x%lx ]:", func_addr);
+    PRINTF("[ Argument Shadow of 0x%lx ]:", func_addr);
     for (int64_t shadow_item : arg_shadow)
     {
-        sgxsan_printf(" %ld", shadow_item);
+        PRINTF(" %ld", shadow_item);
     }
-    sgxsan_printf(" \n");
+    PRINTF(" \n");
 }
 
 bool ThreadFuncArgShadowStack::query_arg(uint64_t func_addr, int64_t arg_pos)

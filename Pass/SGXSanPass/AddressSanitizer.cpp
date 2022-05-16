@@ -3,27 +3,8 @@
 #include "SGXSanInstVisitor.hpp"
 #include <utility>
 #include <tuple>
+
 using namespace llvm;
-
-#define FOR_LOOP_BEG(insert_point, count)                                       \
-    Instruction *forBodyTerm = SplitBlockAndInsertIfThen(                       \
-        IRB.CreateICmpSGT(count, IRB.getInt32(0), ""),                          \
-        insert_point,                                                           \
-        false);                                                                 \
-    IRB.SetInsertPoint(forBodyTerm);                                            \
-    PHINode *phi = IRB.CreatePHI(IRB.getInt32Ty(), 2, "");                      \
-    phi->addIncoming(IRB.getInt32(0), forBodyTerm->getParent()->getPrevNode()); \
-    BasicBlock *forBodyEntry = phi->getParent();
-
-#define FOR_LOOP_END(count)                                                                             \
-    /*  instrumentParameterCheck may insert new bb, so forBodyTerm may not belong to forBodyEntry BB */ \
-    IRB.SetInsertPoint(forBodyTerm);                                                                    \
-    Value *inc = IRB.CreateAdd(phi, IRB.getInt32(1), "", true, true);                                   \
-    phi->addIncoming(inc, forBodyTerm->getParent());                                                    \
-    ReplaceInstWithInst(forBodyTerm, BranchInst::Create(                                                \
-                                         forBodyEntry,                                                  \
-                                         forBodyTerm->getParent()->getNextNode(),                       \
-                                         IRB.CreateICmpSLT(inc, count)));
 
 const char kAsanReportErrorTemplate[] = "__asan_report_";
 const char kAsanHandleNoReturnName[] = "__asan_handle_no_return";
@@ -180,9 +161,8 @@ void AddressSanitizer::initializeCallbacks(Module &M)
 
     WhitelistOfAddrOutEnclave_global_propagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
                                                                        IRB.getVoidTy(), IRB.getInt64Ty());
-    // void sgxsan_edge_check(uint64_t ptr, uint64_t len, int cnt)
     sgxsan_edge_check = M.getOrInsertFunction("sgxsan_edge_check", IRB.getVoidTy(),
-                                              IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt32Ty());
+                                              IRB.getInt8PtrTy(), IRB.getInt64Ty(), IRB.getInt32Ty());
     SGXSanMemcpyS = M.getOrInsertFunction("sgxsan_memcpy_s", IRB.getInt32Ty(), IRB.getInt8PtrTy(),
                                           IRB.getInt64Ty(), IRB.getInt8PtrTy(), IRB.getInt64Ty());
     SGXSanMemsetS = M.getOrInsertFunction("sgxsan_memset_s", IRB.getInt32Ty(), IRB.getInt8PtrTy(),
@@ -195,6 +175,9 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     SGXSanCalloc = M.getOrInsertFunction("sgxsan_calloc", IRB.getInt8PtrTy(), IRB.getInt64Ty(), IRB.getInt64Ty());
     SGXSanRealloc = M.getOrInsertFunction("sgxsan_realloc", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(), IRB.getInt64Ty());
 #endif
+
+    get_mmap_infos = M.getOrInsertFunction("get_mmap_infos", IRB.getVoidTy());
+    is_pointer_readable = M.getOrInsertFunction("is_pointer_readable", IRB.getInt1Ty(), IRB.getInt8PtrTy(), IntptrTy, IRB.getInt32Ty());
 }
 
 void AddressSanitizer::getInterestingMemoryOperands(
@@ -681,47 +664,72 @@ Type *AddressSanitizer::unpackArrayType(Type *type)
     return elementType;
 }
 
+#define FOR_LOOP_BEG(insert_point, count)                                       \
+    Instruction *forBodyTerm = SplitBlockAndInsertIfThen(                       \
+        IRB.CreateICmpSGT(count, IRB.getInt32(0), ""),                          \
+        insert_point,                                                           \
+        false);                                                                 \
+    IRB.SetInsertPoint(forBodyTerm);                                            \
+    PHINode *phi = IRB.CreatePHI(IRB.getInt32Ty(), 2, "");                      \
+    phi->addIncoming(IRB.getInt32(0), forBodyTerm->getParent()->getPrevNode()); \
+    BasicBlock *forBodyEntry = phi->getParent();
+
+#define FOR_LOOP_END(count)                                                                             \
+    /*  instrumentParameterCheck may insert new bb, so forBodyTerm may not belong to forBodyEntry BB */ \
+    IRB.SetInsertPoint(forBodyTerm);                                                                    \
+    Value *inc = IRB.CreateAdd(phi, IRB.getInt32(1), "", true, true);                                   \
+    phi->addIncoming(inc, forBodyTerm->getParent());                                                    \
+    ReplaceInstWithInst(forBodyTerm, BranchInst::Create(                                                \
+                                         forBodyEntry,                                                  \
+                                         forBodyTerm->getParent()->getNextNode(),                       \
+                                         IRB.CreateICmpSLT(inc, count)));
+
+// Must already set insert point properly in IRB
 bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB, const DataLayout &DL,
                                                 int depth, Value *eleCnt, Value *operandAddr,
                                                 bool checkCurrentLevelPtr)
 {
-    if (depth > 10)
-    {
+    if (depth++ > 10)
         return false;
-    }
-    depth++;
+
     Type *operandType = operand->getType();
-    // insert point defined by caller function or last round of instrumentParameterCheck implied in IRB
     // fix-me: how about FunctionType
     if (PointerType *pointerType = dyn_cast<PointerType>(operandType))
     {
-        // if it's a function pointer, ignore
         if (!pointerType->getElementType()->isSized())
-            return false;
+            return false; // ignore unsized, e.g. function pointer
 
-        Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)), &(*IRB.GetInsertPoint()), false);
+        auto operandInt8ptr = IRB.CreatePointerCast(operand, IRB.getInt8PtrTy());
+        auto eleSize = IRB.getInt64(DL.getTypeAllocSize(pointerType->getElementType()));
+        if (eleCnt == nullptr)
+            eleCnt = IRB.getInt32(-1);
+        CallInst *isReadable = IRB.CreateCall(is_pointer_readable, {operandInt8ptr, eleSize, eleCnt});
+        Instruction *PointerCheckTerm = SplitBlockAndInsertIfThen(isReadable, &(*IRB.GetInsertPoint()), false);
         IRB.SetInsertPoint(PointerCheckTerm);
+
+        // now pointer is loadable
         if (checkCurrentLevelPtr)
-        {
-            IRB.CreateCall(sgxsan_edge_check,
-                           {IRB.CreatePointerCast(operand, IRB.getInt64Ty()),
-                            IRB.getInt64(DL.getTypeAllocSize(pointerType->getElementType())),
-                            (eleCnt == nullptr ? IRB.getInt32(-1) : eleCnt)});
-        }
-        assert(eleCnt != IRB.getInt32(0));
-        if (eleCnt && (eleCnt != IRB.getInt32(-1)) && (eleCnt != IRB.getInt32(1)))
+            IRB.CreateCall(sgxsan_edge_check, {operandInt8ptr, eleSize, eleCnt});
+
+        if (eleCnt == IRB.getInt32(0))
+            abort();
+        else if (eleCnt != IRB.getInt32(-1) && eleCnt != IRB.getInt32(1))
         {
             // multi element
             FOR_LOOP_BEG(PointerCheckTerm, eleCnt)
             Value *eleAddr = IRB.CreateGEP(operand, phi);
+            auto ele = IRB.CreateLoad(eleAddr);
             /* if element is pointer then nullptr means no idea about element's sub-element count */
-            instrumentParameterCheck(IRB.CreateLoad(eleAddr), IRB, DL, depth, nullptr, eleAddr);
+            instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
             FOR_LOOP_END(eleCnt)
         }
         else
         {
             // one element
-            instrumentParameterCheck(IRB.CreateLoad(operand), IRB, DL, depth, nullptr, operand);
+            auto ele = IRB.CreateLoad(operand);
+            bool result = instrumentParameterCheck(ele, IRB, DL, depth, nullptr, operand);
+            if (not result)
+                ele->eraseFromParent();
         }
 
         return true;
@@ -729,44 +737,60 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     else if (StructType *structType = dyn_cast<StructType>(operandType))
     {
         Instruction *insertPoint = &(*IRB.GetInsertPoint());
-        // struct type cannot GEP with phi
-
+        bool has_modified = false;
+        // struct type cannot GEP with phi, since elements of struct may be different from each other
         for (size_t index = 0; index < structType->elements().size(); index++)
         {
             IRB.SetInsertPoint(insertPoint);
             Value *element = IRB.CreateExtractValue(operand, index);
-            instrumentParameterCheck(element, IRB, DL, depth);
+            bool result = instrumentParameterCheck(element, IRB, DL, depth);
+            if (result)
+                has_modified = true;
+            else
+            {
+                if (auto I = dyn_cast<Instruction>(element))
+                    I->eraseFromParent();
+            }
         }
-        return true;
+        return has_modified;
     }
     else if (ArrayType *arrayType = dyn_cast<ArrayType>(operandType))
     {
         Type *unpackedType = unpackArrayType(arrayType);
         if (!unpackedType->isPointerTy() && !unpackedType->isStructTy())
-        {
             // do not need instrument
             return false;
-        }
         Instruction *insertPoint = &(*IRB.GetInsertPoint());
+        bool has_modified = false;
         if (operandAddr)
         {
-            // lvalue case
-            FOR_LOOP_BEG(insertPoint, IRB.getInt32(arrayType->getNumElements()))
+            // lvalue case, that has memobj
+            auto cnt = IRB.getInt32(arrayType->getNumElements());
+            FOR_LOOP_BEG(insertPoint, cnt)
             Value *eleAddr = IRB.CreateGEP(operandAddr, {IRB.getInt32(0), phi});
-            instrumentParameterCheck(IRB.CreateLoad(eleAddr), IRB, DL, depth, nullptr, eleAddr);
-            FOR_LOOP_END(IRB.getInt32(arrayType->getNumElements()))
+            auto ele = IRB.CreateLoad(eleAddr);
+            instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
+            FOR_LOOP_END(cnt)
+            has_modified = true;
         }
         else
         {
-            // rvalue case
+            // rvalue case, that only in register
             for (uint64_t index = 0; index < arrayType->getNumElements(); index++)
             {
                 IRB.SetInsertPoint(insertPoint);
                 Value *element = IRB.CreateExtractValue(operand, index);
-                instrumentParameterCheck(element, IRB, DL, depth);
+                bool result = instrumentParameterCheck(element, IRB, DL, depth);
+                if (result)
+                    has_modified = true;
+                else
+                {
+                    if (auto I = dyn_cast<Instruction>(element))
+                        I->eraseFromParent();
+                }
             }
         }
-        return true;
+        return has_modified;
     }
     return false;
 }
@@ -800,6 +824,7 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
     // instrument `WhitelistOfAddrOutEnclave_active` before RealEcall
     IRBuilder<> IRB(CI);
     IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
+    IRB.CreateCall(get_mmap_infos);
     const DataLayout &DL = CI->getModule()->getDataLayout();
     // instrument `sgxsan_edge_check` for each actual parameter of RealEcall before RealEcall
     for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++)

@@ -76,7 +76,7 @@ std::pair<std::map<uint64_t, uint64_t>::iterator, bool> WhitelistOfAddrOutEnclav
         return std::pair<std::map<uint64_t, uint64_t>::iterator, bool>(std::map<uint64_t, uint64_t>::iterator(), true);
     }
     auto ret = m_whitelist->emplace(start, size);
-    // SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "Thread", "+", (void *)start, (void *)size);
+    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "Thread", "+", (void *)start, (void *)size);
     // iter();
     return ret;
 }
@@ -89,7 +89,7 @@ std::pair<std::map<uint64_t, uint64_t>::iterator, bool> WhitelistOfAddrOutEnclav
     }
     pthread_rwlock_wrlock(&m_rwlock_global_whitelist);
     auto ret = m_global_whitelist.emplace(start, size);
-    // SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "~Global~", "+", (void *)start, (void *)size);
+    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "~Global~", "+", (void *)start, (void *)size);
     // iter(true);
     pthread_rwlock_unlock(&m_rwlock_global_whitelist);
     return ret;
@@ -115,7 +115,7 @@ std::tuple<uint64_t, uint64_t, bool> WhitelistOfAddrOutEnclave::query(uint64_t s
         last_query_start = start;
         last_query_size = size;
     }
-    // SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "Thread", "?", (void *)start, (void *)size);
+    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "Thread", "?", (void *)start, (void *)size);
     // iter();
     std::map<uint64_t, uint64_t>::iterator it;
     std::tuple<uint64_t, uint64_t, bool> ret, false_ret = std::tuple<uint64_t, uint64_t, bool>(0, 0, false);
@@ -163,7 +163,7 @@ exit:
 std::pair<uint64_t, uint64_t> WhitelistOfAddrOutEnclave::query_global(uint64_t start, uint64_t size)
 {
     pthread_rwlock_rdlock(&m_rwlock_global_whitelist);
-    // SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "~Global~", "?", (void *)start, (void *)size);
+    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0x%p)\n", "~Global~", "?", (void *)start, (void *)size);
     // iter(true);
     std::map<uint64_t, uint64_t>::iterator it;
     std::pair<uint64_t, uint64_t> ret, false_ret = std::pair<uint64_t, uint64_t>(0, 0);
@@ -210,7 +210,7 @@ bool WhitelistOfAddrOutEnclave::global_propagate(uint64_t addr)
     assert(find_start >= g_enclave_base + g_enclave_size or find_start + find_size <= g_enclave_base);
     if (is_at_global == false && find_size != 0 /* return case 2 */)
     {
-        // SGXSAN_TRACE("[Whitelist] [Thread] => 0x%p => [~Global~]\n", (void *)addr);
+        SGXSAN_TRACE("[Whitelist] [Thread] => 0x%p => [~Global~]\n", (void *)addr);
         add_global(find_start, find_size);
     }
     return true;
@@ -249,7 +249,7 @@ void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size, bool is_writ
     size_t buf_size = 1024;
     char buf[buf_size];
     sprintf_s(buf, buf_size, "[SGXSan] Illegal access outside-enclave: 0x%p", (void *)start);
-    SGXSAN_WARNING(find_size != 0, buf);
+    SGXSAN_WARNING(find_size == 0, buf);
 }
 
 void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr)

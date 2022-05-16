@@ -1,5 +1,5 @@
 #include "SGXSanDefs.h"
-#include "SGXSanCommonErrorReport.hpp"
+#include "ErrorReport.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "PoisonCheck.hpp"
 #include "WhitelistCheck.hpp"
