@@ -780,8 +780,7 @@ void SensitiveLeakSan::includeSGXSanCheck()
 {
     IRBuilder<> IRB(*C);
     sgxsan_region_is_poisoned = M->getOrInsertFunction("sgxsan_region_is_poisoned", IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
-    is_addr_in_elrange = M->getOrInsertFunction("is_addr_in_elrange", IRB.getInt1Ty(), IRB.getInt64Ty());
-    is_addr_in_elrange_ex = M->getOrInsertFunction("is_addr_in_elrange_ex", IRB.getInt1Ty(), IRB.getInt64Ty(), IRB.getInt64Ty());
+    sgx_is_within_enclave = M->getOrInsertFunction("sgx_is_within_enclave", IRB.getInt32Ty(), IRB.getInt8PtrTy(), IntptrTy);
     sgxsan_region_is_in_elrange_and_poisoned = M->getOrInsertFunction("sgxsan_region_is_in_elrange_and_poisoned", IRB.getInt1Ty(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
 }
 
@@ -1238,15 +1237,18 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI)
 
         IRBuilder<> IRB(srcIsPoisonedTerm);
         Value *dstPtr = SI->getPointerOperand();
-        Value *dstPtrInt = IRB.CreatePtrToInt(dstPtr, IRB.getInt64Ty());
         assert(not isa<Function>(dstPtr));
-        CallInst *isDestInElrange = IRB.CreateCall(is_addr_in_elrange_ex, {dstPtrInt, IRB.getInt64(getPointerElementSize(dstPtr))});
+        auto isDestInElrange = IRB.CreateICmpEQ(
+            IRB.CreateCall(sgx_is_within_enclave, {IRB.CreatePointerCast(dstPtr, IRB.getInt8PtrTy()),
+                                                   IRB.getInt64(getPointerElementSize(dstPtr))}),
+            IRB.getInt32(1));
 
         Instruction *destIsInElrangeTerm = SplitBlockAndInsertIfThen(isDestInElrange, srcIsPoisonedTerm, false);
 
         IRB.SetInsertPoint(destIsInElrangeTerm);
         uint64_t dstMemSize = M->getDataLayout().getTypeAllocSize(SI->getValueOperand()->getType());
         Value *dstMemSizeVal = IRB.getInt64(dstMemSize);
+        Value *dstPtrInt = IRB.CreatePtrToInt(dstPtr, IRB.getInt64Ty());
 #ifdef DUMP_VALUE_FLOW
         printSrcAtRT(IRB, src);
         printStrAtRT(IRB, "-[Store]->\n");
@@ -1361,12 +1363,15 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
         Instruction *sourceIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, sizeNot0Term, false);
 
         IRB.SetInsertPoint(sourceIsPoisonedTerm);
-        Value *dstPtrInt = IRB.CreatePtrToInt(destPtr, IntptrTy);
-        CallInst *isDestInElrange = IRB.CreateCall(is_addr_in_elrange_ex, {dstPtrInt, dstSize});
+        auto isDestInElrange = IRB.CreateICmpEQ(
+            IRB.CreateCall(sgx_is_within_enclave,
+                           {IRB.CreatePointerCast(destPtr, IRB.getInt8PtrTy()), dstSize}),
+            IRB.getInt32(1));
         Instruction *dstIsInElrangeTerm = SplitBlockAndInsertIfThen(isDestInElrange, sourceIsPoisonedTerm, false);
 
         IRB.SetInsertPoint(dstIsInElrangeTerm);
         Value *srcPtrInt = IRB.CreatePtrToInt(srcPtr, IntptrTy);
+        Value *dstPtrInt = IRB.CreatePtrToInt(destPtr, IntptrTy);
 #ifdef DUMP_VALUE_FLOW
         IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n" + toString(srcPtr)),
                                    srcPtrInt, copyCnt});
@@ -1429,13 +1434,15 @@ void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned, CallIns
     {
         Instruction *srcIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, MSI, false);
         IRBuilder<> IRB(srcIsPoisonedTerm);
-        Value *dstPtrInt = IRB.CreatePtrToInt(dstPtr, IRB.getInt64Ty());
         assert(not isa<Function>(dstPtr));
-        CallInst *isDestInElrange = IRB.CreateCall(is_addr_in_elrange_ex, {dstPtrInt, setSize});
-
+        auto isDestInElrange = IRB.CreateICmpEQ(
+            IRB.CreateCall(sgx_is_within_enclave,
+                           {IRB.CreatePointerCast(dstPtr, IRB.getInt8PtrTy()), setSize}),
+            IRB.getInt32(1));
         Instruction *destIsInElrangeTerm = SplitBlockAndInsertIfThen(isDestInElrange, srcIsPoisonedTerm, false);
 
         IRB.SetInsertPoint(destIsInElrangeTerm);
+        Value *dstPtrInt = IRB.CreatePtrToInt(dstPtr, IRB.getInt64Ty());
 #ifdef DUMP_VALUE_FLOW
         printSrcAtRT(IRB, src);
         printStrAtRT(IRB, "-[Memset]->\n");

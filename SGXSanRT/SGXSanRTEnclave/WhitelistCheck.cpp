@@ -5,6 +5,7 @@
 #include "SGXSanPrintf.hpp"
 #include "PoisonCheck.hpp"
 #include "SGXSanCommonShadowMap.hpp"
+#include "SGXInternal.hpp"
 
 #define FUNC_NAME_MAX_LEN 127
 #define CONTROL_FETCH_QUEUE_MAX_SIZE 3
@@ -83,8 +84,7 @@ void WhitelistOfAddrOutEnclave::iter(bool is_global)
 
 std::pair<std::map<const void *, size_t>::iterator, bool> WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
 {
-    assert(ptr && m_whitelist);
-    assert(((uptr)ptr >= g_enclave_base + g_enclave_size) or ((uptr)ptr + size <= g_enclave_base));
+    assert(ptr && m_whitelist && sgx_is_outside_enclave(ptr, size));
     auto ret = m_whitelist->emplace(ptr, size);
     SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0xllx)\n", "Thread", "+", ptr, size);
     // iter();
@@ -147,7 +147,7 @@ bool WhitelistOfAddrOutEnclave::double_fetch_detect(const void *ptr, size_t size
 // 3) query success at global whitelist (thread whitelist do not contain this info)
 std::tuple<const void *, size_t, bool> WhitelistOfAddrOutEnclave::query(const void *ptr, size_t size)
 {
-    assert(m_whitelist && ptr && (((uptr)ptr >= g_enclave_base + g_enclave_size) or ((uptr)ptr + size <= g_enclave_base)));
+    assert(m_whitelist && ptr && sgx_is_outside_enclave(ptr, size));
     if (!m_whitelist_active)
         return std::tuple<const void *, size_t, bool>(nullptr, 1, false);
 
@@ -228,13 +228,13 @@ exit:
 // input ptr may be in Enclave or out of Enclave
 bool WhitelistOfAddrOutEnclave::global_propagate(const void *ptr)
 {
-    if (((uptr)ptr >= g_enclave_base) and ((uptr)ptr < g_enclave_base + g_enclave_size))
+    if (sgx_is_within_enclave(ptr, 1))
         return true;
     const void *find_start = nullptr;
     size_t find_size = 0;
     bool is_at_global = false;
     std::tie(find_start, find_size, is_at_global) = query(ptr, 1);
-    assert(((uptr)find_start >= g_enclave_base + g_enclave_size) or ((uptr)find_start + find_size <= g_enclave_base));
+    assert(sgx_is_outside_enclave(find_start, find_size));
     if (is_at_global == false && find_size != 0 /* return case 2 */)
     {
         SGXSAN_TRACE("[Whitelist] [Thread] => 0x%p => [~Global~]\n", ptr);

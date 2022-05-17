@@ -4,6 +4,7 @@
 #include "SGXSanManifest.h"
 #include "SGXSanCommonPoison.hpp"
 #include "PoisonCheck.hpp"
+#include "SGXInternal.hpp"
 
 static const u64 kAllocaRedzoneSize = 32UL;
 static const u64 kAllocaRedzoneMask = 31UL;
@@ -234,7 +235,7 @@ void sgxsan_shallow_shadow_copy_on_mem_transfer(uptr dst_addr, uptr src_addr, up
 {
     // should already instrumented check at Pass-End
     assert(dst_size != 0 && copy_cnt != 0 && sgxsan_region_is_in_elrange_and_poisoned(src_addr, copy_cnt, 0x20) &&
-           is_addr_in_elrange_ex(dst_addr, dst_size));
+           sgx_is_within_enclave((void *)dst_addr, dst_size));
 
     if (copy_cnt > dst_size)
         copy_cnt = dst_size;

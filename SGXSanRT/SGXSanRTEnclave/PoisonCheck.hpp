@@ -11,8 +11,6 @@ extern "C"
 {
 #endif
     uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask = ~0x70);
-    bool is_addr_in_elrange(uptr addr);
-    bool is_addr_in_elrange_ex(uptr addr, size_t size);
     bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8_t mask);
 #if defined(__cplusplus)
 }
