@@ -20,16 +20,17 @@ std::vector<std::pair<uint64_t, uint32_t>> SensitivePoisoner::m_guard_list,
 
 bool SensitivePoisoner::get_layout_info(const uint64_t start_rva, layout_entry_t *layout)
 {
-    // static int count = 0;
+    static int count = 0;
+    (void)count;
     uint64_t rva = start_rva + layout->rva;
     assert(IsAligned(rva, 0x1000));
-    SGXSAN_TRACE("%d\t%s\n", ++count, __FUNCTION__);
-    SGXSAN_TRACE("\tEntry Id     = %4u, %-16s, ", layout->id, layout_id_str[layout->id & ~(GROUP_FLAG)]);
-    SGXSAN_TRACE("Page Count = %5u, ", layout->page_count);
-    SGXSAN_TRACE("Attributes = 0x%02X, ", layout->attributes);
-    SGXSAN_TRACE("Flags = 0x%016lX, ", layout->si_flags);
-    SGXSAN_TRACE("RVA = 0x%016lX -> ", layout->rva);
-    SGXSAN_TRACE("RVA = 0x%016lX\n", rva);
+    SGXSAN_LOG("%d\t%s\n", ++count, __FUNCTION__);
+    SGXSAN_LOG("\tEntry Id     = %4u, %-16s, ", layout->id, layout_id_str[layout->id & ~(GROUP_FLAG)]);
+    SGXSAN_LOG("Page Count = %5u, ", layout->page_count);
+    SGXSAN_LOG("Attributes = 0x%02X, ", layout->attributes);
+    SGXSAN_LOG("Flags = 0x%016lX, ", layout->si_flags);
+    SGXSAN_LOG("RVA = 0x%016lX -> ", layout->rva);
+    SGXSAN_LOG("RVA = 0x%016lX\n", rva);
     // collect info for sgxsan
     if (layout->id == LAYOUT_ID_GUARD)
     {
@@ -82,7 +83,7 @@ bool SensitivePoisoner::get_layout_infos(layout_t *layout_start, layout_t *layou
 {
     for (layout_t *layout = layout_start; layout < layout_end; layout++)
     {
-        SGXSAN_TRACE("%s, step = 0x%016lX\n", __FUNCTION__, delta);
+        SGXSAN_LOG("%s, step = 0x%016lX\n", __FUNCTION__, delta);
 
         if (!IS_GROUP_ID(layout->group.id))
         {
@@ -93,10 +94,10 @@ bool SensitivePoisoner::get_layout_infos(layout_t *layout_start, layout_t *layou
         }
         else
         {
-            SGXSAN_TRACE("\tEntry Id(%2u) = %4u, %-16s, ", 0, layout->entry.id, layout_id_str[layout->entry.id & ~(GROUP_FLAG)]);
-            SGXSAN_TRACE("Entry Count = %4u, ", layout->group.entry_count);
-            SGXSAN_TRACE("Load Times = %u,    ", layout->group.load_times);
-            SGXSAN_TRACE("LStep = 0x%016lX\n", layout->group.load_step);
+            SGXSAN_LOG("\tEntry Id(%2u) = %4u, %-16s, ", 0, layout->entry.id, layout_id_str[layout->entry.id & ~(GROUP_FLAG)]);
+            SGXSAN_LOG("Entry Count = %4u, ", layout->group.entry_count);
+            SGXSAN_LOG("Load Times = %u,    ", layout->group.load_times);
+            SGXSAN_LOG("LStep = 0x%016lX\n", layout->group.load_step);
 
             uint64_t step = 0;
             for (uint32_t j = 0; j < layout->group.load_times; j++)

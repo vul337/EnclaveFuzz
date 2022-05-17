@@ -137,29 +137,31 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(SVF::ObjPN *objPN, std::pai
         abort();
 
     assert(objLivePoints.size() >= 1);
+
+    IRBuilder<> IRB(objI->getNextNode());
+    Value *obj = nullptr, *objSize = nullptr;
+    if (SVF::GepObjPN *gepObjPN = dyn_cast<SVF::GepObjPN>(objPN))
+    {
+        auto inStructOffset = gepObjPN->getLocationSet().getOffset();
+        obj = IRB.CreateGEP(objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
+        auto _objSize = M->getDataLayout().getTypeAllocSize(cast<PointerType>(obj->getType())->getElementType());
+        assert(_objSize > 0);
+        objSize = IRB.getInt64(_objSize);
+    }
+    else if (isa<SVF::FIObjPN>(objPN))
+    {
+        obj = objI;
+        objSize = getStackOrHeapInstObjSize(objI, IRB);
+        assert(objSize != nullptr);
+    }
+    else
+        abort();
+
+    Value *objAddrInt = IRB.CreatePtrToInt(obj, IRB.getInt64Ty());
+
     for (auto insertPt : objLivePoints)
     {
         IRBuilder<> IRB(insertPt);
-
-        Value *obj = nullptr, *objSize = nullptr;
-        if (SVF::GepObjPN *gepObjPN = dyn_cast<SVF::GepObjPN>(objPN))
-        {
-            auto inStructOffset = gepObjPN->getLocationSet().getOffset();
-            obj = IRB.CreateGEP(objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
-            objSize = IRB.getInt64(
-                M->getDataLayout().getTypeAllocSize(
-                    cast<PointerType>(obj->getType())->getElementType()));
-        }
-        else if (isa<SVF::FIObjPN>(objPN))
-        {
-            obj = objI;
-            objSize = getStackOrHeapInstObjSize(objI, IRB);
-            assert(objSize != nullptr);
-        }
-        else
-            abort();
-
-        Value *objAddrInt = IRB.CreatePtrToInt(obj, IRB.getInt64Ty());
 #ifdef DUMP_VALUE_FLOW
         IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr("\n-[Collect]->\n" + toString(objPN)),
                                    objAddrInt,
@@ -182,7 +184,9 @@ Value *SensitiveLeakSan::getStackOrHeapInstObjSize(Instruction *objI, IRBuilder<
     Value *objSize = nullptr;
     if (AllocaInst *AI = dyn_cast<AllocaInst>(objI))
     {
-        objSize = IRB.getInt64(getAllocaSizeInBytes(*AI));
+        auto _objSize = getAllocaSizeInBytes(*AI);
+        assert(_objSize > 0);
+        objSize = IRB.getInt64(_objSize);
     }
     else if (CallInst *CI = dyn_cast<CallInst>(objI))
     {
@@ -286,6 +290,7 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN, std::pair<uin
             assert(not memObj->isFunction() && shadowBytesPair == nullptr);
             GlobalVariable *objGV = cast<GlobalVariable>(const_cast<Value *>(objPN->getValue()));
             uint64_t SizeInBytes = M->getDataLayout().getTypeAllocSize(objGV->getValueType());
+            assert(SizeInBytes > 0);
             Constant *globalToBePolluted = ConstantStruct::get(
                 StructType::get(IntptrTy, IntptrTy, Type::getInt8Ty(*C)),
                 ConstantExpr::getPointerCast(objGV, IntptrTy),
@@ -1089,10 +1094,12 @@ uint64_t SensitiveLeakSan::getPointerElementSize(Value *ptr)
 Value *SensitiveLeakSan::isPtrPoisoned(Instruction *insertPoint, Value *ptr, Value *size)
 {
     assert(isa<PointerType>(ptr->getType()));
+    auto ptrEleSize = getPointerElementSize(ptr);
+    assert(ptrEleSize > 0);
     IRBuilder<> IRB(insertPoint);
     return IRB.CreateCall(sgxsan_region_is_in_elrange_and_poisoned,
                           {IRB.CreatePtrToInt(ptr, IRB.getInt64Ty()),
-                           size ? IRB.CreateIntCast(size, IntptrTy, false) : IRB.getInt64(getPointerElementSize(ptr)),
+                           size ? IRB.CreateIntCast(size, IntptrTy, false) : IRB.getInt64(ptrEleSize),
                            IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
 }
 
@@ -1238,15 +1245,18 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI)
         IRBuilder<> IRB(srcIsPoisonedTerm);
         Value *dstPtr = SI->getPointerOperand();
         assert(not isa<Function>(dstPtr));
+        auto dstPtrEleSize = getPointerElementSize(dstPtr);
+        assert(dstPtrEleSize > 0);
         auto isDestInElrange = IRB.CreateICmpEQ(
             IRB.CreateCall(sgx_is_within_enclave, {IRB.CreatePointerCast(dstPtr, IRB.getInt8PtrTy()),
-                                                   IRB.getInt64(getPointerElementSize(dstPtr))}),
+                                                   IRB.getInt64(dstPtrEleSize)}),
             IRB.getInt32(1));
 
         Instruction *destIsInElrangeTerm = SplitBlockAndInsertIfThen(isDestInElrange, srcIsPoisonedTerm, false);
 
         IRB.SetInsertPoint(destIsInElrangeTerm);
         uint64_t dstMemSize = M->getDataLayout().getTypeAllocSize(SI->getValueOperand()->getType());
+        assert(dstPtrEleSize == dstMemSize);
         Value *dstMemSizeVal = IRB.getInt64(dstMemSize);
         Value *dstPtrInt = IRB.CreatePtrToInt(dstPtr, IRB.getInt64Ty());
 #ifdef DUMP_VALUE_FLOW
@@ -1306,9 +1316,10 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN)
             {
                 IRBuilder<> IRB(RI);
                 assert(AI->getAllocatedType()->isSized() && !AI->isSwiftError());
-                Value *objSize = IRB.getInt64(getAllocaSizeInBytes(*AI));
+                auto _objSize = getAllocaSizeInBytes(*AI);
+                assert(_objSize > 0);
                 IRB.CreateCall(sgxsan_shallow_poison_object, {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()),
-                                                              objSize, IRB.getInt8(0x0), IRB.getInt1(true)});
+                                                              IRB.getInt64(_objSize), IRB.getInt8(0x0), IRB.getInt1(true)});
             }
             cleanedStackObjs.emplace(AI);
         }

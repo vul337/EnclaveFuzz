@@ -15,7 +15,7 @@ else
         SGX_COMMON_FLAGS += -O2
 endif
 
-SGX_COMMON_FLAGS += -Wall -Wextra -Winit-self -Wpointer-arith -Wreturn-type \
+SGX_COMMON_FLAGS += -Wall -Wextra -Werror -Winit-self -Wpointer-arith -Wreturn-type \
                     -Waddress -Wsequence-point -Wformat-security \
                     -Wmissing-include-dirs -Wfloat-equal -Wundef -Wshadow \
                     -Wcast-align -Wcast-qual -Wconversion -Wredundant-decls
@@ -27,7 +27,7 @@ SGX_COMMON_CXXFLAGS := $(SGX_COMMON_FLAGS) -Wnon-virtual-dtor -std=c++11
 SGXSanRTApp_Cpp_Files := $(wildcard SGXSanRTApp/*.cpp)
 SGXSanRTApp_Include_Paths := -ISGXSanRTApp -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include
 
-SGXSanRTApp_C_Flags := -fPIC -Wno-attributes $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${EName}"
+SGXSanRTApp_C_Flags := -fPIC $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${EName}"
 
 # Three configuration modes - Debug, prerelease, release
 #   Debug - Macro DEBUG enabled.

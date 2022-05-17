@@ -272,6 +272,7 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
 
         Type *Ty = G->getValueType();
         const uint64_t SizeInBytes = DL.getTypeAllocSize(Ty);
+        assert(SizeInBytes > 0);
         const uint64_t RightRedzoneSize = getRedzoneSizeForGlobal(SizeInBytes);
         Type *RightRedZoneTy = ArrayType::get(IRB.getInt8Ty(), RightRedzoneSize);
 

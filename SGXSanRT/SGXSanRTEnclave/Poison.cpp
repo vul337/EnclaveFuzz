@@ -226,7 +226,7 @@ void sgxsan_shallow_poison_aligned_object(uptr addr, uptr size, uint8_t value, b
 
 void sgxsan_check_shadow_bytes_match_obj(uptr obj_addr, uptr obj_size, uptr shadow_bytes_len)
 {
-    assert(obj_addr % SHADOW_GRANULARITY == 0);
+    assert(obj_size > 0 && obj_addr % SHADOW_GRANULARITY == 0);
     assert((obj_size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY >= shadow_bytes_len);
 }
 

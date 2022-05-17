@@ -10,6 +10,7 @@
 #include "Quarantine.hpp"
 #include "InternalDlmalloc.hpp"
 #include "SGXSanPrintf.hpp"
+#include "StackTrace.hpp"
 
 #if (USE_SGXSAN_MALLOC)
 size_t (*real_malloc_usable_size)(void *) = nullptr;

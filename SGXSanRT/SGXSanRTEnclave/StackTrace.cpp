@@ -1,6 +1,5 @@
 #include "SGXSanPrintf.hpp"
 #include "PoisonCheck.hpp"
-#include "SGXSanStackTrace.hpp"
 #include "StackTrace.hpp"
 #include "SGXSanRTTBridge.hpp"
 #include "SGXInternal.hpp"
