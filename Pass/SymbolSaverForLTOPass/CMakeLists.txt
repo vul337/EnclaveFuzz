@@ -4,11 +4,7 @@ project(SymbolSaverForLTOPass)
 # get LLVM_DIR
 set(LLVM_DIR "$ENV{LLVM_DIR}")
 if(NOT LLVM_DIR)
-if(EXISTS "/usr/lib/llvm-12")
-    set(LLVM_DIR "/usr/lib/llvm-12")
-else()
-    message(FATAL_ERROR "LLVM is not found! Please e.g. \"export LLVM_DIR=/usr/lib/llvm-12\"")
-endif()
+    message(FATAL_ERROR "Please set LLVM Path, e.g. \"export LLVM_DIR=/usr/lib/llvm-12\"")
 endif()
 
 # Add the location of LLVMConfig.cmake to CMake search paths (so that find_package can locate it)

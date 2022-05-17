@@ -9,6 +9,7 @@
 #include "SensitivePoisoner.hpp"
 #include "Malloc.hpp"
 #include "SGXSanPrintf.hpp"
+#include "StackTrace.hpp"
 
 struct SGXSanMMapInfo
 {
@@ -22,7 +23,7 @@ struct SGXSanMMapInfo
     // char description[64] = {0};
 };
 
-const __thread size_t SGXSanMMapInfoMaxCount = 200;
+const __thread size_t SGXSanMMapInfoMaxCount = 1024;
 __thread size_t SGXSanMMapInfoRealCount = 0;
 __thread SGXSanMMapInfo SGXSanMMapInfos[SGXSanMMapInfoMaxCount];
 
@@ -78,6 +79,7 @@ extern "C" void get_mmap_infos()
 {
     if (SGX_SUCCESS != sgxsan_ocall_get_mmap_infos(SGXSanMMapInfos, SGXSanMMapInfoMaxCount * sizeof(SGXSanMMapInfo), &SGXSanMMapInfoRealCount))
         abort();
+    assert(SGXSanMMapInfoRealCount <= SGXSanMMapInfoMaxCount);
 }
 
 // assume SGXSanMMapInfos is sorted, and info range is [info.start, info.end]

@@ -4,6 +4,7 @@
 #include "SGXSanManifest.h"
 #include "SGXSanCommonPoison.hpp"
 #include "PoisonCheck.hpp"
+#include "SGXInternal.hpp"
 
 static const u64 kAllocaRedzoneSize = 32UL;
 static const u64 kAllocaRedzoneMask = 31UL;
@@ -225,7 +226,7 @@ void sgxsan_shallow_poison_aligned_object(uptr addr, uptr size, uint8_t value, b
 
 void sgxsan_check_shadow_bytes_match_obj(uptr obj_addr, uptr obj_size, uptr shadow_bytes_len)
 {
-    assert(obj_addr % SHADOW_GRANULARITY == 0);
+    assert(obj_size > 0 && obj_addr % SHADOW_GRANULARITY == 0);
     assert((obj_size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY >= shadow_bytes_len);
 }
 
@@ -234,7 +235,7 @@ void sgxsan_shallow_shadow_copy_on_mem_transfer(uptr dst_addr, uptr src_addr, up
 {
     // should already instrumented check at Pass-End
     assert(dst_size != 0 && copy_cnt != 0 && sgxsan_region_is_in_elrange_and_poisoned(src_addr, copy_cnt, 0x20) &&
-           is_addr_in_elrange_ex(dst_addr, dst_size));
+           sgx_is_within_enclave((void *)dst_addr, dst_size));
 
     if (copy_cnt > dst_size)
         copy_cnt = dst_size;

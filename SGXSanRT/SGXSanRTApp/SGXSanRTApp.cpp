@@ -21,9 +21,9 @@
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoison.hpp"
 #include "SGXSanDefs.h"
-#include "SGXSanStackTrace.hpp"
 
 #define PRINTF printf
+#define SGXSAN_PRINT_STACK_TRACE(...)
 
 struct SGXSanMMapInfo
 {
@@ -75,8 +75,7 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 		{
 			printf("[SGXSAN] Pointer dereference overflows enclave boundray (Overlapping memory access)\n");
 		}
-		else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
-				 ((g_enclave_base + g_enclave_size - 0x1000) <= page_fault_addr && page_fault_addr < (g_enclave_base + g_enclave_size)))
+		else if ((g_enclave_base + g_enclave_size - 0x1000) <= page_fault_addr && page_fault_addr < (g_enclave_base + g_enclave_size))
 		{
 			printf("[SGXSAN] Infer pointer dereference overflows enclave boundray, as mprotect's effort is page-granularity and si_addr only give page-granularity address\n");
 		}
@@ -124,11 +123,11 @@ void reg_sgxsan_sigaction()
 	sig_act.sa_sigaction = sgxsan_sigaction;
 	sig_act.sa_flags = SA_SIGINFO | SA_NODEFER | SA_RESTART;
 	sigemptyset(&sig_act.sa_mask);
-	ABORT_ASSERT(0 == sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask), "Fail to get signal mask");
+	SGXSAN_ASSERT(0 == sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask), "Fail to get signal mask");
 	// make sure SIGSEGV is not blocked
 	sigdelset(&sig_act.sa_mask, SIGSEGV);
 	// take place before signal handler of sgx aex
-	ABORT_ASSERT(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]), "Fail to regist SIGSEGV action");
+	SGXSAN_ASSERT(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]), "Fail to regist SIGSEGV action");
 }
 
 // create shadow memory outside enclave for elrange
@@ -147,16 +146,16 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 	uptr shadow_start = kLowShadowBeg;
 
 	uptr page_size = getpagesize();
-	ABORT_ASSERT(page_size == 0x1000, "Currently only support 4k page size");
+	SGXSAN_ASSERT(page_size == 0x1000, "Currently only support 4k page size");
 	shadow_start -= page_size;
 
 	// fix-me: may need unmap at destructor
 	// mmap the shadow plus at least one page at the left.
-	ABORT_ASSERT((MAP_FAILED != mmap((void *)shadow_start, kLowShadowEnd - shadow_start + 1, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1, 0)) &&
-					 (-1 != madvise((void *)shadow_start, kLowShadowEnd - shadow_start + 1, MADV_NOHUGEPAGE)),
-				 "Shadow Memory unavailable");
+	SGXSAN_ASSERT((MAP_FAILED != mmap((void *)shadow_start, kLowShadowEnd - shadow_start + 1, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1, 0)) &&
+					  (-1 != madvise((void *)shadow_start, kLowShadowEnd - shadow_start + 1, MADV_NOHUGEPAGE)),
+				  "Shadow Memory unavailable");
 
-	ABORT_ASSERT(((kLowMemBeg & 0xfff) == 0) && (((kLowMemEnd + 1) & 0xfff) == 0), "Elrange is not aligned to page");
+	SGXSAN_ASSERT(((kLowMemBeg & 0xfff) == 0) && (((kLowMemEnd + 1) & 0xfff) == 0), "Elrange is not aligned to page");
 
 	// consistent with modification in psw/enclave_common/sgx_enclave_common.cpp:enclave_create_ex
 	g_enclave_low_guard_start = kLowMemBeg - page_size;
@@ -171,11 +170,8 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 		auto mmap_min_addr_str = match[1].str();
 		auto mmap_min_addr = std::stoll(mmap_min_addr_str, nullptr, 0);
 		if (mmap_min_addr == 0)
-			ABORT_ASSERT(MAP_FAILED != mmap((void *)0, 0x10000, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0), "Failed to make 0 address not accessible");
+			SGXSAN_ASSERT(MAP_FAILED != mmap((void *)0, 0x10000, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0), "Failed to make 0 address not accessible");
 	}
-	// ABORT_ASSERT((MAP_FAILED != mmap((void *)g_enclave_low_guard_start, kLowMemBeg - g_enclave_low_guard_start, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) ||
-	//                  (MAP_FAILED != mmap((void *)(kLowMemEnd + 1), g_enclave_high_guard_end - kLowMemEnd, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)),
-	//              "ElrangeGuard unavailable");
 
 	PrintAddressSpaceLayout();
 
@@ -258,12 +254,6 @@ void sgxsan_ocall_addr2line_ex(uint64_t *addr_arr, size_t arr_cnt, int level)
 	}
 }
 
-void sgxsan_print_stack_trace(int level)
-{
-	// do-nothing
-	(void)level;
-}
-
 void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size_t byte_arr_size, int bucket_num, bool is_cipher)
 {
 	static int prefix = 0;
@@ -287,7 +277,7 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size
 	return;
 }
 
-void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real_size)
+void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real_cnt)
 {
 	SGXSanMMapInfo *infos = (SGXSanMMapInfo *)mmap_infos;
 	size_t max_cnt = max_size / sizeof(SGXSanMMapInfo);
@@ -295,8 +285,8 @@ void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real
 
 	std::fstream f("/proc/self/maps", std::ios::in);
 	std::string line;
-	size_t real_cnt = 0;
-	while (std::getline(f, line) && real_cnt < max_cnt)
+	size_t cnt = 0;
+	while (std::getline(f, line) && cnt < max_cnt)
 	{
 		std::regex map_pattern("([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
 		std::smatch match;
@@ -304,7 +294,7 @@ void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real
 		{
 			try
 			{
-				SGXSanMMapInfo &info = infos[real_cnt];
+				SGXSanMMapInfo &info = infos[cnt];
 				info.start = std::stoll(match[1].str(), nullptr, 16);
 				info.end = std::stoll(match[2].str(), nullptr, 16) - 1;
 				info.is_readable = match[3] == "r";
@@ -322,7 +312,7 @@ void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real
 				// 	memcpy(info.description, description.c_str(), cpLen);
 				// 	info.description[cpLen] = 0;
 				// }
-				real_cnt++;
+				cnt++;
 			}
 			catch (const std::exception &e)
 			{
@@ -331,5 +321,5 @@ void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real
 		}
 	}
 
-	*real_size = real_cnt * sizeof(SGXSanMMapInfo);
+	*real_cnt = cnt;
 }

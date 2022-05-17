@@ -1,8 +1,7 @@
 #pragma once
 
-#ifndef SGXSAN_DEBUG
-#define SGXSAN_DEBUG 1
-#endif
+#define DUMP_STACK_TRACE 0
+#define DUMP_LOG 0
 
 // after modification, need rebuild both rt and pass
 #define SGXSAN_SHADOW_MAP_BASE 0x7fff8000

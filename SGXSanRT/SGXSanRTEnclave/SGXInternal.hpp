@@ -4,8 +4,8 @@
 
 #define SE_GUARD_PAGE_SHIFT 16
 #define SE_GUARD_PAGE_SIZE (1 << SE_GUARD_PAGE_SHIFT)
-#define STATIC_STACK_SIZE   688
-#define TD2TCS(td) ((const void *)(((thread_data_t*)(td))->stack_base_addr + (size_t)STATIC_STACK_SIZE + (size_t)SE_GUARD_PAGE_SIZE))
+#define STATIC_STACK_SIZE 688
+#define TD2TCS(td) ((const void *)(((thread_data_t *)(td))->stack_base_addr + (size_t)STATIC_STACK_SIZE + (size_t)SE_GUARD_PAGE_SIZE))
 
 typedef size_t sys_word_t;
 
@@ -171,6 +171,8 @@ extern "C"
     size_t get_heap_size(void);
     const void *get_tcs(void);
     bool is_stack_addr(void *address, size_t size);
+    int sgx_is_within_enclave(const void *addr, size_t size);
+    int sgx_is_outside_enclave(const void *addr, size_t size);
 #if defined(__cplusplus)
 }
 #endif

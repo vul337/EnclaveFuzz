@@ -5,6 +5,8 @@
 #include "SGXSanPrintf.hpp"
 #include "PoisonCheck.hpp"
 #include "SGXSanCommonShadowMap.hpp"
+#include "SGXInternal.hpp"
+#include "StackTrace.hpp"
 
 #define FUNC_NAME_MAX_LEN 127
 #define CONTROL_FETCH_QUEUE_MAX_SIZE 3
@@ -29,8 +31,8 @@ public:
     static void init();
     static void destroy();
     static void iter(bool is_global = false);
-    static std::pair<std::map<const void *, size_t>::iterator, bool> add(const void *ptr, size_t size);
-    static std::pair<std::map<const void *, size_t>::iterator, bool> add_global(const void *ptr, size_t size);
+    static bool add(const void *ptr, size_t size);
+    static bool add_global(const void *ptr, size_t size);
     static std::tuple<const void *, size_t, bool /* is_at_global? */> query(const void *ptr, size_t size);
     static std::pair<const void *, size_t> query_global(const void *ptr, size_t size);
     static bool global_propagate(const void *ptr);
@@ -73,33 +75,111 @@ void WhitelistOfAddrOutEnclave::destroy()
 void WhitelistOfAddrOutEnclave::iter(bool is_global)
 {
     std::map<const void *, size_t> *whitelist = is_global ? &m_global_whitelist : m_whitelist;
-    SGXSAN_TRACE("[Whitelist] [%s] ", is_global ? "Global" : "Thread");
-    for (auto it = whitelist->begin(); it != whitelist->end(); it++)
+    SGXSAN_LOG("[Whitelist] [%s(0x%p)] ", is_global ? "Global" : "Thread", whitelist);
+    for (auto &item : *whitelist)
     {
-        SGXSAN_TRACE("0x%p(0xllx) ", it->first, it->second);
+        (void)item;
+        SGXSAN_LOG("0x%p(0x%llx) ", item.first, item.second);
     }
-    SGXSAN_TRACE(" %s", "\n");
+    SGXSAN_LOG(" %s", "\n");
 }
 
-std::pair<std::map<const void *, size_t>::iterator, bool> WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
+std::pair<const void *, size_t> merge_adjacent_memory(const void *addr1, size_t len1, const void *addr2, size_t len2)
 {
-    assert(ptr && m_whitelist);
-    assert(((uptr)ptr >= g_enclave_base + g_enclave_size) or ((uptr)ptr + size <= g_enclave_base));
-    auto ret = m_whitelist->emplace(ptr, size);
-    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0xllx)\n", "Thread", "+", ptr, size);
-    // iter();
-    return ret;
+    assert(addr1 && addr2 && len1 > 0 && len2 > 0);
+    const void *result_addr = nullptr;
+    size_t result_len = 0;
+    if ((uptr)addr1 <= (uptr)addr2 && (uptr)addr2 + len2 <= (uptr)addr1 + len1)
+    {
+        result_addr = addr1;
+        result_len = len1;
+    }
+    else if ((uptr)addr2 < (uptr)addr1 && (uptr)addr1 + len1 < (uptr)addr2 + len2)
+    {
+        result_addr = addr2;
+        result_len = len2;
+    }
+    else if ((uptr)addr1 <= (uptr)addr2 && (uptr)addr2 <= (uptr)addr1 + len1)
+    {
+        result_addr = addr1;
+        result_len = (uptr)addr2 + len2 - (uptr)addr1;
+    }
+    else if ((uptr)addr2 <= (uptr)addr1 && (uptr)addr1 <= (uptr)addr2 + len2)
+    {
+        result_addr = addr2;
+        result_len = (uptr)addr1 + len1 - (uptr)addr2;
+    }
+    return std::pair<const void *, size_t>(result_addr, result_len);
 }
 
-std::pair<std::map<const void *, size_t>::iterator, bool> WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
+bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
 {
-    assert(ptr);
+    assert(ptr && size > 0 && m_whitelist && sgx_is_outside_enclave(ptr, size));
+#if (DUMP_LOG)
+    iter();
+#endif
+    SGXSAN_LOG("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "+", ptr, size);
+    const void *target_addr = ptr;
+    size_t target_len = size;
+    bool hasMet = false;
+    for (auto it = m_whitelist->begin(); it != m_whitelist->end();)
+    {
+        auto tmp = merge_adjacent_memory(target_addr, target_len, it->first, it->second);
+        if (tmp.second != 0)
+        {
+            hasMet = true;
+            SGXSAN_LOG("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "-", it->first, it->second);
+            it = m_whitelist->erase(it);
+            target_addr = tmp.first;
+            target_len = tmp.second;
+        }
+        else if (hasMet)
+            break;
+        else
+            it++;
+    }
+
+    auto ret = m_whitelist->emplace(target_addr, target_len);
+#if (DUMP_LOG)
+    iter();
+#endif
+    return ret.second;
+}
+
+bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
+{
+    assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
     pthread_rwlock_wrlock(&m_rwlock_global_whitelist);
-    auto ret = m_global_whitelist.emplace(ptr, size);
-    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0xllx)\n", "~Global~", "+", ptr, size);
-    // iter(true);
+#if (DUMP_LOG)
+    iter(true);
+#endif
+    SGXSAN_LOG("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "+", ptr, size);
+    const void *target_addr = ptr;
+    size_t target_len = size;
+    bool hasMet = false;
+    for (auto it = m_global_whitelist.begin(); it != m_global_whitelist.end();)
+    {
+        auto tmp = merge_adjacent_memory(target_addr, target_len, it->first, it->second);
+        if (tmp.second != 0)
+        {
+            hasMet = true;
+            SGXSAN_LOG("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "-", it->first, it->second);
+            it = m_global_whitelist.erase(it);
+            target_addr = tmp.first;
+            target_len = tmp.second;
+        }
+        else if (hasMet)
+            break;
+        else
+            it++;
+    }
+
+    auto ret = m_global_whitelist.emplace(target_addr, target_len);
+#if (DUMP_LOG)
+    iter(true);
+#endif
     pthread_rwlock_unlock(&m_rwlock_global_whitelist);
-    return ret;
+    return ret.second;
 }
 
 // fetch must be a LoadInst
@@ -147,12 +227,16 @@ bool WhitelistOfAddrOutEnclave::double_fetch_detect(const void *ptr, size_t size
 // 3) query success at global whitelist (thread whitelist do not contain this info)
 std::tuple<const void *, size_t, bool> WhitelistOfAddrOutEnclave::query(const void *ptr, size_t size)
 {
-    assert(m_whitelist && ptr && (((uptr)ptr >= g_enclave_base + g_enclave_size) or ((uptr)ptr + size <= g_enclave_base)));
-    if (!m_whitelist_active)
+    assert(m_whitelist && sgx_is_outside_enclave(ptr, size));
+    if (ptr == nullptr)
+        return std::tuple<const void *, size_t, bool>(nullptr, 0, false);
+    else if (!m_whitelist_active)
         return std::tuple<const void *, size_t, bool>(nullptr, 1, false);
 
-    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0xllx)\n", "Thread", "?", ptr, size);
-    // iter();
+    SGXSAN_LOG("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "?", ptr, size);
+#if (DUMP_LOG)
+    iter();
+#endif
     std::map<const void *, size_t>::iterator it;
     std::tuple<const void *, size_t, bool> ret, false_ret = std::tuple<const void *, size_t, bool>(nullptr, 0, false);
 
@@ -192,8 +276,10 @@ exit:
 std::pair<const void *, size_t> WhitelistOfAddrOutEnclave::query_global(const void *ptr, size_t size)
 {
     pthread_rwlock_rdlock(&m_rwlock_global_whitelist);
-    SGXSAN_TRACE("[Whitelist] [%s] [%s] 0x%p(0xllx)\n", "~Global~", "?", ptr, size);
-    // iter(true);
+    SGXSAN_LOG("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "?", ptr, size);
+#if (DUMP_LOG)
+    iter(true);
+#endif
     std::map<const void *, size_t>::iterator it;
     std::pair<const void *, size_t> ret, false_ret = std::pair<const void *, size_t>(nullptr, 0);
 
@@ -228,17 +314,17 @@ exit:
 // input ptr may be in Enclave or out of Enclave
 bool WhitelistOfAddrOutEnclave::global_propagate(const void *ptr)
 {
-    if (((uptr)ptr >= g_enclave_base) and ((uptr)ptr < g_enclave_base + g_enclave_size))
+    if (sgx_is_within_enclave(ptr, 1))
         return true;
     const void *find_start = nullptr;
     size_t find_size = 0;
     bool is_at_global = false;
     std::tie(find_start, find_size, is_at_global) = query(ptr, 1);
-    assert(((uptr)find_start >= g_enclave_base + g_enclave_size) or ((uptr)find_start + find_size <= g_enclave_base));
     if (is_at_global == false && find_size != 0 /* return case 2 */)
     {
-        SGXSAN_TRACE("[Whitelist] [Thread] => 0x%p => [~Global~]\n", ptr);
-        add_global(find_start, find_size);
+        assert(sgx_is_outside_enclave(find_start, find_size));
+        SGXSAN_LOG("[Whitelist] [Thread(0x%p)] => 0x%p => [Global]\n", m_whitelist, ptr);
+        assert(add_global(find_start, find_size));
     }
     return true;
 }
@@ -266,15 +352,17 @@ void WhitelistOfAddrOutEnclave_destroy()
 
 void WhitelistOfAddrOutEnclave_add(const void *start, size_t size)
 {
-    ABORT_ASSERT(WhitelistOfAddrOutEnclave::add(start, size).second, "Insertion conflict?");
+    SGXSAN_ASSERT(WhitelistOfAddrOutEnclave::add(start, size), "Insertion conflict?");
 }
 
 void WhitelistOfAddrOutEnclave_query_ex(const void *ptr, size_t size, bool is_write, bool used_to_cmp, char *parent_func)
 {
+    if (ptr == nullptr)
+        return; // leave it to guard page check
     if (not is_write)
     {
-        SGXSAN_WARNING(WhitelistOfAddrOutEnclave::double_fetch_detect(ptr, size, used_to_cmp, parent_func),
-                       "[SGXSan] Detect Double-Fetch Situation");
+        bool res = WhitelistOfAddrOutEnclave::double_fetch_detect(ptr, size, used_to_cmp, parent_func);
+        SGXSAN_WARNING(res, "Detect Double-Fetch Situation");
     }
     WhitelistOfAddrOutEnclave_query(ptr, size);
 }
@@ -285,13 +373,13 @@ void WhitelistOfAddrOutEnclave_query(const void *ptr, size_t size)
     std::tie(std::ignore, find_size, std::ignore) = WhitelistOfAddrOutEnclave::query(ptr, size);
     size_t buf_size = 1024;
     char buf[buf_size];
-    sprintf_s(buf, buf_size, "[SGXSan] Illegal access outside-enclave: 0x%p", ptr);
+    sprintf_s(buf, buf_size, "Illegal access outside-enclave: 0x%p", ptr);
     SGXSAN_WARNING(find_size == 0, buf);
 }
 
 void WhitelistOfAddrOutEnclave_global_propagate(const void *addr)
 {
-    ABORT_ASSERT(WhitelistOfAddrOutEnclave::global_propagate(addr), "Fail to propagate to global whitelist");
+    SGXSAN_ASSERT(WhitelistOfAddrOutEnclave::global_propagate(addr), "Fail to propagate to global whitelist");
 }
 
 void WhitelistOfAddrOutEnclave_active()

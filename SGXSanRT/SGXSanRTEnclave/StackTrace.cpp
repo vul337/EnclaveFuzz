@@ -1,6 +1,5 @@
 #include "SGXSanPrintf.hpp"
 #include "PoisonCheck.hpp"
-#include "SGXSanStackTrace.hpp"
 #include "StackTrace.hpp"
 #include "SGXSanRTTBridge.hpp"
 #include "SGXInternal.hpp"
@@ -22,7 +21,7 @@ void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs, uint64_t base_addr
         if (not is_stack_addr((void *)bp, sizeof(uintptr_t)))
             break;
         ret_addr = *(uint64_t *)(bp + 8);
-        if (!is_addr_in_elrange(ret_addr))
+        if (!sgx_is_within_enclave((void *)ret_addr, 1))
             break;
     }
 }
@@ -59,7 +58,7 @@ uint64_t get_last_return_address(uint64_t base_addr, int level)
         if (not is_stack_addr((void *)bp, sizeof(uintptr_t)))
             break;
         ret_addr = *(uint64_t *)(bp + 8);
-        if (!is_addr_in_elrange(ret_addr))
+        if (!sgx_is_within_enclave((void *)ret_addr, 1))
             break;
     }
 

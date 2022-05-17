@@ -5,7 +5,6 @@
 #include <pthread.h>
 #include "SGXSanPrintf.hpp"
 #include "CiphertextDetect.hpp"
-#include "SGXSanStackTrace.hpp"
 #include "StackTrace.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanRTTBridge.hpp"

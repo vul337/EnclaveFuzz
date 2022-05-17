@@ -1,9 +1,8 @@
 #!/bin/bash
 set -e
-FLAG=$@
+FLAGS="$@"
 mkdir -p output
-cd SGXSDKPatches
-cd enclave_common_patch
-./apply_patch.sh ${FLAG}
+cd SGXSDKPatches/enclave_common_patch
+./apply_patch.sh ${FLAGS}
 cd ../sdk_patch
-./apply_patch.sh ${FLAG}
+./apply_patch.sh ${FLAGS}

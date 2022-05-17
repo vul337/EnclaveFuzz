@@ -649,9 +649,11 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
     {
         if (!pointerType->getElementType()->isSized())
             return false; // ignore unsized, e.g. function pointer
-
+        auto _eleSize = DL.getTypeAllocSize(pointerType->getElementType());
+        if (_eleSize <= 0)
+            return false;
         auto operandInt8ptr = IRB.CreatePointerCast(operand, IRB.getInt8PtrTy());
-        auto eleSize = IRB.getInt64(DL.getTypeAllocSize(pointerType->getElementType()));
+        auto eleSize = IRB.getInt64(_eleSize);
         if (eleCnt == nullptr)
             eleCnt = IRB.getInt32(-1);
         CallInst *isReadable = IRB.CreateCall(is_pointer_readable, {operandInt8ptr, eleSize, eleCnt});
