@@ -306,7 +306,7 @@ void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real
 			{
 				SGXSanMMapInfo &info = infos[real_cnt];
 				info.start = std::stoll(match[1].str(), nullptr, 16);
-				info.end = std::stoll(match[2].str(), nullptr, 16);
+				info.end = std::stoll(match[2].str(), nullptr, 16) - 1;
 				info.is_readable = match[3] == "r";
 				info.is_writable = match[4] == "w";
 				info.is_executable = match[5] == "x";
@@ -326,7 +326,7 @@ void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real
 			}
 			catch (const std::exception &e)
 			{
-				std::cerr << "MMap line can't recognize:\n\t" << line << "\n";
+				// std::cerr << "MMap line can't recognize:\n\t" << line << "\n";
 			}
 		}
 	}

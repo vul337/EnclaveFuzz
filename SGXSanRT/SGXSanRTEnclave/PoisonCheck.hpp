@@ -1,5 +1,4 @@
-#ifndef SGXSAN_COMMON_POISON_CHECK_HPP
-#define SGXSAN_COMMON_POISON_CHECK_HPP
+#pragma once
 
 #include "SGXSanInt.h"
 #include "SGXSanCheck.h"
@@ -12,8 +11,8 @@ extern "C"
 {
 #endif
     uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask = ~0x70);
-    bool is_addr_in_elrange(uint64_t addr);
-    bool is_addr_in_elrange_ex(uint64_t addr, uint64_t size);
+    bool is_addr_in_elrange(uptr addr);
+    bool is_addr_in_elrange_ex(uptr addr, size_t size);
     bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8_t mask);
 #if defined(__cplusplus)
 }
@@ -74,8 +73,8 @@ static inline bool mem_is_zero(uint8_t *beg, uptr size, uint8_t mask = ~0x70)
     return (all & mask) == 0;
 }
 
-// ElrangeCheck start
-#define SGXSAN_ELRANGE_CHECK_BEG(start, is_write, size)          \
+// Leave overlapping memory access to ELRANGE guard page to check
+#define SGXSAN_ELRANGE_CHECK_BEG(start, size)                    \
     do                                                           \
     {                                                            \
         uptr _start = (uptr)start;                               \
@@ -93,31 +92,6 @@ static inline bool mem_is_zero(uint8_t *beg, uptr size, uint8_t mask = ~0x70)
     }                            \
     }                            \
     while (0)
-
-#define SGXSAN_ELRANGE_DOUBLE_CHECK_BEG(start, is_write, size)                \
-    do                                                                        \
-    {                                                                         \
-        uptr _start = (uptr)start;                                            \
-        uptr _end = _start + size - 1;                                        \
-        if (_start > _end)                                                    \
-        {                                                                     \
-            GET_CALLER_PC_BP_SP;                                              \
-            ReportGenericError(pc, bp, sp, _start, is_write, size, true);     \
-        }                                                                     \
-        uptr _enclave_end = g_enclave_base + g_enclave_size - 1;              \
-        if (_end >= g_enclave_base && _start <= _enclave_end)                 \
-        {                                                                     \
-            if (_start < g_enclave_base or _end > _enclave_end)               \
-            {                                                                 \
-                GET_CALLER_PC_BP_SP;                                          \
-                ReportGenericError(pc, bp, sp, _start, is_write, size, true); \
-            }
-
-#define SGXSAN_ELRANGE_DOUBLE_CHECK_END \
-    }                                   \
-    }                                   \
-    while (0)
-// ElrangeCheck end
 
 // Behavior of functions like "memcpy" or "strcpy" is undefined
 // if memory intervals overlap. We report error in this case.
@@ -155,5 +129,3 @@ static inline bool RangesOverlap(const char *offset1, uptr length1,
     ACCESS_MEMORY_RANGE(offset, size, false)
 #define ASAN_WRITE_RANGE(offset, size) \
     ACCESS_MEMORY_RANGE(offset, size, true)
-
-#endif

@@ -65,18 +65,6 @@ static cl::opt<int> ClMaxInsnsToInstrumentPerBB(
     cl::desc("maximal number of instructions to instrument in any given BB"),
     cl::Hidden);
 
-static cl::opt<bool> ClCheckAddrOverflow(
-    "sgxsan-check-addr-overflow",
-    cl::desc("Whether check address overflow, default value is false, as in detection work, we can use page fault of 0-address to find problem"),
-    cl::Hidden,
-    cl::init(false));
-
-static cl::opt<bool> ClUseElrangeGuard(
-    "sgxsan-use-elrange-guard",
-    cl::desc("Whether use elrange guard, default value is true, as in detection work, we can use page fault of elrange guard to find problem"),
-    cl::Hidden,
-    cl::init(true));
-
 static cl::opt<bool> ClUseAfterScope(
     "sgxsan-use-after-scope",
     cl::desc("Check stack-use-after-scope"),
@@ -103,6 +91,11 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     // Create __asan_report* callbacks.
     // IsWrite and TypeSize are encoded in the function name.
 
+    AsanMemoryAccessCallbackSizedLoad = M.getOrInsertFunction(ClMemoryAccessCallbackPrefix + "LoadN",
+                                                              IRB.getVoidTy(), IntptrTy, IntptrTy, IRB.getInt1Ty(), IRB.getInt8PtrTy());
+    AsanMemoryAccessCallbackSizedStore = M.getOrInsertFunction(ClMemoryAccessCallbackPrefix + "StoreN",
+                                                               IRB.getVoidTy(), IntptrTy, IntptrTy);
+
     for (size_t AccessIsWrite = 0; AccessIsWrite <= 1; AccessIsWrite++)
     {
         const std::string TypeStr = AccessIsWrite ? "store" : "load";
@@ -112,9 +105,6 @@ void AddressSanitizer::initializeCallbacks(Module &M)
 
         AsanErrorCallbackSized[AccessIsWrite] = M.getOrInsertFunction(
             kAsanReportErrorTemplate + TypeStr + "_n",
-            FunctionType::get(IRB.getVoidTy(), Args2, false));
-        AsanMemoryAccessCallbackSized[AccessIsWrite] = M.getOrInsertFunction(
-            ClMemoryAccessCallbackPrefix + TypeStr + "N",
             FunctionType::get(IRB.getVoidTy(), Args2, false));
 
         for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
@@ -155,12 +145,12 @@ void AddressSanitizer::initializeCallbacks(Module &M)
 
     WhitelistOfAddrOutEnclave_active = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_active", IRB.getVoidTy());
     WhitelistOfAddrOutEnclave_deactive = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
-    WhitelistOfAddrOutEnclave_query = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query",
-                                                            IRB.getVoidTy(), IRB.getInt64Ty(),
-                                                            IRB.getInt64Ty(), IRB.getInt1Ty());
+    WhitelistOfAddrOutEnclave_query_ex = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query_ex",
+                                                               IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy,
+                                                               IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
 
     WhitelistOfAddrOutEnclave_global_propagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
-                                                                       IRB.getVoidTy(), IRB.getInt64Ty());
+                                                                       IRB.getVoidTy(), IRB.getInt8PtrTy());
     sgxsan_edge_check = M.getOrInsertFunction("sgxsan_edge_check", IRB.getVoidTy(),
                                               IRB.getInt8PtrTy(), IRB.getInt64Ty(), IRB.getInt32Ty());
     SGXSanMemcpyS = M.getOrInsertFunction("sgxsan_memcpy_s", IRB.getInt32Ty(), IRB.getInt8PtrTy(),
@@ -355,23 +345,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     assert(TypeSize > 0 && TypeSize % 8 == 0);
     Value *EndAddrLong = IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1));
 
-    if (ClCheckAddrOverflow)
-    {
-        // if (start > end) //when start == end, only visit one byte
-        // {
-        //     crash; // unreachable                <= IntegerOverFlowTerm
-        // }
-        // continue check;                          <= InsertBefore
-        // (this check maybe unnecessarily, this could tested by kernel 0 addr SIGSEG)
-        Value *CmpStartAddrUGTEndAddr = IRB.CreateICmpUGT(AddrLong, EndAddrLong);
-        Instruction *IntegerOverFlowTerm = SplitBlockAndInsertIfThen(CmpStartAddrUGTEndAddr, InsertBefore, true);
-        Instruction *RangeCrash = generateCrashCode(IntegerOverFlowTerm, AddrLong, IsWrite, AccessSizeIndex, SizeArgument);
-        RangeCrash->setDebugLoc(OrigIns->getDebugLoc());
-
-        // update insert point
-        IRB.SetInsertPoint(InsertBefore);
-    }
-    // now start <= end
+    // we use page fault of 0 address to find address overflow problem, now start <= end
     // sgxsdk should ensure SGXSanEnclaveSize > 0 and SGXSanEnclaveEnd do not overflow
     Value *SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr);
     Value *SGXSanEnclaveSize = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr);
@@ -379,69 +353,42 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
                                             IRB.CreateSub(SGXSanEnclaveSize, ConstantInt::get(IntptrTy, 1)));
 
     Instruction *ShadowCheckInsertPoint = nullptr;
-    // now can use elrange guard page to detect cross boundary
-    if (!ClUseElrangeGuard)
+    // Use elrange guard page to detect cross boundary
+    // below is c-like code
+    // if (EnclaveBase <= start (1-bit)& end <= EnclaveEnd) // totally in elrange
+    // {
+    //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
+    //                                                                                              <= ShadowCheckInsertPoint
+    // }
+    // else if (end < EnclaveBase (1-bit)| start > EnclaveEnd) // totally outside enclave
+    // {
+    //     Out-Addr Whitelist check(start, size);
+    // }
+    // situation that cross-bound leave to elrange guard check
+    // access start address                                                                         <= InsertBefore
+    Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
+    Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
+    Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
+    if (isFuncAtEnclaveTBridge)
     {
-        // if (not(end < EnclaveBase or start > EnclaveEnd)) // equal to if (end >= EnclaveBase [i1 type bitwise]and start <= EnclaveEnd))
-        // {
-        //     if (not(start >= EnclaveBase and end <= EnclaveEnd)) // equal to if (start < EnclaveBase [i1 type bitwise]or end > EnclaveEnd)
-        //     {
-        //         cross-boundary; // unreachable                                                       <= CrossBoundaryTerm
-        //     }
-        //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
-        //                                                                                              <= NotTotallyOutEnclaveTerm
-        // }
-        // totally outside enclave (end < EnclaveBase or start > EnclaveEnd), needn't check
-        // access start address                                                                         <= InsertBefore
-        Value *CmpEndAddrUGEEnclaveBase = IRB.CreateICmpUGE(EndAddrLong, SGXSanEnclaveBase);
-        Value *CmpStartAddrULEEnclaveEnd = IRB.CreateICmpULE(AddrLong, SGXSanEnclaveEnd);
-        Instruction *NotTotallyOutEnclaveTerm = SplitBlockAndInsertIfThen(
-            IRB.CreateAnd(CmpEndAddrUGEEnclaveBase, CmpStartAddrULEEnclaveEnd), InsertBefore, false);
-
-        // second-step check
-        IRB.SetInsertPoint(NotTotallyOutEnclaveTerm);
-        Value *CmpStartAddrULTEnclaveBase = IRB.CreateICmpULT(AddrLong, SGXSanEnclaveBase);
-        Value *CmpEndAddrUGTEnclaveEnd = IRB.CreateICmpUGT(EndAddrLong, SGXSanEnclaveEnd);
-        Instruction *CrossBoundaryTerm = SplitBlockAndInsertIfThen(
-            IRB.CreateOr(CmpStartAddrULTEnclaveBase, CmpEndAddrUGTEnclaveEnd), NotTotallyOutEnclaveTerm, true);
-        Instruction *CrossBoundaryCrash = generateCrashCode(CrossBoundaryTerm, AddrLong, IsWrite, AccessSizeIndex, SizeArgument);
-        CrossBoundaryCrash->setDebugLoc(OrigIns->getDebugLoc());
-
-        ShadowCheckInsertPoint = NotTotallyOutEnclaveTerm;
+        ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(IfCond, InsertBefore, false);
     }
     else
     {
-        // if (EnclaveBase <= start [i1 type bitwise]and end <= EnclaveEnd) // totally in elrange
-        // {
-        //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
-        //                                                                                              <= ShadowCheckInsertPoint
-        // }
-        // else if (end < EnclaveBase [i1 type bitwise]or start > EnclaveEnd) // totally outside enclave
-        // {
-        //     Out-Addr Whitelist check(start, size);
-        // }
-        // situation that cross-bound leave to elrange guard check
-        // access start address                                                                         <= InsertBefore
-
-        Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
-        Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
-        Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
-        if (isFuncAtEnclaveTBridge)
-        {
-            ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(IfCond, InsertBefore, false);
-        }
-        else
-        {
-            Instruction *ElseTI = nullptr;
-            SplitBlockAndInsertIfThenElse(IfCond, InsertBefore, &ShadowCheckInsertPoint, &ElseTI, MDBuilder(*C).createBranchWeights(100000, 1));
-            IRB.SetInsertPoint(ElseTI);
-            Value *CmpEndAddrULTEnclaveBase = IRB.CreateICmpULT(EndAddrLong, SGXSanEnclaveBase);
-            Value *CmpStartAddrUGTEnclaveEnd = IRB.CreateICmpUGT(AddrLong, SGXSanEnclaveEnd);
-            Value *ElseIfCond = IRB.CreateOr(CmpEndAddrULTEnclaveBase, CmpStartAddrUGTEnclaveEnd);
-            Instruction *ElseIfTerm = SplitBlockAndInsertIfThen(ElseIfCond, ElseTI, false);
-            IRB.SetInsertPoint(ElseIfTerm);
-            IRB.CreateCall(WhitelistOfAddrOutEnclave_query, {AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3)), IRB.getInt1(IsWrite)});
-        }
+        Instruction *ElseTI = nullptr;
+        SplitBlockAndInsertIfThenElse(IfCond, InsertBefore, &ShadowCheckInsertPoint, &ElseTI, MDBuilder(*C).createBranchWeights(100000, 1));
+        IRB.SetInsertPoint(ElseTI);
+        Value *CmpEndAddrULTEnclaveBase = IRB.CreateICmpULT(EndAddrLong, SGXSanEnclaveBase);
+        Value *CmpStartAddrUGTEnclaveEnd = IRB.CreateICmpUGT(AddrLong, SGXSanEnclaveEnd);
+        Value *ElseIfCond = IRB.CreateOr(CmpEndAddrULTEnclaveBase, CmpStartAddrUGTEnclaveEnd);
+        Instruction *ElseIfTerm = SplitBlockAndInsertIfThen(ElseIfCond, ElseTI, false);
+        IRB.SetInsertPoint(ElseIfTerm);
+        IRB.CreateCall(WhitelistOfAddrOutEnclave_query_ex,
+                       {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
+                        ConstantInt::get(IntptrTy, (TypeSize >> 3)),
+                        IRB.getInt1(IsWrite),
+                        IRB.getInt1(hasCmpUser(OrigIns)),
+                        IRB.CreateGlobalStringPtr(OrigIns->getFunction()->getName())});
     }
 
     // start instrument shadowbyte check
@@ -508,8 +455,12 @@ void AddressSanitizer::instrumentUnusualSizeOrAlignment(
     Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
     if (UseCalls)
     {
-        IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite],
-                       {AddrLong, Size});
+        if (IsWrite)
+            IRB.CreateCall(AsanMemoryAccessCallbackSizedStore, {AddrLong, Size});
+        else
+            IRB.CreateCall(AsanMemoryAccessCallbackSizedLoad, {AddrLong, Size,
+                                                               IRB.getInt1(hasCmpUser(I)),
+                                                               IRB.CreateGlobalStringPtr(I->getFunction()->getName())});
     }
     else
     {
@@ -638,8 +589,8 @@ void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI)
     Value *val = SI->getValueOperand();
 
     IRB.CreateCall(WhitelistOfAddrOutEnclave_global_propagate, {val->getType()->isPointerTy()
-                                                                    ? IRB.CreatePtrToInt(val, IRB.getInt64Ty())
-                                                                    : IRB.CreateIntCast(val, IRB.getInt64Ty(), false)});
+                                                                    ? IRB.CreatePointerCast(val, IRB.getInt8PtrTy())
+                                                                    : IRB.CreateIntToPtr(val, IRB.getInt8PtrTy())});
 }
 
 Type *AddressSanitizer::unpackArrayType(Type *type)
@@ -821,9 +772,7 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
 
     __instrumentTLSMgr(CI->getFunction());
 
-    // instrument `WhitelistOfAddrOutEnclave_active` before RealEcall
     IRBuilder<> IRB(CI);
-    IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
     IRB.CreateCall(get_mmap_infos);
     const DataLayout &DL = CI->getModule()->getDataLayout();
     // instrument `sgxsan_edge_check` for each actual parameter of RealEcall before RealEcall
@@ -840,7 +789,7 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
             Value *ptrEleCnt = convertPointerLenAndValue2CountValue(operand, CI, lenAndValue);
             // if it is [in]/[out] (array-)pointer, sub-element still need to be filled into whitelist
             instrumentParameterCheck(operand, IRB, DL, 0, ptrEleCnt, nullptr,
-                                     lenAndValue.second == nullptr ? true : false /* _in_ prefixed ptr, needn't check */);
+                                     lenAndValue.second == nullptr /* _in_ prefixed ptr, needn't check */);
         }
         else if (ArrayType *arrType = dyn_cast<ArrayType>(operand->getType()))
         {
@@ -867,6 +816,9 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
             instrumentParameterCheck(operand, IRB, DL, 0);
         }
     }
+    // instrument `WhitelistOfAddrOutEnclave_active` before RealEcall
+    IRB.SetInsertPoint(CI);
+    IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
     // instrument `WhitelistOfAddrOutEnclave_deactive` after RealEcall
     IRB.SetInsertPoint(CI->getNextNode());
     IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
@@ -876,8 +828,7 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
 
 bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
 {
-    Instruction &firstFuncInsertPoint = *OcallWrapper.getEntryBlock().getFirstInsertionPt();
-    IRBuilder<> IRB(&firstFuncInsertPoint);
+    IRBuilder<> IRB(&OcallWrapper.front().front());
     IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
 
     for (auto RetInst : SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec)

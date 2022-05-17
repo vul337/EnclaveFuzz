@@ -12,9 +12,10 @@ extern "C"
     // a list of c wrapper of WhitelistOfAddrOutEnclave, class member function is inlined defaultly
     void WhitelistOfAddrOutEnclave_init();
     void WhitelistOfAddrOutEnclave_destroy();
-    void WhitelistOfAddrOutEnclave_add(uint64_t start, uint64_t size);
-    void WhitelistOfAddrOutEnclave_query(uint64_t start, uint64_t size, bool is_write = false);
-    void WhitelistOfAddrOutEnclave_global_propagate(uint64_t addr);
+    void WhitelistOfAddrOutEnclave_add(const void *start, size_t size);
+    void WhitelistOfAddrOutEnclave_query_ex(const void *start, size_t size, bool is_write, bool used_to_cmp = false, char *parent_func = nullptr);
+    void WhitelistOfAddrOutEnclave_query(const void *start, size_t size);
+    void WhitelistOfAddrOutEnclave_global_propagate(const void *addr);
 
     void WhitelistOfAddrOutEnclave_active();
     void WhitelistOfAddrOutEnclave_deactive();

@@ -4,29 +4,22 @@
 #include "PoisonCheck.hpp"
 #include "WhitelistCheck.hpp"
 
-#define ASAN_MEMORY_ACCESS_CALLBACK_BODY(type, is_write, size, fatal)        \
-    uptr smp = MEM_TO_SHADOW(addr);                                          \
-    uptr s = size <= SHADOW_GRANULARITY ? *reinterpret_cast<u8 *>(smp)       \
-                                        : *reinterpret_cast<u16 *>(smp);     \
-    if (UNLIKELY(s))                                                         \
-    {                                                                        \
-        if (UNLIKELY(size >= SHADOW_GRANULARITY ||                           \
-                     ((s8)((addr & (SHADOW_GRANULARITY - 1)) + size - 1)) >= \
-                         (s8)s))                                             \
-        {                                                                    \
-            GET_CALLER_PC_BP_SP;                                             \
-            ReportGenericError(pc, bp, sp, addr, is_write, size, fatal);     \
-        }                                                                    \
-    }
-
-#define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                       \
-    extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(uptr addr) \
-    {                                                                           \
-        SGXSAN_ELRANGE_CHECK_BEG(addr, is_write, size)                          \
-        ASAN_MEMORY_ACCESS_CALLBACK_BODY(type, is_write, size, true);           \
-        SGXSAN_ELRANGE_CHECK_MID                                                \
-        WhitelistOfAddrOutEnclave_query((uint64_t)addr, size, is_write);        \
-        SGXSAN_ELRANGE_CHECK_END;                                               \
+// Totally in ELRANGE, ensured by PASS. Only need to check shadow byte,
+#define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                                   \
+    extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(uptr addr)             \
+    {                                                                                       \
+        uptr smp = MEM_TO_SHADOW(addr);                                                     \
+        uptr s = size <= SHADOW_GRANULARITY ? ((*reinterpret_cast<u8 *>(smp)) & (0x8F))     \
+                                            : ((*reinterpret_cast<u16 *>(smp)) & (0x8F8F)); \
+        if (UNLIKELY(s))                                                                    \
+        {                                                                                   \
+            if (UNLIKELY(size >= SHADOW_GRANULARITY ||                                      \
+                         ((s8)((addr & (SHADOW_GRANULARITY - 1)) + size - 1)) >= (s8)s))    \
+            {                                                                               \
+                GET_CALLER_PC_BP_SP;                                                        \
+                ReportGenericError(pc, bp, sp, addr, is_write, size, true);                 \
+            }                                                                               \
+        }                                                                                   \
     }
 
 ASAN_MEMORY_ACCESS_CALLBACK(load, false, 1)
@@ -40,23 +33,28 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 4)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 8)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 
-#define SGXSAN_MEMORY_ACCESS_CALLBACK_SIZED_BODY(addr, size, is_write) \
-    SGXSAN_ELRANGE_CHECK_BEG(addr, is_write, size)                     \
-    if (sgxsan_region_is_poisoned(addr, size))                         \
-    {                                                                  \
-        GET_CALLER_PC_BP_SP;                                           \
-        ReportGenericError(pc, bp, sp, addr, is_write, size, true);    \
-    }                                                                  \
-    SGXSAN_ELRANGE_CHECK_MID                                           \
-    WhitelistOfAddrOutEnclave_query((uint64_t)addr, size, is_write);   \
-    SGXSAN_ELRANGE_CHECK_END;
-
-extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_loadN(uptr addr, uptr size)
+extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_loadN(uptr addr, uptr size, bool used_to_cmp, char *parent_func)
 {
-    SGXSAN_MEMORY_ACCESS_CALLBACK_SIZED_BODY(addr, size, false);
+    SGXSAN_ELRANGE_CHECK_BEG(addr, size)
+    if (sgxsan_region_is_poisoned(addr, size))
+    {
+        GET_CALLER_PC_BP_SP;
+        ReportGenericError(pc, bp, sp, addr, false, size, true);
+    }
+    SGXSAN_ELRANGE_CHECK_MID
+    WhitelistOfAddrOutEnclave_query_ex((void *)addr, size, false, used_to_cmp, parent_func);
+    SGXSAN_ELRANGE_CHECK_END;
 }
 
 extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_storeN(uptr addr, uptr size)
 {
-    SGXSAN_MEMORY_ACCESS_CALLBACK_SIZED_BODY(addr, size, true);
+    SGXSAN_ELRANGE_CHECK_BEG(addr, size)
+    if (sgxsan_region_is_poisoned(addr, size))
+    {
+        GET_CALLER_PC_BP_SP;
+        ReportGenericError(pc, bp, sp, addr, true, size, true);
+    }
+    SGXSAN_ELRANGE_CHECK_MID
+    WhitelistOfAddrOutEnclave_query((void *)addr, size);
+    SGXSAN_ELRANGE_CHECK_END;
 }

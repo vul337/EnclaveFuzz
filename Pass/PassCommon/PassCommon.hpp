@@ -50,4 +50,6 @@ namespace llvm
     void dump(Value *val);
     uint64_t getAllocaSizeInBytes(const AllocaInst &AI);
     Function *getCalledFunctionStripPointerCast(CallInst *CallI);
+    SmallVector<User *> getNonCastUsers(Value *value);
+    bool hasCmpUser(Value *val);
 }

@@ -78,7 +78,7 @@ namespace llvm
 
         // These arrays is indexed by AccessIsWrite and Experiment.
         FunctionCallee AsanErrorCallbackSized[2];
-        FunctionCallee AsanMemoryAccessCallbackSized[2];
+        FunctionCallee AsanMemoryAccessCallbackSizedLoad, AsanMemoryAccessCallbackSizedStore;
 
         FunctionCallee AsanMemmove, AsanMemcpy, AsanMemset;
         Value *LocalDynamicShadow = nullptr;
@@ -88,7 +88,7 @@ namespace llvm
         GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
 
         FunctionCallee WhitelistOfAddrOutEnclave_active, WhitelistOfAddrOutEnclave_deactive,
-            WhitelistOfAddrOutEnclave_query, WhitelistOfAddrOutEnclave_global_propagate,
+            WhitelistOfAddrOutEnclave_query_ex, WhitelistOfAddrOutEnclave_global_propagate,
             sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
             EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd, get_mmap_infos, is_pointer_readable;
 #if (USE_SGXSAN_MALLOC)

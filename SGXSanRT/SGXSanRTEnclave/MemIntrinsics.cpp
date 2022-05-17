@@ -16,70 +16,6 @@
 // (Current) Or replace memcpy_s with sgxsan_memcpy_s
 // If we need to instrument sgxsdk, we needn't extra check, as memcpy will be replaced with __asan_memcpy by llvm pass
 
-/* #define ASAN_MEMCPY_IMPL(to, from, size)                                                                     \
-    do                                                                                                       \
-    {                                                                                                        \
-        if (LIKELY(asan_inited))                                                                             \
-        {                                                                                                    \
-            ENSURE_ASAN_INITED();                                                                            \
-            if (to != from)                                                                                  \
-            {                                                                                                \
-                if (RangesOverlap((const char *)to, size, (const char *)from, size))                         \
-                {                                                                                            \
-                    PrintErrorAndAbort("[%s] %p:%lu overlap with %p:%lu\n", "memcpy", to, size, from, size); \
-                }                                                                                            \
-            }                                                                                                \
-            SGXSAN_ELRANGE_CHECK_BEG(from, 0, size)                                                          \
-            ASAN_READ_RANGE(from, size);                                                                     \
-            SGXSAN_ELRANGE_CHECK_END;                                                                        \
-            SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)                                                            \
-            ASAN_WRITE_RANGE(to, size);                                                                      \
-            SGXSAN_ELRANGE_CHECK_END;                                                                        \
-        }                                                                                                    \
-        return memcpy(to, from, size);                                                                       \
-    } while (0) */
-
-/* #define ASAN_MEMSET_IMPL(block, c, size)             \
-    do                                               \
-    {                                                \
-        if (LIKELY(asan_inited))                     \
-        {                                            \
-            ENSURE_ASAN_INITED();                    \
-            SGXSAN_ELRANGE_CHECK_BEG(block, 1, size) \
-            ASAN_WRITE_RANGE(block, size);           \
-            SGXSAN_ELRANGE_CHECK_END;                \
-        }                                            \
-        return memset(block, c, size);               \
-    } while (0) */
-
-/* #define ASAN_MEMMOVE_IMPL(to, from, size)           \
-    do                                              \
-    {                                               \
-        if (LIKELY(asan_inited))                    \
-        {                                           \
-            ENSURE_ASAN_INITED();                   \
-            SGXSAN_ELRANGE_CHECK_BEG(from, 0, size) \
-            ASAN_READ_RANGE(from, size);            \
-            SGXSAN_ELRANGE_CHECK_END;               \
-            SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)   \
-            ASAN_WRITE_RANGE(to, size);             \
-            SGXSAN_ELRANGE_CHECK_END;               \
-        }                                           \
-        return memmove(to, from, size);             \
-    } while (0) */
-
-/* #define _VALIDATE_RETURN_ERRCODE(expr, errorcode) \
-    {                                             \
-        int _Expr_val = !!(expr);                 \
-        assert((_Expr_val) && (#expr));           \
-        if (!(_Expr_val))                         \
-        {                                         \
-            errno = errorcode;                    \
-            assert(0 && (#expr));                 \
-            return (errorcode);                   \
-        }                                         \
-    } */
-
 void *__asan_memcpy(void *to, const void *from, uptr size)
 {
     if (LIKELY(asan_inited))
@@ -93,17 +29,17 @@ void *__asan_memcpy(void *to, const void *from, uptr size)
             }
         }
         bool isSrcInEnclave = false, isDstOutEnclave = false;
-        SGXSAN_ELRANGE_CHECK_BEG(from, 0, size)
+        SGXSAN_ELRANGE_CHECK_BEG(from, size)
         ASAN_READ_RANGE(from, size);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
-        WhitelistOfAddrOutEnclave_query((uint64_t)from, size, false);
+        WhitelistOfAddrOutEnclave_query_ex(from, size, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
-        SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)
+        SGXSAN_ELRANGE_CHECK_BEG(to, size)
         ASAN_WRITE_RANGE(to, size);
         SGXSAN_ELRANGE_CHECK_MID
         isDstOutEnclave = true;
-        WhitelistOfAddrOutEnclave_query((uint64_t)to, size, true);
+        WhitelistOfAddrOutEnclave_query(to, size);
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
@@ -119,10 +55,10 @@ void *__asan_memset(void *block, int c, uptr size)
     if (LIKELY(asan_inited))
     {
         ENSURE_ASAN_INITED();
-        SGXSAN_ELRANGE_CHECK_BEG(block, 1, size)
+        SGXSAN_ELRANGE_CHECK_BEG(block, size)
         ASAN_WRITE_RANGE(block, size);
         SGXSAN_ELRANGE_CHECK_MID
-        WhitelistOfAddrOutEnclave_query((uint64_t)block, size, true);
+        WhitelistOfAddrOutEnclave_query(block, size);
         SGXSAN_ELRANGE_CHECK_END;
     }
     return memset(block, c, size);
@@ -134,17 +70,17 @@ void *__asan_memmove(void *to, const void *from, uptr size)
     {
         ENSURE_ASAN_INITED();
         bool isSrcInEnclave = false, isDstOutEnclave = false;
-        SGXSAN_ELRANGE_CHECK_BEG(from, 0, size)
+        SGXSAN_ELRANGE_CHECK_BEG(from, size)
         ASAN_READ_RANGE(from, size);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
-        WhitelistOfAddrOutEnclave_query((uint64_t)from, size, false);
+        WhitelistOfAddrOutEnclave_query_ex(from, size, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
-        SGXSAN_ELRANGE_CHECK_BEG(to, 1, size)
+        SGXSAN_ELRANGE_CHECK_BEG(to, size)
         ASAN_WRITE_RANGE(to, size);
         SGXSAN_ELRANGE_CHECK_MID
         isDstOutEnclave = true;
-        WhitelistOfAddrOutEnclave_query((uint64_t)to, size, true);
+        WhitelistOfAddrOutEnclave_query(to, size);
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
@@ -168,17 +104,17 @@ errno_t sgxsan_memcpy_s(void *dst, size_t sizeInBytes, const void *src, size_t c
             }
         }
         bool isSrcInEnclave = false, isDstOutEnclave = false;
-        SGXSAN_ELRANGE_CHECK_BEG(src, 0, count)
+        SGXSAN_ELRANGE_CHECK_BEG(src, count)
         ASAN_READ_RANGE(src, count);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
-        WhitelistOfAddrOutEnclave_query((uint64_t)src, count, false);
+        WhitelistOfAddrOutEnclave_query_ex(src, count, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
-        SGXSAN_ELRANGE_CHECK_BEG(dst, 1, sizeInBytes)
+        SGXSAN_ELRANGE_CHECK_BEG(dst, sizeInBytes)
         ASAN_WRITE_RANGE(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_MID
         isDstOutEnclave = true;
-        WhitelistOfAddrOutEnclave_query((uint64_t)dst, sizeInBytes, true);
+        WhitelistOfAddrOutEnclave_query(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
@@ -194,10 +130,10 @@ errno_t sgxsan_memset_s(void *s, size_t smax, int c, size_t n)
     if (LIKELY(asan_inited))
     {
         ENSURE_ASAN_INITED();
-        SGXSAN_ELRANGE_CHECK_BEG(s, 1, smax > n ? smax : n)
+        SGXSAN_ELRANGE_CHECK_BEG(s, smax > n ? smax : n)
         ASAN_WRITE_RANGE(s, smax > n ? smax : n);
         SGXSAN_ELRANGE_CHECK_MID
-        WhitelistOfAddrOutEnclave_query((uint64_t)s, smax > n ? smax : n, true);
+        WhitelistOfAddrOutEnclave_query(s, smax > n ? smax : n);
         SGXSAN_ELRANGE_CHECK_END;
     }
     return memset_s(s, smax, c, n);
@@ -209,31 +145,23 @@ int sgxsan_memmove_s(void *dst, size_t sizeInBytes, const void *src, size_t coun
     {
         ENSURE_ASAN_INITED();
         bool isSrcInEnclave = false, isDstOutEnclave = false;
-        SGXSAN_ELRANGE_CHECK_BEG(src, 0, count)
+        SGXSAN_ELRANGE_CHECK_BEG(src, count)
         ASAN_READ_RANGE(src, count);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
-        WhitelistOfAddrOutEnclave_query((uint64_t)src, count, false);
+        WhitelistOfAddrOutEnclave_query_ex(src, count, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
-        SGXSAN_ELRANGE_CHECK_BEG(dst, 1, sizeInBytes)
+        SGXSAN_ELRANGE_CHECK_BEG(dst, sizeInBytes)
         ASAN_WRITE_RANGE(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_MID
         isDstOutEnclave = true;
-        WhitelistOfAddrOutEnclave_query((uint64_t)dst, sizeInBytes, true);
+        WhitelistOfAddrOutEnclave_query(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
             sgxsan_warning_detail(!sgxsan_region_is_poisoned((uint64_t)src, count, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
             check_output_hybrid((uint64_t)src, count);
         }
-        // else if (isSrcInEnclave && !isDstOutEnclave)
-        // {
-        //     // when sensitive poison is in use
-        //     memcpy_s((void *)MEM_TO_SHADOW((uint64_t)dst),
-        //              RoundUpTo(sizeInBytes, SHADOW_GRANULARITY) / SHADOW_GRANULARITY,
-        //              (void *)MEM_TO_SHADOW((uint64_t)src),
-        //              RoundUpTo(count, SHADOW_GRANULARITY) / SHADOW_GRANULARITY);
-        // }
     }
     return memmove_s(dst, sizeInBytes, src, count);
 }

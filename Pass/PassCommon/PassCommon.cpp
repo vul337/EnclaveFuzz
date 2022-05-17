@@ -65,12 +65,12 @@ namespace llvm
 
     bool isValueNamePrefixedWith(Value *val, std::string prefix)
     {
-        return (SGXSanGetName(val).startswith(StringRef(prefix)) ? true : false);
+        return SGXSanGetName(val).startswith(StringRef(prefix));
     }
 
     bool isValueNameEqualWith(Value *val, std::string name)
     {
-        return (SGXSanGetName(val).str() == name ? true : false);
+        return SGXSanGetName(val).str() == name;
     }
 
     SmallVector<Value *> getValuesByStrInFunction(Function *F, bool (*cmp)(Value *, std::string), std::string str)
@@ -303,5 +303,35 @@ namespace llvm
             }
         }
         return nullptr;
+    }
+
+    SmallVector<User *> getNonCastUsers(Value *value)
+    {
+        SmallVector<User *> users;
+        for (User *user : value->users())
+        {
+            if (CastInst *CastI = dyn_cast<CastInst>(user))
+            {
+                users.append(getNonCastUsers(CastI));
+            }
+            else
+            {
+                users.push_back(user);
+            }
+        }
+        return users;
+    }
+
+    bool hasCmpUser(Value *val)
+    {
+        for (auto user : getNonCastUsers(val))
+        {
+            auto I = dyn_cast<Instruction>(user);
+            if (I && (I->getOpcode() == Instruction::ICmp || I->getOpcode() == Instruction::FCmp))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

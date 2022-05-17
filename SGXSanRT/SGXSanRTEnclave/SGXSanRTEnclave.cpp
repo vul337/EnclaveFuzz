@@ -80,7 +80,7 @@ extern "C" void get_mmap_infos()
         abort();
 }
 
-// assume SGXSanMMapInfos is sorted, and info range is [info.start, info.end)
+// assume SGXSanMMapInfos is sorted, and info range is [info.start, info.end]
 bool _is_addr_readable(uint64_t addr, size_t length, size_t mmap_info_start_index)
 {
     for (size_t i = mmap_info_start_index; i < SGXSanMMapInfoRealCount; i++)
@@ -91,11 +91,11 @@ bool _is_addr_readable(uint64_t addr, size_t length, size_t mmap_info_start_inde
             // Subsequent items will only be bigger, we can think it false early.
             return false;
         }
-        else if (info.start <= addr && addr < info.end && info.is_readable)
+        else if (info.start <= addr && addr <= info.end && info.is_readable)
         {
-            if (info.end < (addr + length))
+            if (info.end < (addr + length - 1))
             {
-                return _is_addr_readable(info.end, addr + length - info.end, i + 1);
+                return _is_addr_readable(info.end + 1, addr + length - 1 - info.end, i + 1);
             }
             else
             {

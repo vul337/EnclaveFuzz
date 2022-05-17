@@ -94,7 +94,6 @@ namespace llvm
         static bool ContainWord(StringRef str, const std::string word);
         static bool ContainWordExactly(StringRef str, const std::string word);
         static bool isEncryptionFunction(Function *F);
-        static void getNonCastUsers(Value *value, std::vector<User *> &users);
         void poisonSensitiveGlobalVariableAtRuntime();
         void initializeCallbacks();
         void cleanStackObjectSensitiveShadow(Value *stackObject);

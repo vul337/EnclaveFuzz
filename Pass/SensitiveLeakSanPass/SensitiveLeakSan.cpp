@@ -633,9 +633,7 @@ StringRef SensitiveLeakSan::getObjMeaningfulName(SVF::ObjPN *objPN)
     {
         auto obj = const_cast<Value *>(objPN->getValue());
         assert(isa<CallInst>(obj));
-        std::vector<User *> users;
-        getNonCastUsers(obj, users);
-        for (auto user : users)
+        for (auto user : getNonCastUsers(obj))
         {
             if (auto StoreI = dyn_cast<StoreInst>(user))
             {
@@ -1425,21 +1423,6 @@ void SensitiveLeakSan::doVFA(Value *work)
     }
 }
 
-void SensitiveLeakSan::getNonCastUsers(Value *value, std::vector<User *> &users)
-{
-    for (User *user : value->users())
-    {
-        if (CastInst *CastI = dyn_cast<CastInst>(user))
-        {
-            getNonCastUsers(CastI, users);
-        }
-        else
-        {
-            users.push_back(user);
-        }
-    }
-}
-
 void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned, CallInst *MSI, Value *dstPtr, Value *setSize)
 {
     if (poisonedInst.count(MSI) == 0)
@@ -1467,9 +1450,7 @@ void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned, CallIns
 void SensitiveLeakSan::propagateShadow(Value *src)
 {
     // src maybe 'Function Argument'/LoadInst/'Return Value of CallInst'
-    std::vector<User *> srcUsers;
-    getNonCastUsers(src, srcUsers);
-    for (User *srcUser : srcUsers)
+    for (User *srcUser : getNonCastUsers(src))
     {
         if (isa<StoreInst>(srcUser) || isa<CallInst>(srcUser) || isa<ReturnInst>(srcUser))
         {

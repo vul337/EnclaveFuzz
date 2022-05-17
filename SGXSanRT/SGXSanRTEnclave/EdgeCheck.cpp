@@ -12,7 +12,7 @@ void sgxsan_edge_check(void *ptr, uint64_t len, int cnt)
         // int overflow
         min_size = len;
     }
-    SGXSAN_ELRANGE_CHECK_BEG((uptr)ptr, 0, min_size)
+    SGXSAN_ELRANGE_CHECK_BEG((uptr)ptr, min_size)
     if (sgxsan_region_is_poisoned((uptr)ptr, min_size, (~0x70) | kSGXSanSensitiveLayout))
     {
         // PrintErrorAndAbort("[sgxsan_edge_check] 0x%lx point to sensitive area\n", ptr);
@@ -21,7 +21,7 @@ void sgxsan_edge_check(void *ptr, uint64_t len, int cnt)
     }
     SGXSAN_ELRANGE_CHECK_MID
     // totally outside enclave, add to whitelist
-    WhitelistOfAddrOutEnclave_add((uptr)ptr, (cnt == -1) ? (1 << 9) : (len * cnt));
+    WhitelistOfAddrOutEnclave_add(ptr, (cnt == -1) ? (1 << 9) : (len * cnt));
     SGXSAN_ELRANGE_CHECK_END;
     return;
 }

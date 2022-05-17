@@ -36,14 +36,14 @@ uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask)
     return 0;
 }
 
-bool is_addr_in_elrange(uint64_t addr)
+bool is_addr_in_elrange(uptr addr)
 {
-    return (g_enclave_base <= addr && addr < g_enclave_base + g_enclave_size) ? true : false;
+    return g_enclave_base <= addr && addr < g_enclave_base + g_enclave_size;
 }
 
-bool is_addr_in_elrange_ex(uint64_t addr, uint64_t size)
+bool is_addr_in_elrange_ex(uptr addr, size_t size)
 {
-    return (g_enclave_base <= addr && addr + size <= g_enclave_base + g_enclave_size) ? true : false;
+    return g_enclave_base <= addr && addr + size <= g_enclave_base + g_enclave_size;
 }
 
 bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8_t mask)
