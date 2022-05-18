@@ -114,7 +114,7 @@ std::pair<const void *, size_t> merge_adjacent_memory(const void *addr1, size_t 
 bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
 {
     assert(ptr && size > 0 && m_whitelist && sgx_is_outside_enclave(ptr, size));
-
+    SGXSAN_LOG("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "+", ptr, size);
     const void *target_addr = ptr;
     size_t target_len = size;
     bool hasMet = false;
@@ -132,7 +132,6 @@ bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
             break;
     }
 
-    SGXSAN_LOG("[Whitelist] [%s(0x%p)] [%s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "+", ptr, size);
     auto ret = m_whitelist->emplace(target_addr, target_len);
 #if (DUMP_LOG)
     iter();
@@ -145,6 +144,7 @@ bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
     assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
     pthread_rwlock_wrlock(&m_rwlock_global_whitelist);
 
+    SGXSAN_LOG("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "+", ptr, size);
     const void *target_addr = ptr;
     size_t target_len = size;
     bool hasMet = false;
@@ -162,7 +162,6 @@ bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
             break;
     }
 
-    SGXSAN_LOG("[Whitelist] [%s] [%s] 0x%p(0x%llx)\n", "Global", "+", ptr, size);
     auto ret = m_global_whitelist.emplace(target_addr, target_len);
 #if (DUMP_LOG)
     iter(true);
@@ -222,7 +221,7 @@ std::tuple<const void *, size_t, bool> WhitelistOfAddrOutEnclave::query(const vo
     else if (!m_whitelist_active)
         return std::tuple<const void *, size_t, bool>(nullptr, 1, false);
 
-    SGXSAN_LOG("[Whitelist] [%s(0x%p)] [%s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "?", ptr, size);
+    SGXSAN_LOG("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "?", ptr, size);
 #if (DUMP_LOG)
     iter();
 #endif
@@ -265,7 +264,7 @@ exit:
 std::pair<const void *, size_t> WhitelistOfAddrOutEnclave::query_global(const void *ptr, size_t size)
 {
     pthread_rwlock_rdlock(&m_rwlock_global_whitelist);
-    SGXSAN_LOG("[Whitelist] [%s] [%s] 0x%p(0x%llx)\n", "Global", "?", ptr, size);
+    SGXSAN_LOG("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "?", ptr, size);
 #if (DUMP_LOG)
     iter(true);
 #endif
