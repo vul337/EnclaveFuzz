@@ -10,7 +10,7 @@
 
 #define FUNC_NAME_MAX_LEN 127
 #define CONTROL_FETCH_QUEUE_MAX_SIZE 3
-
+#define STATIC_MEMORY_ACCESS 0
 struct FetchInfo
 {
     const void *start_addr = nullptr;
@@ -39,12 +39,22 @@ public:
     static void active();
     static void deactive();
     static bool double_fetch_detect(const void *ptr, size_t size, bool used_to_cmp, char *parent_func);
+    static void add_in_enclave_access_cnt()
+    {
+        if (m_whitelist_active)
+        {
+            assert(m_whitelist);
+            m_in_enclave_access_cnt++;
+        }
+    }
 
 private:
     static __thread std::map<const void *, size_t> *m_whitelist;
     // used in nested ecall-ocall case
     static __thread bool m_whitelist_active;
     static __thread std::deque<FetchInfo> *m_control_fetchs;
+    static __thread size_t m_out_of_enclave_access_cnt;
+    static __thread size_t m_in_enclave_access_cnt;
     static std::map<const void *, size_t> m_global_whitelist;
     static pthread_rwlock_t m_rwlock_global_whitelist;
 };
@@ -52,6 +62,8 @@ private:
 __thread std::map<const void *, size_t> *WhitelistOfAddrOutEnclave::m_whitelist;
 __thread bool WhitelistOfAddrOutEnclave::m_whitelist_active;
 __thread std::deque<FetchInfo> *WhitelistOfAddrOutEnclave::m_control_fetchs;
+__thread size_t WhitelistOfAddrOutEnclave::m_out_of_enclave_access_cnt;
+__thread size_t WhitelistOfAddrOutEnclave::m_in_enclave_access_cnt;
 std::map<const void *, size_t> WhitelistOfAddrOutEnclave::m_global_whitelist;
 pthread_rwlock_t WhitelistOfAddrOutEnclave::m_rwlock_global_whitelist = PTHREAD_RWLOCK_INITIALIZER;
 
@@ -61,6 +73,8 @@ void WhitelistOfAddrOutEnclave::init()
     m_whitelist = new std::map<const void *, size_t>();
     m_whitelist_active = false;
     m_control_fetchs = new std::deque<FetchInfo>();
+    m_out_of_enclave_access_cnt = 0;
+    m_in_enclave_access_cnt = 0;
 }
 
 void WhitelistOfAddrOutEnclave::destroy()
@@ -70,6 +84,11 @@ void WhitelistOfAddrOutEnclave::destroy()
     delete m_control_fetchs;
     m_control_fetchs = nullptr;
     m_whitelist_active = false;
+#if (STATIC_MEMORY_ACCESS)
+    PRINTF("[Access Count (Out/In)] %lld/%lld\n", m_out_of_enclave_access_cnt, m_in_enclave_access_cnt);
+#endif
+    m_out_of_enclave_access_cnt = 0;
+    m_in_enclave_access_cnt = 0;
 }
 
 void WhitelistOfAddrOutEnclave::iter(bool is_global)
@@ -114,7 +133,10 @@ std::pair<const void *, size_t> merge_adjacent_memory(const void *addr1, size_t 
 
 bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
 {
-    assert(ptr && size > 0 && m_whitelist && sgx_is_outside_enclave(ptr, size));
+    // there may be ocall and ocall return before enter first ecall
+    if (!m_whitelist)
+        return true;
+    assert(ptr && size > 0 && !m_whitelist_active && sgx_is_outside_enclave(ptr, size));
 #if (DUMP_LOG)
     iter();
 #endif
@@ -185,7 +207,11 @@ bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
 // fetch must be a LoadInst
 bool WhitelistOfAddrOutEnclave::double_fetch_detect(const void *ptr, size_t size, bool used_to_cmp, char *parent_func)
 {
-    assert(m_control_fetchs && ptr && size > 0);
+    assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
+    // there may be ocall and ocall return before enter first ecall
+    if (!m_whitelist_active)
+        return false;
+    assert(m_whitelist && m_control_fetchs);
     if (used_to_cmp)
     {
         // it's a fetch used to compare, maybe used to 'check'
@@ -227,18 +253,24 @@ bool WhitelistOfAddrOutEnclave::double_fetch_detect(const void *ptr, size_t size
 // 3) query success at global whitelist (thread whitelist do not contain this info)
 std::tuple<const void *, size_t, bool> WhitelistOfAddrOutEnclave::query(const void *ptr, size_t size)
 {
-    assert(m_whitelist && sgx_is_outside_enclave(ptr, size));
+    std::tuple<const void *, size_t, bool> ret,
+        ignore_ret = std::tuple<const void *, size_t, bool>(nullptr, 1, false),
+        false_ret = std::tuple<const void *, size_t, bool>(nullptr, 0, false);
     if (ptr == nullptr)
-        return std::tuple<const void *, size_t, bool>(nullptr, 0, false);
-    else if (!m_whitelist_active)
-        return std::tuple<const void *, size_t, bool>(nullptr, 1, false);
-
+        return false_ret;
+    assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
+    // there may be ocall and ocall return before enter first ecall
+    if (!m_whitelist_active)
+        return ignore_ret;
+    assert(m_whitelist);
+#if (STATIC_MEMORY_ACCESS)
+    m_out_of_enclave_access_cnt++;
+#endif
     SGXSAN_LOG("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "?", ptr, size);
 #if (DUMP_LOG)
     iter();
 #endif
     std::map<const void *, size_t>::iterator it;
-    std::tuple<const void *, size_t, bool> ret, false_ret = std::tuple<const void *, size_t, bool>(nullptr, 0, false);
 
     if (m_whitelist->size() == 0)
     {
@@ -369,6 +401,8 @@ void WhitelistOfAddrOutEnclave_query_ex(const void *ptr, size_t size, bool is_wr
 
 void WhitelistOfAddrOutEnclave_query(const void *ptr, size_t size)
 {
+    if (ptr == nullptr)
+        return; // leave it to guard page check
     size_t find_size;
     std::tie(std::ignore, find_size, std::ignore) = WhitelistOfAddrOutEnclave::query(ptr, size);
     size_t buf_size = 1024;
@@ -390,4 +424,11 @@ void WhitelistOfAddrOutEnclave_active()
 void WhitelistOfAddrOutEnclave_deactive()
 {
     WhitelistOfAddrOutEnclave::deactive();
+}
+
+void WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt()
+{
+#if (STATIC_MEMORY_ACCESS)
+    WhitelistOfAddrOutEnclave::add_in_enclave_access_cnt();
+#endif
 }

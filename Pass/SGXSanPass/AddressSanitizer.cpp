@@ -148,7 +148,7 @@ void AddressSanitizer::initializeCallbacks(Module &M)
     WhitelistOfAddrOutEnclave_query_ex = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_query_ex",
                                                                IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy,
                                                                IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
-
+    WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt", IRB.getVoidTy());
     WhitelistOfAddrOutEnclave_global_propagate = M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
                                                                        IRB.getVoidTy(), IRB.getInt8PtrTy());
     sgxsan_edge_check = M.getOrInsertFunction("sgxsan_edge_check", IRB.getVoidTy(),
@@ -393,6 +393,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
 
     // start instrument shadowbyte check
     IRB.SetInsertPoint(ShadowCheckInsertPoint);
+    IRB.CreateCall(WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt);
     if (UseCalls)
     {
         IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][AccessSizeIndex],

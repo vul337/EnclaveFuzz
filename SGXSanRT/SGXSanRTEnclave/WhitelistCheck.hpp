@@ -16,7 +16,7 @@ extern "C"
     void WhitelistOfAddrOutEnclave_query_ex(const void *start, size_t size, bool is_write, bool used_to_cmp = false, char *parent_func = nullptr);
     void WhitelistOfAddrOutEnclave_query(const void *start, size_t size);
     void WhitelistOfAddrOutEnclave_global_propagate(const void *addr);
-
+    void WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt();
     void WhitelistOfAddrOutEnclave_active();
     void WhitelistOfAddrOutEnclave_deactive();
 #if defined(__cplusplus)

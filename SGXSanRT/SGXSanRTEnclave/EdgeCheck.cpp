@@ -22,7 +22,7 @@ void sgxsan_edge_check(void *ptr, uint64_t len, int cnt)
     }
     SGXSAN_ELRANGE_CHECK_MID
     // totally outside enclave, add to whitelist
-    WhitelistOfAddrOutEnclave_add(ptr, (cnt == -1) ? (1 << 9) : (len * cnt));
+    WhitelistOfAddrOutEnclave_add(ptr, (cnt == -1) ? (1 << 10) : (len * cnt));
     SGXSAN_ELRANGE_CHECK_END;
     return;
 }
