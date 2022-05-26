@@ -3,14 +3,14 @@ project(SensitiveLeakSanPass)
 
 # get LLVM_DIR
 set(LLVM_DIR "$ENV{LLVM_DIR}")
-if(NOT DEFINED LLVM_DIR)
+if(NOT LLVM_DIR)
     message(FATAL_ERROR "Please specify LLVM Path, e.g. \"export LLVM_DIR=/usr/lib/llvm-12\"")
 endif()
 
 # get SVF direcory
 set(SVF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../SVF")
 
-if(NOT DEFINED SVF_MODE)
+if(NOT SVF_MODE)
     set(SVF_MODE "Release")
 elseif(NOT (SVF_MODE MATCHES "^(Release|Debug)$"))
     message(FATAL_ERROR "SVF_MODE must be \"Debug\" or \"Release\"(Default)")
