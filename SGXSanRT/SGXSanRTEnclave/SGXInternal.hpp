@@ -2,11 +2,17 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// from common/inc/internal/util.h
 #define SE_GUARD_PAGE_SHIFT 16
 #define SE_GUARD_PAGE_SIZE (1 << SE_GUARD_PAGE_SHIFT)
+
+// from sdk/trts/trts_shared_constants.h
 #define STATIC_STACK_SIZE 688
+
+// from sdk/trts/trts_internal.h
 #define TD2TCS(td) ((const void *)(((thread_data_t *)(td))->stack_base_addr + (size_t)STATIC_STACK_SIZE + (size_t)SE_GUARD_PAGE_SIZE))
 
+// from common/inc/internal/thread_data.h
 typedef size_t sys_word_t;
 
 typedef struct _thread_data_t
@@ -29,8 +35,11 @@ typedef struct _thread_data_t
     sys_word_t stack_commit_addr;
 } thread_data_t;
 
+// from common/inc/internal/se_types.h
 #define REG(name) r##name
 #define REGISTER(name) uint64_t REG(name)
+
+// from common/inc/internal/arch.h
 
 /****************************************************************************
  * Definitions for SSA
@@ -71,6 +80,7 @@ typedef struct _ssa_gpr_t
     uint64_t gs;           /* (176) GS register */
 } ssa_gpr_t;
 
+// from common/inc/internal/metadata.h
 typedef uint64_t si_flags_t;
 
 /*
@@ -136,6 +146,10 @@ typedef union _layout_t
 #define LAYOUT_ID_RSRV_MAX (22)
 
 #define TCS_TEMPLATE_SIZE 72
+
+extern const char *layout_id_str[];
+
+// from common/inc/internal/global_data.h
 #define LAYOUT_ENTRY_NUM 42
 typedef struct _global_data_t
 {
@@ -158,9 +172,9 @@ typedef struct _global_data_t
     uint64_t elrange_size;          /* the size of the enclave address range provided in the enclave's SECS (SECS.SIZE) */
 } global_data_t;
 
-extern const char *layout_id_str[];
-
 extern global_data_t g_global_data;
+
+// from sdk/trts/init_enclave.cpp
 extern uint64_t g_enclave_base, g_enclave_size;
 
 #if defined(__cplusplus)
@@ -171,8 +185,6 @@ extern "C"
     size_t get_heap_size(void);
     const void *get_tcs(void);
     bool is_stack_addr(void *address, size_t size);
-    int sgx_is_within_enclave(const void *addr, size_t size);
-    int sgx_is_outside_enclave(const void *addr, size_t size);
 #if defined(__cplusplus)
 }
 #endif

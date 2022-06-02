@@ -3,6 +3,7 @@
 #include "StackTrace.hpp"
 #include "SGXSanRTTBridge.hpp"
 #include "SGXInternal.hpp"
+#include <sgx_trts.h>
 #include <cstdlib>
 
 // level == 0 means return address of function that called 'get_ret_addrs_in_stack'

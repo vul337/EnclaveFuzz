@@ -1,5 +1,5 @@
 #include "PoisonCheck.hpp"
-#include "SGXInternal.hpp"
+#include <sgx_trts.h>
 #include <cstdlib>
 
 uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask)

@@ -1,10 +1,10 @@
 #include <string.h>
 #include <algorithm>
+#include <sgx_trts.h>
 #include "Poison.hpp"
 #include "SGXSanManifest.h"
 #include "SGXSanCommonPoison.hpp"
 #include "PoisonCheck.hpp"
-#include "SGXInternal.hpp"
 
 static const u64 kAllocaRedzoneSize = 32UL;
 static const u64 kAllocaRedzoneMask = 31UL;

@@ -89,7 +89,8 @@ SGXSanRTApp/%.o: SGXSanRTApp/%.cpp ../SGXSanManifest/SGXSanManifest.h
 
 $(LibSGXSanRTApp): $(SGXSanRTApp_Cpp_Objects)
 	@$(AR) rcs $@ $^
-	@cp $(LibSGXSanRTApp) ../output/$(LibSGXSanRTApp)
+	@ln -fs ../SGXSanRT/$(LibSGXSanRTApp) ../output/$(LibSGXSanRTApp)
+	@echo "AR   =>  $@"
 
 ######## SGXSanRT Enclave Objects ########
 
@@ -109,7 +110,8 @@ SGXSanRTEnclave/%.o: SGXSanRTEnclave/%.cpp ../SGXSanManifest/SGXSanManifest.h
 
 $(LibSGXSanRTEnclave): $(SGXSanRTEnclave_Cpp_Objects)
 	@$(AR) rcs $@ $^
-	@cp $(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTEnclave)
+	@ln -fs ../SGXSanRT/$(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTEnclave)
+	@echo "AR   =>  $@"
 
 .PHONY: clean
 clean:

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <sgx_trts_exception.h>
 #include "SGXSanManifest.h"
 #include "SGXSanDefs.h"
 #include "SGXSanRTEnclave.hpp"
@@ -37,10 +38,22 @@ uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
 
 int asan_inited = 0;
 
+// only usable for SGXv2 when MiscSelect is 1
+int sgxsan_exception_handler(sgx_exception_info_t *info)
+{
+    (void)info;
+    // currently not in use
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 static void init_shadow_memory_out_enclave()
 {
     // only use LowMem and LowShadow
     if (SGX_SUCCESS != sgxsan_ocall_init_shadow_memory(g_enclave_base, g_enclave_size, &kLowShadowBeg, &kLowShadowEnd))
+    {
+        abort();
+    }
+    if (sgx_register_exception_handler(1, sgxsan_exception_handler) == nullptr)
     {
         abort();
     }

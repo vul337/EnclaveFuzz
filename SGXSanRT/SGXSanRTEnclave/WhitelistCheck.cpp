@@ -1,11 +1,11 @@
 #include <string>
 #include <deque>
 #include <mbusafecrt.h>
+#include <sgx_trts.h>
 #include "WhitelistCheck.hpp"
 #include "SGXSanPrintf.hpp"
 #include "PoisonCheck.hpp"
 #include "SGXSanCommonShadowMap.hpp"
-#include "SGXInternal.hpp"
 #include "StackTrace.hpp"
 
 #define FUNC_NAME_MAX_LEN 127
