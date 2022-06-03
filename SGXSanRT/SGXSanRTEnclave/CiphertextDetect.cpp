@@ -14,7 +14,7 @@ std::unordered_map<uint64_t /* callsite addr */, std::vector<text_encryption_t> 
 
 static pthread_rwlock_t rwlock_output_history = PTHREAD_RWLOCK_INITIALIZER;
 
-static const int level = 1;
+static const unsigned int level = 2;
 
 static inline int getArraySum(int *array, int size)
 {
@@ -39,7 +39,8 @@ void __get_func_name(std::string &func_name_str)
 {
     uint64_t ret_addr = get_last_return_address(g_enclave_base, level + 2);
     size_t buf_size = 1024;
-    char func_name[buf_size] = {0};
+    char func_name[buf_size];
+    memset(func_name, 0, buf_size);
     if (SGX_SUCCESS != sgxsan_ocall_addr2func_name(ret_addr - 1, func_name, buf_size))
     {
         abort();

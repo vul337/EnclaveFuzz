@@ -41,8 +41,7 @@ int asan_inited = 0;
 // only usable for SGXv2 when MiscSelect is 1
 int sgxsan_exception_handler(sgx_exception_info_t *info)
 {
-    (void)info;
-    // currently not in use
+    SGXSAN_PRINT_STACK_TRACE(0, info->cpu_context.rbp, info->cpu_context.rip);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 

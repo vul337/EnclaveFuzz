@@ -1,6 +1,6 @@
 #pragma once
 
-#define DUMP_STACK_TRACE 0
+#define DUMP_STACK_TRACE 1
 #define DUMP_LOG 0
 
 // after modification, need rebuild both rt and pass
