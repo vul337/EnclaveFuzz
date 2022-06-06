@@ -618,7 +618,8 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLeve
             if (compositeTy && compositeTy->getSizeInBits() != 0 && compositeTy->getTag() == dwarf::DW_TAG_structure_type)
             {
                 size_t shadowBytesLen = (compositeTy->getSizeInBits() + 8 * SHADOW_GRANULARITY - 1) / (8 * SHADOW_GRANULARITY);
-                uint8_t shadowBytes[shadowBytesLen] = {0};
+                uint8_t shadowBytes[shadowBytesLen];
+                memset(shadowBytes, 0, shadowBytesLen);
                 std::pair<uint8_t *, size_t> shadowBytesPair(shadowBytes, shadowBytesLen);
                 if (poisonStructSensitiveShadowOnTemp(compositeTy, &shadowBytesPair, 0))
                 {
@@ -796,7 +797,7 @@ void SensitiveLeakSan::initializeCallbacks()
     PoisonSensitiveGlobal = M->getOrInsertFunction(
         "PoisonSensitiveGlobal", IRB.getVoidTy(), IntptrTy, IntptrTy);
     Abort = M->getOrInsertFunction("abort", IRB.getVoidTy());
-    Printf = M->getOrInsertFunction("sgxsan_printf", Type::getInt32Ty(*C), Type::getInt8PtrTy(*C), Type::getInt8PtrTy(*C));
+    SGXSanLog = M->getOrInsertFunction("sgxsan_log", Type::getInt32Ty(*C), Type::getInt32Ty(*C), Type::getInt1Ty(*C), Type::getInt8PtrTy(*C), Type::getInt8PtrTy(*C));
     StrSpeicifier = IRB.CreateGlobalStringPtr("%s", "", 0, M);
     print_ptr = M->getOrInsertFunction("print_ptr", Type::getVoidTy(*C), Type::getInt8PtrTy(*C), Type::getInt64Ty(*C), Type::getInt64Ty(*C));
     print_arg = M->getOrInsertFunction("print_arg", Type::getVoidTy(*C), Type::getInt8PtrTy(*C), Type::getInt64Ty(*C), Type::getInt64Ty(*C));
@@ -1233,7 +1234,7 @@ uint64_t SensitiveLeakSan::RoundUpUDiv(uint64_t dividend, uint64_t divisor)
 
 void SensitiveLeakSan::printStrAtRT(IRBuilder<> &IRB, std::string str)
 {
-    IRB.CreateCall(Printf, {StrSpeicifier, IRB.CreateGlobalStringPtr(str)});
+    IRB.CreateCall(SGXSanLog, {IRB.getInt32(3) /* LOG_LEVEL_DEBUG */, IRB.getInt1(1), StrSpeicifier, IRB.CreateGlobalStringPtr(str)});
 }
 
 void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI)

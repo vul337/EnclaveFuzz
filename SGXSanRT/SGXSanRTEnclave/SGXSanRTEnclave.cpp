@@ -9,7 +9,7 @@
 #include "SGXSanRTTBridge.hpp"
 #include "SensitivePoisoner.hpp"
 #include "Malloc.hpp"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "StackTrace.hpp"
 
 struct SGXSanMMapInfo
@@ -21,7 +21,6 @@ struct SGXSanMMapInfo
     bool is_executable = false;
     bool is_shared = false;
     bool is_private = false;
-    // char description[64] = {0};
 };
 
 const __thread size_t SGXSanMMapInfoMaxCount = 1024;
@@ -41,7 +40,7 @@ int asan_inited = 0;
 // only usable for SGXv2 when MiscSelect is 1
 int sgxsan_exception_handler(sgx_exception_info_t *info)
 {
-    SGXSAN_PRINT_STACK_TRACE(0, info->cpu_context.rbp, info->cpu_context.rip);
+    sgxsan_print_stack_trace(LOG_LEVEL_ERROR, 0, info->cpu_context.rbp, info->cpu_context.rip);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -127,6 +126,6 @@ extern "C" bool is_pointer_readable(void *ptr, size_t element_size, int count)
     auto length = element_size * std::max(1, count);
     assert(length > 0);
     auto result = _is_addr_readable((uint64_t)ptr, length, 0);
-    SGXSAN_WARNING(result == false, "Pass non-null unreadable pointer parameter");
+    sgxsan_warning(result == false, "Pass non-null unreadable pointer parameter\n");
     return result;
 }

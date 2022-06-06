@@ -3,7 +3,7 @@
 #include <stdarg.h>
 #include <string>
 #include "SGXSanDefs.h"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "PoisonCheck.hpp"
 #include "StackTrace.hpp"
@@ -39,15 +39,18 @@ ASAN_REPORT_ERROR(store, true, 16)
 ASAN_REPORT_ERROR_N(load, false)
 ASAN_REPORT_ERROR_N(store, true)
 
-void PrintShadowMap(uptr addr)
+void PrintShadowMap(log_level ll, uptr addr)
 {
     uptr shadowAddr = MEM_TO_SHADOW(addr);
     uptr shadowAddrRow = RoundDownTo(shadowAddr, 0x10);
     int shadowAddrCol = (int)(shadowAddr - shadowAddrRow);
-    PRINTF("Shadow bytes around the buggy address:\n");
+    char buf[BUFSIZ];
+    snprintf(buf, BUFSIZ, "Shadow bytes around the buggy address:\n");
+    std::string str = buf;
     for (int i = 0; i <= 10; i++)
     {
-        PRINTF("%s%p:", i == 5 ? "=>" : "  ", (void *)(shadowAddrRow - 0x50 + 0x10 * i));
+        snprintf(buf, BUFSIZ, "%s%p:", i == 5 ? "=>" : "  ", (void *)(shadowAddrRow - 0x50 + 0x10 * i));
+        str += buf;
         for (int j = 0; j < 16; j++)
         {
             std::string prefix = " ", appendix = "";
@@ -64,11 +67,12 @@ void PrintShadowMap(uptr addr)
                 else if (j == shadowAddrCol + 1)
                     prefix = "]";
             }
-            PRINTF("%s%02x%s", prefix, *(uint8_t *)(shadowAddrRow - 0x50 + 0x10 * i + j), appendix);
+            snprintf(buf, BUFSIZ, "%s%02x%s", prefix.c_str(), *(uint8_t *)(shadowAddrRow - 0x50 + 0x10 * i + j), appendix.c_str());
+            str += buf;
         }
-        PRINTF(" \n");
+        str += " \n";
     }
-    PRINTF("Shadow byte legend (one shadow byte represents 8 application bytes):\n"
+    str += "Shadow byte legend (one shadow byte represents 8 application bytes):\n"
            "  Addressable:           00\n"
            "  Partially addressable: 01 02 03 04 05 06 07\n"
            "  SGX sensitive layout:  10\n"
@@ -85,46 +89,24 @@ void PrintShadowMap(uptr addr)
            "  Global redzone:        f9\n"
            "  Global init order:     f6\n"
            "  Poisoned by user:      f7\n"
-           "  ASan internal:         fe\n");
+           "  ASan internal:         fe\n";
+    sgxsan_log(ll, false, str.c_str());
 }
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal, const char *msg)
 {
-    PRINTF("================ Error Report ================\n"
-           "[ERROR MESSAGE] %s\n"
-           "  pc = 0x%lx\tbp   = 0x%lx\n"
-           "  sp = 0x%lx\taddr = 0x%lx\n"
-           "  is_write = %d\t\taccess_size = 0x%lx\n",
-           msg, pc, bp, sp, addr, is_write, access_size);
-    SGXSAN_PRINT_STACK_TRACE();
-    PrintShadowMap(addr);
-    PRINTF("================= Report End =================\n");
+    log_level ll = fatal ? LOG_LEVEL_ERROR : LOG_LEVEL_WARNING;
+    sgxsan_log(ll, false, "================ Error Report ================\n"
+                          "[ERROR MESSAGE] %s\n"
+                          "  pc = 0x%lx\tbp   = 0x%lx\n"
+                          "  sp = 0x%lx\taddr = 0x%lx\n"
+                          "  is_write = %d\t\taccess_size = 0x%lx\n",
+               msg, pc, bp, sp, addr, is_write, access_size);
+    sgxsan_print_stack_trace(ll);
+    PrintShadowMap(ll, addr);
+    sgxsan_log(ll, false, "================= Report End =================\n");
     if (fatal)
         abort();
     return;
-}
-
-void PrintErrorAndAbort(const char *format, ...)
-{
-    char buf[BUFSIZ] = {'\0'};
-    va_list argptr;
-    va_start(argptr, format);
-    vsnprintf(buf, BUFSIZ, format, argptr);
-    va_end(argptr);
-    PRINTF("[PrintErrorAndAbort] %s\n", buf);
-    SGXSAN_PRINT_STACK_TRACE();
-    abort();
-}
-
-void sgxsan_warning_detail(bool cond, const char *message, uint64_t addr, uint64_t size)
-{
-    if (!cond)
-    {
-        PRINTF("================== Message ===================\n"
-               "[SGXSan Warning] %s \n",
-               message);
-        GET_CALLER_PC_BP_SP;
-        ReportGenericError(pc, bp, sp, addr, 0, size, false);
-    }
 }

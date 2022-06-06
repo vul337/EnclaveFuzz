@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <stack>
 #include "ThreadFuncArgShadowStack.hpp"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 
 // function addr -> poisoned function argument index set
 // ( -1 means return value)
@@ -84,12 +84,12 @@ void ThreadFuncArgShadowStack::show_arg_shadow(uint64_t func_addr)
     FuncArgShadowTy &top = thread_func_arg_shadow_stack->top();
     assert(top.func_addr == func_addr);
     std::unordered_set<int64_t> &arg_shadow = top.arg_shadow;
-    PRINTF("[ Argument Shadow of 0x%lx ]:", func_addr);
+    log_debug("[ Argument Shadow of 0x%lx ]:", func_addr);
     for (int64_t shadow_item : arg_shadow)
     {
-        PRINTF(" %ld", shadow_item);
+        log_debug(" %ld", shadow_item);
     }
-    PRINTF(" \n");
+    log_debug(" \n");
 }
 
 bool ThreadFuncArgShadowStack::query_arg(uint64_t func_addr, int64_t arg_pos)

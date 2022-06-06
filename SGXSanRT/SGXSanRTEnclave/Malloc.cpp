@@ -9,7 +9,7 @@
 #include "SGXSanRTEnclave.hpp"
 #include "Quarantine.hpp"
 #include "InternalDlmalloc.hpp"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "StackTrace.hpp"
 
 #if (USE_SGXSAN_MALLOC)
@@ -27,8 +27,9 @@ struct chunk
 	size_t user_size;
 };
 
-void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *mem), bool true_add_false_minus)
+void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *), bool true_add_false_minus)
 {
+#if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
 	static uint64_t heapLogIndex = 0;
 	if (ptr)
 	{
@@ -37,30 +38,36 @@ void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *mem), 
 		size_t allocated_size = malloc_usable_size_func(ptr);
 		if (true_add_false_minus)
 		{
-			PRINTF("(%ld)[HEAP SIZE] 0x%lx=0x%lx+0x%lx\n", heapLogIndex, global_heap_usage + allocated_size, global_heap_usage, allocated_size);
+			log_debug("(%ld)[HEAP SIZE] 0x%lx=0x%lx+0x%lx\n", heapLogIndex, global_heap_usage + allocated_size, global_heap_usage, allocated_size);
 			global_heap_usage += allocated_size;
 		}
 		else
 		{
-			PRINTF("(%ld)[HEAP SIZE] 0x%lx=0x%lx-0x%lx\n", heapLogIndex, global_heap_usage - allocated_size, global_heap_usage, allocated_size);
+			log_debug("(%ld)[HEAP SIZE] 0x%lx=0x%lx-0x%lx\n", heapLogIndex, global_heap_usage - allocated_size, global_heap_usage, allocated_size);
 			global_heap_usage -= allocated_size;
 		}
 		pthread_mutex_unlock(&mutex);
 	}
+#else
+	(void)ptr;
+	(void)malloc_usable_size_func;
+	(void)true_add_false_minus;
+	(void)mutex;
+#endif
 }
 
 void *MALLOC(size_t size)
 {
 	if (size == 0)
 	{
-		SGXSAN_WARNING(size == 0, "Malloc 0 size");
+		sgxsan_warning(size == 0, "Malloc 0 size\n");
 		return nullptr;
 	}
 
 	if (not asan_inited)
 	{
 		auto p = BACKEND_MALLOC(size);
-		UPDATE_HEAP_USAGE(p, BACKEND_MALLOC_USABLE_SZIE);
+		update_heap_usage(p, BACKEND_MALLOC_USABLE_SZIE);
 		return p;
 	}
 
@@ -71,7 +78,7 @@ void *MALLOC(size_t size)
 	uptr needed_size = rounded_size + 2 * rz_size;
 
 	void *allocated = BACKEND_MALLOC(needed_size);
-	UPDATE_HEAP_USAGE(allocated, BACKEND_MALLOC_USABLE_SZIE);
+	update_heap_usage(allocated, BACKEND_MALLOC_USABLE_SZIE);
 
 	size_t allocated_size = BACKEND_MALLOC_USABLE_SZIE(allocated);
 	needed_size = allocated_size;
@@ -100,9 +107,7 @@ void *MALLOC(size_t size)
 	// if alloc_beg is not aligned, we cannot automatically calculate it
 	m->alloc_beg = alloc_beg;
 	m->user_size = size;
-#ifdef DUMP_OPERATION
-	PRINTF("\n[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg, user_end, alloc_end);
-#endif
+	log_debug("\n[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg, user_end, alloc_end);
 	// start poisoning, if assume alloc_beg is 8-byte aligned, we can use FastPoisonShadow()
 	/* Fast */ PoisonShadow(alloc_beg, user_beg - alloc_beg, kAsanHeapLeftRedzoneMagic);
 	PoisonShadow(user_beg, size, 0x0); // user_beg is already aligned to alignment
@@ -116,7 +121,7 @@ void FREE(void *ptr)
 {
 	if (not asan_inited)
 	{
-		UPDATE_HEAP_USAGE(ptr, BACKEND_MALLOC_USABLE_SZIE, false);
+		update_heap_usage(ptr, BACKEND_MALLOC_USABLE_SZIE, false);
 		BACKEND_FREE(ptr);
 		return;
 	}
@@ -135,9 +140,7 @@ void FREE(void *ptr)
 	uptr chunk_beg = user_beg - sizeof(chunk);
 	chunk *m = reinterpret_cast<chunk *>(chunk_beg);
 	size_t user_size = m->user_size;
-#ifdef DUMP_OPERATION
-	PRINTF("\n[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg, user_beg + user_size, m->alloc_beg + ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment));
-#endif
+	log_debug("\n[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg, user_beg + user_size, m->alloc_beg + ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment));
 	FastPoisonShadow(user_beg, RoundUpTo(user_size, alignment), kAsanHeapFreeMagic);
 	size_t alloc_size = /* ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment) */ BACKEND_MALLOC_USABLE_SZIE((void *)m->alloc_beg);
 

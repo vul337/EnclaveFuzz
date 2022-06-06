@@ -82,14 +82,14 @@ namespace SGXSan
 
             // replace malloc with dlmalloc, as we modified malloc which may call here
             pointer ret = (pointer)(dlmalloc(num * sizeof(T)));
-            UPDATE_HEAP_USAGE(ret, dlmalloc_usable_size);
+            update_heap_usage(ret, dlmalloc_usable_size);
             int try_times = 3;
             while (ret == nullptr)
             {
                 if (try_times-- == 0)
                     abort();
                 ret = (pointer)dlmalloc(num * sizeof(T));
-                UPDATE_HEAP_USAGE(ret, dlmalloc_usable_size);
+                update_heap_usage(ret, dlmalloc_usable_size);
             }
 
             return ret;
@@ -115,7 +115,7 @@ namespace SGXSan
             (void)num;
             if (p)
             {
-                UPDATE_HEAP_USAGE((void *)p, dlmalloc_usable_size, false);
+                update_heap_usage((void *)p, dlmalloc_usable_size, false);
                 dlfree((void *)p);
             }
         }

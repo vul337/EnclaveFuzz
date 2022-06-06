@@ -141,7 +141,7 @@ namespace llvm
             push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
             sgxsan_region_is_poisoned, sgx_is_within_enclave,
             sgxsan_region_is_in_elrange_and_poisoned,
-            PoisonSensitiveGlobal, Abort, Printf, print_ptr, print_arg, sgxsan_shallow_poison_object,
+            PoisonSensitiveGlobal, Abort, SGXSanLog, print_ptr, print_arg, sgxsan_shallow_poison_object,
             sgxsan_check_shadow_bytes_match_obj, sgxsan_shallow_shadow_copy_on_mem_transfer, func_malloc_usable_size;
 
         Module *M = nullptr;

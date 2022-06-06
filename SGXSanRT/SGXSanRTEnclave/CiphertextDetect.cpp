@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <vector>
 #include <pthread.h>
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "CiphertextDetect.hpp"
 #include "StackTrace.hpp"
 #include "SGXSanCommonShadowMap.hpp"
@@ -80,14 +80,10 @@ text_encryption_t isCiphertext(uint64_t addr, uint64_t size)
     double CountPerBacket = (int)size / (double)bucket_num;
     if (size >= 0x100)
         CountPerBacket = (int)(size - map[0] /* maybe 0-padding in ciphertext */) / (double)(bucket_num - 1);
-    // PRINTF("[Cipher Detect] CountPerBacket = %f \n", CountPerBacket);
 
     bool is_cipher = true;
     int step = 0x100 / bucket_num;
-    // PRINTF("======== Byte Count Begin ========\n");
-    // std::string byteStr = "", cntStr = "";
-    // size_t buf_size = 1024;
-    // char buf[buf_size];
+    log_debug("[Cipher Detect] CountPerBacket = %f \n", CountPerBacket);
 
     for (int i = 0; i < 256; i += step)
     {
@@ -95,34 +91,15 @@ text_encryption_t isCiphertext(uint64_t addr, uint64_t size)
         if ((sum > CountPerBacket * 1.5 || sum < CountPerBacket / 2) and (size >= 0x100 ? i != 0 : true))
         {
             is_cipher = false;
-            // sprintf_s(buf, buf_size, "|*0x%02X(0x%02X)*", i, step);
+            break;
         }
-        // else
-        // {
-        //     sprintf_s(buf, buf_size, "| 0x%02X(0x%02X) ", i, step);
-        // }
-
-        // byteStr = byteStr + buf;
-        // sprintf_s(buf, buf_size, "| %10d ", sum);
-        // cntStr = cntStr + buf;
-        // if ((i / step + 1) % 8 == 0)
-        // {
-        //     PRINTF("%s \n%s \n", byteStr.c_str(), cntStr.c_str());
-        //     byteStr = "";
-        //     cntStr = "";
-        // }
     }
-    // if (byteStr != "")
-    // {
-    //     PRINTF("%s \n%s \n", byteStr.c_str(), cntStr.c_str());
-    // }
-    // PRINTF("========= Byte Count End =========\n");
 
     // draw_distribution((unsigned char *)addr, size, bucket_num, is_cipher);
 
     if (!is_cipher)
     {
-        PRINTF("[Cipher Detector] \'%s()\' plaintext transfering...\n", func_name.c_str());
+        log_warning("[Cipher Detector] \'%s()\' plaintext transfering...\n", func_name.c_str());
     }
     return is_cipher ? Ciphertext : Plaintext;
 }
@@ -152,8 +129,8 @@ void check_output_hybrid(uint64_t addr, uint64_t size)
         }
         history.emplace_back(status);
 
-        SGXSAN_WARNING(last_known_status != Unknown && status != Unknown && last_known_status != status,
-                       "Output is plaintext ciphertext hybridization");
+        sgxsan_warning(last_known_status != Unknown && status != Unknown && last_known_status != status,
+                       "Output is plaintext ciphertext hybridization\n");
     }
     pthread_rwlock_unlock(&rwlock_output_history);
 }

@@ -3,13 +3,13 @@
 #include "SGXSanCheck.h"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanAlignment.h"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "SGXSanCommonPoison.hpp"
 
 typedef __asan_global Global;
 
 #ifndef Report
-#define Report PRINTF
+#define Report log_warning
 #endif
 
 inline void PoisonRedZones(const Global &g)

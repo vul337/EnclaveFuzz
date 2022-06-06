@@ -8,7 +8,7 @@
 #include "PoisonCheck.hpp"
 #include "MemIntrinsics.hpp"
 #include "WhitelistCheck.hpp"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "CiphertextDetect.hpp"
 
 // In order to check safe memory operations:
@@ -23,10 +23,8 @@ void *__asan_memcpy(void *to, const void *from, uptr size)
         ENSURE_ASAN_INITED();
         if (to != from)
         {
-            if (RangesOverlap((const char *)to, size, (const char *)from, size))
-            {
-                PrintErrorAndAbort("[%s] %p:%lu overlap with %p:%lu\n", "memcpy", to, size, from, size);
-            }
+            sgxsan_error(RangesOverlap((const char *)to, size, (const char *)from, size),
+                         "[%s] %p:%lu overlap with %p:%lu\n", "memcpy", to, size, from, size);
         }
         bool isSrcInEnclave = false, isDstOutEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(from, size)
@@ -43,7 +41,7 @@ void *__asan_memcpy(void *to, const void *from, uptr size)
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            sgxsan_warning_detail(!sgxsan_region_is_poisoned((uint64_t)from, size, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
             check_output_hybrid((uint64_t)from, size);
         }
     }
@@ -84,7 +82,7 @@ void *__asan_memmove(void *to, const void *from, uptr size)
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            sgxsan_warning_detail(!sgxsan_region_is_poisoned((uint64_t)from, size, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
             check_output_hybrid((uint64_t)from, size);
         }
     }
@@ -98,10 +96,8 @@ errno_t sgxsan_memcpy_s(void *dst, size_t sizeInBytes, const void *src, size_t c
         ENSURE_ASAN_INITED();
         if (dst != src)
         {
-            if (RangesOverlap((const char *)dst, sizeInBytes, (const char *)src, count))
-            {
-                PrintErrorAndAbort("[%s] %p:%lu overlap with %p:%lu\n", "memcpy_s", dst, sizeInBytes, src, count);
-            }
+            sgxsan_error(RangesOverlap((const char *)dst, sizeInBytes, (const char *)src, count),
+                         "[%s] %p:%lu overlap with %p:%lu\n", "memcpy_s", dst, sizeInBytes, src, count);
         }
         bool isSrcInEnclave = false, isDstOutEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(src, count)
@@ -118,7 +114,7 @@ errno_t sgxsan_memcpy_s(void *dst, size_t sizeInBytes, const void *src, size_t c
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            sgxsan_warning_detail(!sgxsan_region_is_poisoned((uint64_t)src, count, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
             check_output_hybrid((uint64_t)src, count);
         }
     }
@@ -159,7 +155,7 @@ int sgxsan_memmove_s(void *dst, size_t sizeInBytes, const void *src, size_t coun
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            sgxsan_warning_detail(!sgxsan_region_is_poisoned((uint64_t)src, count, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
             check_output_hybrid((uint64_t)src, count);
         }
     }

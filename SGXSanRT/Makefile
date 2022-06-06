@@ -27,7 +27,7 @@ SGX_COMMON_CXXFLAGS := $(SGX_COMMON_FLAGS) -Wnon-virtual-dtor -std=c++11
 SGXSanRTApp_Cpp_Files := $(wildcard SGXSanRTApp/*.cpp)
 SGXSanRTApp_Include_Paths := -ISGXSanRTApp -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include
 
-SGXSanRTApp_C_Flags := -fPIC $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${EName}"
+SGXSanRTApp_C_Flags := -fPIC $(SGXSanRTApp_Include_Paths) -DENCLAVE_FILENAME="${EName}" -DOUT_ENCLAVE
 
 # Three configuration modes - Debug, prerelease, release
 #   Debug - Macro DEBUG enabled.
@@ -52,7 +52,7 @@ LibSGXSanRTApp := libSGXSanRTApp.a
 SGXSanRTEnclave_Cpp_Files := $(wildcard SGXSanRTEnclave/*.cpp)
 SGXSanRTEnclave_Include_Paths := -ISGXSanRTEnclave -ISGXSanRTCommon -I../SGXSanManifest -I$(SGX_SDK)/include  -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
 
-SGXSanRTEnclave_C_Flags := $(SGXSanRTEnclave_Include_Paths) -nostdinc -fvisibility=hidden -fpie -ffunction-sections -fdata-sections $(MITIGATION_CFLAGS)
+SGXSanRTEnclave_C_Flags := $(SGXSanRTEnclave_Include_Paths) -nostdinc -fvisibility=hidden -fpie -ffunction-sections -fdata-sections $(MITIGATION_CFLAGS) -DIN_ENCLAVE
 CC_BELOW_4_9 := $(shell expr "`$(CC) -dumpversion`" \< "4.9")
 ifeq ($(CC_BELOW_4_9), 1)
 	SGXSanRTEnclave_C_Flags += -fstack-protector

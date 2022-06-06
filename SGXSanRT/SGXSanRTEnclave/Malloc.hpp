@@ -2,6 +2,7 @@
 
 #include "SGXSanCheck.h"
 #include "SGXSanDefs.h"
+#include "SGXSanManifest.h"
 
 #if (USE_SGXSAN_MALLOC)
 #define MALLOC sgxsan_malloc
@@ -29,12 +30,6 @@ extern size_t (*real_malloc_usable_size)(void *);
 #define BACKEND_MALLOC_USABLE_SZIE dlmalloc_usable_size
 #endif
 
-// #define DUMP_OPERATION
-#ifdef DUMP_OPERATION
-#define UPDATE_HEAP_USAGE update_heap_usage
-#else
-#define UPDATE_HEAP_USAGE(...)
-#endif
 // rz_log represent 2^(rz_log+4)
 static inline uptr ComputeRZLog(uptr user_requested_size)
 {

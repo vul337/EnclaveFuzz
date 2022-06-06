@@ -105,22 +105,20 @@ static inline bool RangesOverlap(const char *offset1, uptr length1,
 // that no extra frames are created, and stack trace contains
 // relevant information only.
 // We check all shadow bytes.
-#define ACCESS_MEMORY_RANGE(offset, size, isWrite)                                                       \
-    do                                                                                                   \
-    {                                                                                                    \
-        uptr __offset = (uptr)(offset);                                                                  \
-        uptr __size = (uptr)(size);                                                                      \
-        uptr __bad = 0;                                                                                  \
-        if (__offset > __offset + __size)                                                                \
-        {                                                                                                \
-            PrintErrorAndAbort("[%s:%d] 0x%lx:%lu size overflow", __FILE__, __LINE__, __offset, __size); \
-        }                                                                                                \
-        if (!QuickCheckForUnpoisonedRegion(__offset, __size) &&                                          \
-            (__bad = sgxsan_region_is_poisoned(__offset, __size)))                                       \
-        {                                                                                                \
-            GET_CALLER_PC_BP_SP;                                                                         \
-            ReportGenericError(pc, bp, sp, __bad, isWrite, __size, true);                                \
-        }                                                                                                \
+#define ACCESS_MEMORY_RANGE(offset, size, isWrite)                                               \
+    do                                                                                           \
+    {                                                                                            \
+        uptr __offset = (uptr)(offset);                                                          \
+        uptr __size = (uptr)(size);                                                              \
+        uptr __bad = 0;                                                                          \
+        sgxsan_error(__offset > __offset + __size,                                               \
+                     "[%s:%d] 0x%lx:%lu size overflow\n", __FILE__, __LINE__, __offset, __size); \
+        if (!QuickCheckForUnpoisonedRegion(__offset, __size) &&                                  \
+            (__bad = sgxsan_region_is_poisoned(__offset, __size)))                               \
+        {                                                                                        \
+            GET_CALLER_PC_BP_SP;                                                                 \
+            ReportGenericError(pc, bp, sp, __bad, isWrite, __size, true);                        \
+        }                                                                                        \
     } while (0)
 
 #define ASAN_READ_RANGE(offset, size) \

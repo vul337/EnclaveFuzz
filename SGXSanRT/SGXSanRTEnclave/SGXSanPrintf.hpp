@@ -1,9 +1,4 @@
-#ifndef SGXSAN_PRINTF_HPP
-#define SGXSAN_PRINTF_HPP
-
-#ifndef PRINTF
-#define PRINTF sgxsan_printf
-#endif
+#pragma once
 
 #include <stdint.h>
 
@@ -17,6 +12,4 @@ extern "C"
     void print_arg(char *info, uint64_t func_addr, int64_t pos);
 #if defined(__cplusplus)
 }
-#endif
-
 #endif

@@ -1,6 +1,6 @@
 #include "SensitivePoisoner.hpp"
 #include "SGXSanAlignment.h"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoison.hpp"
 #include <string>
@@ -24,13 +24,13 @@ bool SensitivePoisoner::get_layout_info(const uint64_t start_rva, layout_entry_t
     (void)count;
     uint64_t rva = start_rva + layout->rva;
     assert(IsAligned(rva, 0x1000));
-    SGXSAN_LOG("%d\t%s\n", ++count, __FUNCTION__);
-    SGXSAN_LOG("\tEntry Id     = %4u, %-16s, ", layout->id, layout_id_str[layout->id & ~(GROUP_FLAG)]);
-    SGXSAN_LOG("Page Count = %5u, ", layout->page_count);
-    SGXSAN_LOG("Attributes = 0x%02X, ", layout->attributes);
-    SGXSAN_LOG("Flags = 0x%016lX, ", layout->si_flags);
-    SGXSAN_LOG("RVA = 0x%016lX -> ", layout->rva);
-    SGXSAN_LOG("RVA = 0x%016lX\n", rva);
+    log_debug("%d\t%s\n", ++count, __FUNCTION__);
+    log_debug("\tEntry Id     = %4u, %-16s, ", layout->id, layout_id_str[layout->id & ~(GROUP_FLAG)]);
+    log_debug("Page Count = %5u, ", layout->page_count);
+    log_debug("Attributes = 0x%02X, ", layout->attributes);
+    log_debug("Flags = 0x%016lX, ", layout->si_flags);
+    log_debug("RVA = 0x%016lX -> ", layout->rva);
+    log_debug("RVA = 0x%016lX\n", rva);
     // collect info for sgxsan
     if (layout->id == LAYOUT_ID_GUARD)
     {
@@ -83,7 +83,7 @@ bool SensitivePoisoner::get_layout_infos(layout_t *layout_start, layout_t *layou
 {
     for (layout_t *layout = layout_start; layout < layout_end; layout++)
     {
-        SGXSAN_LOG("%s, step = 0x%016lX\n", __FUNCTION__, delta);
+        log_debug("%s, step = 0x%016lX\n", __FUNCTION__, delta);
 
         if (!IS_GROUP_ID(layout->group.id))
         {
@@ -94,10 +94,10 @@ bool SensitivePoisoner::get_layout_infos(layout_t *layout_start, layout_t *layou
         }
         else
         {
-            SGXSAN_LOG("\tEntry Id(%2u) = %4u, %-16s, ", 0, layout->entry.id, layout_id_str[layout->entry.id & ~(GROUP_FLAG)]);
-            SGXSAN_LOG("Entry Count = %4u, ", layout->group.entry_count);
-            SGXSAN_LOG("Load Times = %u,    ", layout->group.load_times);
-            SGXSAN_LOG("LStep = 0x%016lX\n", layout->group.load_step);
+            log_debug("\tEntry Id(%2u) = %4u, %-16s, ", 0, layout->entry.id, layout_id_str[layout->entry.id & ~(GROUP_FLAG)]);
+            log_debug("Entry Count = %4u, ", layout->group.entry_count);
+            log_debug("Load Times = %u,    ", layout->group.load_times);
+            log_debug("LStep = 0x%016lX\n", layout->group.load_step);
 
             uint64_t step = 0;
             for (uint32_t j = 0; j < layout->group.load_times; j++)
@@ -125,12 +125,12 @@ void SensitivePoisoner::collect_layout_infos()
 
 void SensitivePoisoner::do_poison(std::string title, std::vector<std::pair<uint64_t, uint32_t>> &list, uint64_t base_addr, bool do_poison)
 {
-    PRINTF("[%s]\n", title);
+    log_debug("[%s]\n", title);
     for (auto ele : list)
     {
         // sensitive area should be well aligned
-        PRINTF("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n", ele.first + base_addr, ele.first + base_addr + (ele.second << 12) - 1,
-               MEM_TO_SHADOW(ele.first + base_addr), MEM_TO_SHADOW(ele.first + base_addr + (ele.second << 12) - 1));
+        log_debug("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n", ele.first + base_addr, ele.first + base_addr + (ele.second << 12) - 1,
+                  MEM_TO_SHADOW(ele.first + base_addr), MEM_TO_SHADOW(ele.first + base_addr + (ele.second << 12) - 1));
         if (do_poison)
             FastPoisonShadow(ele.first + base_addr, ele.second << 12, kSGXSanSensitiveLayout);
     }
@@ -138,7 +138,7 @@ void SensitivePoisoner::do_poison(std::string title, std::vector<std::pair<uint6
 
 void SensitivePoisoner::show_layout_ex(std::string title, std::vector<std::pair<uint64_t, uint32_t>> &list1, std::vector<std::pair<uint64_t, uint32_t>> &list2, uint64_t base_addr)
 {
-    PRINTF("[%s]\n", title);
+    log_debug("[%s]\n", title);
     for (size_t i = 0; i < list1.size(); i++)
     {
         std::pair<uint64_t, uint32_t> ele1 = list1[i];
@@ -146,21 +146,21 @@ void SensitivePoisoner::show_layout_ex(std::string title, std::vector<std::pair<
         {
             std::pair<uint64_t, uint32_t> ele2 = list2[i];
             assert(ele2.first < ele1.first);
-            PRINTF("\t\t[0x%lX...0x%lX, 0x%lX]=>[0x%lX...0x%lX, 0x%lX]\n",
-                   ele2.first + base_addr,
-                   ele1.first + base_addr,
-                   ele1.first + base_addr + (ele1.second << 12) - 1,
-                   MEM_TO_SHADOW(ele2.first + base_addr),
-                   MEM_TO_SHADOW(ele1.first + base_addr),
-                   MEM_TO_SHADOW(ele1.first + base_addr + (ele1.second << 12) - 1));
+            log_debug("\t\t[0x%lX...0x%lX, 0x%lX]=>[0x%lX...0x%lX, 0x%lX]\n",
+                      ele2.first + base_addr,
+                      ele1.first + base_addr,
+                      ele1.first + base_addr + (ele1.second << 12) - 1,
+                      MEM_TO_SHADOW(ele2.first + base_addr),
+                      MEM_TO_SHADOW(ele1.first + base_addr),
+                      MEM_TO_SHADOW(ele1.first + base_addr + (ele1.second << 12) - 1));
         }
         else
         {
-            PRINTF("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n",
-                   ele1.first + base_addr,
-                   ele1.first + base_addr + (ele1.second << 12) - 1,
-                   MEM_TO_SHADOW(ele1.first + base_addr),
-                   MEM_TO_SHADOW(ele1.first + base_addr + (ele1.second << 12) - 1));
+            log_debug("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n",
+                      ele1.first + base_addr,
+                      ele1.first + base_addr + (ele1.second << 12) - 1,
+                      MEM_TO_SHADOW(ele1.first + base_addr),
+                      MEM_TO_SHADOW(ele1.first + base_addr + (ele1.second << 12) - 1));
         }
     }
 }

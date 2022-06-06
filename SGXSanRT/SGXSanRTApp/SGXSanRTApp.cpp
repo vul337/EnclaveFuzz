@@ -15,15 +15,14 @@
 #include <iostream>
 #include <unistd.h>
 #include <regex>
+#include <unistd.h>
 
 #include "SGXSanManifest.h"
 #include "SGXSanRTUBridge.hpp"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanCommonPoison.hpp"
 #include "SGXSanDefs.h"
-
-#define PRINTF printf
-#define SGXSAN_PRINT_STACK_TRACE(...)
+#include "SGXSanLog.hpp"
 
 struct SGXSanMMapInfo
 {
@@ -34,7 +33,6 @@ struct SGXSanMMapInfo
 	bool is_executable = false;
 	bool is_shared = false;
 	bool is_private = false;
-	// char description[64] = {0};
 };
 
 // pass string to ENCLAVE_FILENAME (https://stackoverflow.com/questions/54602025/how-to-pass-a-string-from-a-make-file-into-a-c-program)
@@ -52,12 +50,45 @@ static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
 std::string sgxsan_exec(const char *cmd);
 
+static const char *log_level_to_prefix[] = {
+	[LOG_LEVEL_NONE] = "",
+	[LOG_LEVEL_ERROR] = "[SGXSan error] ",
+	[LOG_LEVEL_WARNING] = "[SGXSan warning] ",
+	[LOG_LEVEL_DEBUG] = "[SGXSan debug] ",
+	[LOG_LEVEL_TRACE] = "[SGXSan trace] ",
+};
+
+void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...)
+{
+	if (ll > USED_LOG_LEVEL)
+		return;
+
+	char buf[BUFSIZ] = {'\0'};
+	std::string prefix = "";
+	if (with_prefix)
+	{
+#if (SHOW_TID)
+		snprintf(buf, BUFSIZ, "[TID=0x%x] ", gettid());
+		prefix += buf;
+#endif
+		prefix += log_level_to_prefix[ll];
+	}
+
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(buf, BUFSIZ, fmt, ap);
+	va_end(ap);
+	std::string content = prefix + buf;
+
+	printf("%s", content.c_str());
+}
+
 void PrintAddressSpaceLayout()
 {
-	printf("|| `[%16p, %16p]` || Shadow    ||\n", (void *)kLowShadowBeg, (void *)kLowShadowEnd);
-	printf("|| `[%16p, %16p]` || LowGuard  ||\n", (void *)g_enclave_low_guard_start, (void *)(g_enclave_base - 1));
-	printf("|| `[%16p, %16p]` || Elrange   ||\n", (void *)g_enclave_base, (void *)(g_enclave_base + g_enclave_size - 1));
-	printf("|| `[%16p, %16p]` || HighGuard ||\n\n", (void *)(g_enclave_base + g_enclave_size), (void *)g_enclave_high_guard_end);
+	log_debug("|| `[%16p, %16p]` || Shadow    ||\n", (void *)kLowShadowBeg, (void *)kLowShadowEnd);
+	log_debug("|| `[%16p, %16p]` || LowGuard  ||\n", (void *)g_enclave_low_guard_start, (void *)(g_enclave_base - 1));
+	log_debug("|| `[%16p, %16p]` || Elrange   ||\n", (void *)g_enclave_base, (void *)(g_enclave_base + g_enclave_size - 1));
+	log_debug("|| `[%16p, %16p]` || HighGuard ||\n\n", (void *)(g_enclave_base + g_enclave_size), (void *)g_enclave_high_guard_end);
 }
 
 void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
@@ -68,16 +99,16 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 		uint64_t page_fault_addr = (uint64_t)siginfo->si_addr;
 		if ((void *)page_fault_addr == nullptr)
 		{
-			printf("[SGXSAN] Null-Pointer dereference\n");
+			log_error("Null-Pointer dereference\n");
 		}
 		else if ((g_enclave_low_guard_start <= page_fault_addr && page_fault_addr < g_enclave_base) ||
 				 ((g_enclave_base + g_enclave_size) <= page_fault_addr && page_fault_addr <= g_enclave_high_guard_end))
 		{
-			printf("[SGXSAN] Pointer dereference overflows enclave boundray (Overlapping memory access)\n");
+			log_error("Pointer dereference overflows enclave boundray (Overlapping memory access)\n");
 		}
 		else if ((g_enclave_base + g_enclave_size - 0x1000) <= page_fault_addr && page_fault_addr < (g_enclave_base + g_enclave_size))
 		{
-			printf("[SGXSAN] Infer pointer dereference overflows enclave boundray, as mprotect's effort is page-granularity and si_addr only give page-granularity address\n");
+			log_error("Infer pointer dereference overflows enclave boundray, as mprotect's effort is page-granularity and si_addr only give page-granularity address\n");
 		}
 	}
 
@@ -123,11 +154,11 @@ void reg_sgxsan_sigaction()
 	sig_act.sa_sigaction = sgxsan_sigaction;
 	sig_act.sa_flags = SA_SIGINFO | SA_NODEFER | SA_RESTART;
 	sigemptyset(&sig_act.sa_mask);
-	SGXSAN_ASSERT(0 == sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask), "Fail to get signal mask");
+	sgxsan_error(0 != sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask), "Fail to get signal mask\n");
 	// make sure SIGSEGV is not blocked
 	sigdelset(&sig_act.sa_mask, SIGSEGV);
 	// take place before signal handler of sgx aex
-	SGXSAN_ASSERT(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]), "Fail to regist SIGSEGV action");
+	sgxsan_error(0 != sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]), "Fail to regist SIGSEGV action\n");
 }
 
 // create shadow memory outside enclave for elrange
@@ -146,16 +177,21 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 	uptr shadow_start = kLowShadowBeg;
 
 	uptr page_size = getpagesize();
-	SGXSAN_ASSERT(page_size == 0x1000, "Currently only support 4k page size");
+	sgxsan_error(page_size != 0x1000, "Currently only support 4k page size\n");
 	shadow_start -= page_size;
 
 	// fix-me: may need unmap at destructor
 	// mmap the shadow plus at least one page at the left.
-	SGXSAN_ASSERT((MAP_FAILED != mmap((void *)shadow_start, kLowShadowEnd - shadow_start + 1, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1, 0)) &&
-					  (-1 != madvise((void *)shadow_start, kLowShadowEnd - shadow_start + 1, MADV_NOHUGEPAGE)),
-				  "Shadow Memory unavailable");
+	sgxsan_error((MAP_FAILED == mmap((void *)shadow_start, kLowShadowEnd - shadow_start + 1,
+									 PROT_READ | PROT_WRITE,
+									 MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON,
+									 -1, 0)) ||
+					 (-1 == madvise((void *)shadow_start, kLowShadowEnd - shadow_start + 1, MADV_NOHUGEPAGE)),
+				 "Shadow Memory unavailable\n");
 
-	SGXSAN_ASSERT(((kLowMemBeg & 0xfff) == 0) && (((kLowMemEnd + 1) & 0xfff) == 0), "Elrange is not aligned to page");
+	sgxsan_error(((kLowMemBeg & 0xfff) != 0) ||
+					 (((kLowMemEnd + 1) & 0xfff) != 0),
+				 "Elrange is not aligned to page\n");
 
 	// consistent with modification in psw/enclave_common/sgx_enclave_common.cpp:enclave_create_ex
 	g_enclave_low_guard_start = kLowMemBeg - page_size;
@@ -170,7 +206,11 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 		auto mmap_min_addr_str = match[1].str();
 		auto mmap_min_addr = std::stoll(mmap_min_addr_str, nullptr, 0);
 		if (mmap_min_addr == 0)
-			SGXSAN_ASSERT(MAP_FAILED != mmap((void *)0, 0x10000, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0), "Failed to make 0 address not accessible");
+			sgxsan_error(MAP_FAILED == mmap((void *)0, 0x10000,
+											PROT_NONE,
+											MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
+											-1, 0),
+						 "Failed to make 0 address not accessible\n");
 	}
 
 	PrintAddressSpaceLayout();

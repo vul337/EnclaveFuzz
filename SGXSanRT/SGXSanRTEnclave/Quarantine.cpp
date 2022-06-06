@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include "Quarantine.hpp"
 #include "SGXSanDefs.h"
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "SGXSanManifest.h"
 #include "SGXInternal.hpp"
 
@@ -25,7 +25,7 @@ void QuarantineCache::init()
 {
     assert(m_queue == nullptr);
     auto p = BACKEND_MALLOC(sizeof(QuarantineQueueTy));
-    UPDATE_HEAP_USAGE(p, BACKEND_MALLOC_USABLE_SZIE);
+    update_heap_usage(p, BACKEND_MALLOC_USABLE_SZIE);
     m_queue = new (p) QuarantineQueueTy();
     assert(m_queue != nullptr);
 
@@ -41,7 +41,7 @@ void QuarantineCache::destory()
         freeOldestQuarantineElement();
     // free struct that record Quarantine
     m_queue->~deque();
-    UPDATE_HEAP_USAGE(m_queue, BACKEND_MALLOC_USABLE_SZIE, false);
+    update_heap_usage(m_queue, BACKEND_MALLOC_USABLE_SZIE, false);
     BACKEND_FREE(m_queue);
     m_queue = nullptr;
 
@@ -76,9 +76,7 @@ void QuarantineCache::put(QuarantineElement qe)
         if (m_queue->empty())
             assert(m_quarantine_cache_used_size == 0);
     }
-#ifdef DUMP_OPERATION
-    PRINTF("[Recycle->Quaratine] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
-#endif
+    log_debug("[Recycle->Quaratine] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
     m_queue->push_back(qe);
     m_quarantine_cache_used_size += qe.alloc_size;
 out:
@@ -87,11 +85,9 @@ out:
 
 void QuarantineCache::freeQuarantineElement(QuarantineElement qe)
 {
-    UPDATE_HEAP_USAGE((void *)qe.alloc_beg, BACKEND_MALLOC_USABLE_SZIE, false);
+    update_heap_usage((void *)qe.alloc_beg, BACKEND_MALLOC_USABLE_SZIE, false);
     BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
-#ifdef DUMP_OPERATION
-    PRINTF("[Quarantine->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
-#endif
+    log_debug("[Quarantine->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
     FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, SHADOW_GRANULARITY), kAsanHeapLeftRedzoneMagic);
     // update quarantine cache
     assert(m_quarantine_cache_used_size >= qe.alloc_size);
@@ -100,11 +96,9 @@ void QuarantineCache::freeQuarantineElement(QuarantineElement qe)
 
 void QuarantineCache::freeDirectly(QuarantineElement qe)
 {
-    UPDATE_HEAP_USAGE((void *)qe.alloc_beg, BACKEND_MALLOC_USABLE_SZIE, false);
+    update_heap_usage((void *)qe.alloc_beg, BACKEND_MALLOC_USABLE_SZIE, false);
     BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
-#ifdef DUMP_OPERATION
-    PRINTF("[Recycle->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
-#endif
+    log_debug("[Recycle->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size, qe.alloc_beg + qe.alloc_size);
     FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, SHADOW_GRANULARITY), kAsanHeapLeftRedzoneMagic);
 }
 

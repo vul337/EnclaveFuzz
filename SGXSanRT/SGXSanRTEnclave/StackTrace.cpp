@@ -1,4 +1,4 @@
-#include "SGXSanPrintf.hpp"
+#include "SGXSanLog.hpp"
 #include "PoisonCheck.hpp"
 #include "StackTrace.hpp"
 #include "SGXSanRTTBridge.hpp"
@@ -27,13 +27,14 @@ void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs, uint64_t enclave_b
     }
 }
 
-void sgxsan_print_stack_trace(unsigned int level, uint64_t bp, uint64_t ip)
+void sgxsan_print_stack_trace(log_level ll, unsigned int level, uint64_t bp, uint64_t ip)
 {
+#if (DUMP_STACK_TRACE)
     std::vector<uint64_t> ret_addrs;
     if (ip != 0)
         ret_addrs.push_back(ip - g_enclave_base);
     get_ret_addrs_in_stack(ret_addrs, g_enclave_base, level, 50, bp);
-    PRINTF("============= Stack Trace Begin ==============\n");
+    sgxsan_log(ll, false, "============= Stack Trace Begin ==============\n");
     size_t ret_addr_arr_size = ret_addrs.size();
     uint64_t addr_arr[ret_addr_arr_size];
     for (size_t i = 0; i < ret_addr_arr_size; i++)
@@ -45,7 +46,8 @@ void sgxsan_print_stack_trace(unsigned int level, uint64_t bp, uint64_t ip)
     // {
     //     sgxsan_ocall_addr2line(ret_addrs[i] - 1, (int)i);
     // }
-    PRINTF("============== Stack Trace End ===============\n");
+    sgxsan_log(ll, false, "============== Stack Trace End ===============\n");
+#endif
 }
 
 // ignore return address of current call
