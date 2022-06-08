@@ -38,12 +38,12 @@ void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *), boo
 		size_t allocated_size = malloc_usable_size_func(ptr);
 		if (true_add_false_minus)
 		{
-			log_debug("(%ld)[HEAP SIZE] 0x%lx=0x%lx+0x%lx\n", heapLogIndex, global_heap_usage + allocated_size, global_heap_usage, allocated_size);
+			log_trace("(%ld)[HEAP SIZE] 0x%lx=0x%lx+0x%lx\n", heapLogIndex, global_heap_usage + allocated_size, global_heap_usage, allocated_size);
 			global_heap_usage += allocated_size;
 		}
 		else
 		{
-			log_debug("(%ld)[HEAP SIZE] 0x%lx=0x%lx-0x%lx\n", heapLogIndex, global_heap_usage - allocated_size, global_heap_usage, allocated_size);
+			log_trace("(%ld)[HEAP SIZE] 0x%lx=0x%lx-0x%lx\n", heapLogIndex, global_heap_usage - allocated_size, global_heap_usage, allocated_size);
 			global_heap_usage -= allocated_size;
 		}
 		pthread_mutex_unlock(&mutex);
@@ -107,7 +107,8 @@ void *MALLOC(size_t size)
 	// if alloc_beg is not aligned, we cannot automatically calculate it
 	m->alloc_beg = alloc_beg;
 	m->user_size = size;
-	log_debug("\n[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg, user_end, alloc_end);
+	log_trace("\n");
+	log_trace("[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg, user_end, alloc_end);
 	// start poisoning, if assume alloc_beg is 8-byte aligned, we can use FastPoisonShadow()
 	/* Fast */ PoisonShadow(alloc_beg, user_beg - alloc_beg, kAsanHeapLeftRedzoneMagic);
 	PoisonShadow(user_beg, size, 0x0); // user_beg is already aligned to alignment
@@ -140,7 +141,8 @@ void FREE(void *ptr)
 	uptr chunk_beg = user_beg - sizeof(chunk);
 	chunk *m = reinterpret_cast<chunk *>(chunk_beg);
 	size_t user_size = m->user_size;
-	log_debug("\n[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg, user_beg + user_size, m->alloc_beg + ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment));
+	log_trace("\n");
+	log_trace("[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg, user_beg + user_size, m->alloc_beg + ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment));
 	FastPoisonShadow(user_beg, RoundUpTo(user_size, alignment), kAsanHeapFreeMagic);
 	size_t alloc_size = /* ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment) */ BACKEND_MALLOC_USABLE_SZIE((void *)m->alloc_beg);
 

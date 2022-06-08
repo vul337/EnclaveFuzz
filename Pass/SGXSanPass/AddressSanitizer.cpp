@@ -839,8 +839,6 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
         const DataLayout &DL = RetInst->getModule()->getDataLayout();
         for (Argument &arg : OcallWrapper.args())
         {
-            IRB.SetInsertPoint(RetInst);
-            IRB.CreateCall(get_mmap_infos);
             // treat ocall-wrapper argument as _in_ prefixed parameter in real-ecall
             IRB.SetInsertPoint(RetInst);
             Type *argType = arg.getType();

@@ -18,29 +18,32 @@ static const char *log_level_to_prefix[] = {
     [LOG_LEVEL_TRACE] = "[SGXSan trace] ",
 };
 
+// can't call malloc, since malloc may call this function
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...)
 {
     if (ll > USED_LOG_LEVEL)
         return;
 
     char buf[BUFSIZ] = {'\0'};
-    std::string prefix = "";
+    size_t offset = 0;
     if (with_prefix)
     {
 #if (SHOW_TID)
         snprintf(buf, BUFSIZ, "[TCSAsID=0x%p] ", get_tcs());
-        prefix += buf;
 #endif
-        prefix += log_level_to_prefix[ll];
+        const char *prefix = log_level_to_prefix[ll];
+        offset = strlen(buf);
+        assert(strlen(prefix) < BUFSIZ - offset);
+        strcat_s(buf + offset, BUFSIZ - offset, prefix);
     }
 
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(buf, BUFSIZ, fmt, ap);
+    offset = strlen(buf);
+    vsnprintf(buf + offset, BUFSIZ - offset, fmt, ap);
     va_end(ap);
-    std::string content = (prefix + buf) + "\n";
 
-    sgxsan_ocall_print_string(content.c_str());
+    sgxsan_ocall_print_string(buf);
 }
 
 /*
@@ -61,17 +64,17 @@ int sgxsan_printf(const char *fmt, ...)
 void print_shadow(void *ptr)
 {
     uint64_t shadow_addr = MEM_TO_SHADOW((uint64_t)ptr);
-    log_debug("[0x%lx =Shadow=> 0x%lx =Value=> 0x%x]\n", ptr, shadow_addr, *(uint8_t *)shadow_addr);
+    log_trace("[0x%lx =Shadow=> 0x%lx =Value=> 0x%x]\n", ptr, shadow_addr, *(uint8_t *)shadow_addr);
 }
 
 void print_ptr(char *info, uint64_t addr, uint64_t size)
 {
     assert(addr && size);
     uint64_t shadow_addr = MEM_TO_SHADOW(addr);
-    log_debug("%s\n[Addr: 0x%lx(0x%lx) =Shadow=> 0x%lx]\n", info, addr, size, shadow_addr);
+    log_trace("%s\n[Addr: 0x%lx(0x%lx) =Shadow=> 0x%lx]\n", info, addr, size, shadow_addr);
 }
 
 void print_arg(char *info, uint64_t func_addr, int64_t pos)
 {
-    log_debug("%s\n[Arg: 0x%lx(%ld)]\n", info, func_addr, pos);
+    log_trace("%s\n[Arg: 0x%lx(%ld)]\n", info, func_addr, pos);
 }

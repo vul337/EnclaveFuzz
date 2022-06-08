@@ -11,7 +11,7 @@ enclave {
         void sgxsan_ocall_addr2line_ex([in, count=arr_cnt] uint64_t *addr_arr, size_t arr_cnt, int level);
         void sgxsan_ocall_addr2func_name(uint64_t addr, [out, count=buf_size] char *func_name, size_t buf_size);
         void sgxsan_ocall_depcit_distribute(uint64_t addr, [in, count=byte_arr_size] unsigned char *byte_arr, size_t byte_arr_size, int bucket_num, bool is_cipher);
-        void sgxsan_ocall_get_mmap_infos([out, size=max_size] void *mmap_infos, size_t max_size, [out] size_t *real_cnt);
+        void sgxsan_ocall_get_mmap_infos([out] void **mmap_infos, [out] size_t *real_cnt);
     };
 
 };

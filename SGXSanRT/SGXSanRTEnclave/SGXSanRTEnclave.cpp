@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <sgx_trts_exception.h>
 #include "SGXSanManifest.h"
 #include "SGXSanDefs.h"
@@ -23,9 +24,8 @@ struct SGXSanMMapInfo
     bool is_private = false;
 };
 
-const __thread size_t SGXSanMMapInfoMaxCount = 1024;
 __thread size_t SGXSanMMapInfoRealCount = 0;
-__thread SGXSanMMapInfo SGXSanMMapInfos[SGXSanMMapInfoMaxCount];
+__thread SGXSanMMapInfo *SGXSanMMapInfos = nullptr;
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -88,9 +88,7 @@ void __asan_init()
 
 extern "C" void get_mmap_infos()
 {
-    if (SGX_SUCCESS != sgxsan_ocall_get_mmap_infos(SGXSanMMapInfos, SGXSanMMapInfoMaxCount * sizeof(SGXSanMMapInfo), &SGXSanMMapInfoRealCount))
-        abort();
-    assert(SGXSanMMapInfoRealCount <= SGXSanMMapInfoMaxCount);
+    sgxsan_error(SGX_SUCCESS != sgxsan_ocall_get_mmap_infos((void **)&SGXSanMMapInfos, &SGXSanMMapInfoRealCount), "Fail to get mmap info\n");
 }
 
 // assume SGXSanMMapInfos is sorted, and info range is [info.start, info.end]

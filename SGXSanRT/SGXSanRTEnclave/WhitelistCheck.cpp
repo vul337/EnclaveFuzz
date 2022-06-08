@@ -83,7 +83,7 @@ void WhitelistOfAddrOutEnclave::destroy()
     delete m_control_fetchs;
     m_control_fetchs = nullptr;
     m_whitelist_active = false;
-    log_debug("[Access Count (Out/In)] %lld/%lld\n", m_out_of_enclave_access_cnt, m_in_enclave_access_cnt);
+    log_trace("[Access Count (Out/In)] %lld/%lld\n", m_out_of_enclave_access_cnt, m_in_enclave_access_cnt);
     m_out_of_enclave_access_cnt = 0;
     m_in_enclave_access_cnt = 0;
 }
@@ -92,12 +92,12 @@ void WhitelistOfAddrOutEnclave::iter(bool is_global)
 {
 #if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
     std::map<const void *, size_t> *whitelist = is_global ? &m_global_whitelist : m_whitelist;
-    log_debug("[Whitelist] [%s(0x%p)] ", is_global ? "Global" : "Thread", whitelist);
+    log_trace("[Whitelist] [%s(0x%p)] ", is_global ? "Global" : "Thread", whitelist);
     for (auto &item : *whitelist)
     {
-        log_debug("0x%p(0x%llx) ", item.first, item.second);
+        log_trace("0x%p(0x%llx) ", item.first, item.second);
     }
-    log_debug(" %s", "\n");
+    log_trace(" %s", "\n");
 #else
     (void)is_global;
 #endif
@@ -138,7 +138,7 @@ bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
         return true;
     assert(ptr && size > 0 && !m_whitelist_active && sgx_is_outside_enclave(ptr, size));
     iter();
-    log_debug("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "+", ptr, size);
+    log_trace("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "+", ptr, size);
     const void *target_addr = ptr;
     size_t target_len = size;
     bool hasMet = false;
@@ -148,7 +148,7 @@ bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
         if (tmp.second != 0)
         {
             hasMet = true;
-            log_debug("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "-", it->first, it->second);
+            log_trace("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "-", it->first, it->second);
             it = m_whitelist->erase(it);
             target_addr = tmp.first;
             target_len = tmp.second;
@@ -169,7 +169,7 @@ bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
     assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
     pthread_rwlock_wrlock(&m_rwlock_global_whitelist);
     iter(true);
-    log_debug("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "+", ptr, size);
+    log_trace("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "+", ptr, size);
     const void *target_addr = ptr;
     size_t target_len = size;
     bool hasMet = false;
@@ -179,7 +179,7 @@ bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
         if (tmp.second != 0)
         {
             hasMet = true;
-            log_debug("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "-", it->first, it->second);
+            log_trace("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "-", it->first, it->second);
             it = m_global_whitelist.erase(it);
             target_addr = tmp.first;
             target_len = tmp.second;
@@ -258,7 +258,7 @@ std::tuple<const void *, size_t, bool> WhitelistOfAddrOutEnclave::query(const vo
 #if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
     m_out_of_enclave_access_cnt++;
 #endif
-    log_debug("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "?", ptr, size);
+    log_trace("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "?", ptr, size);
 
     iter();
 
@@ -300,7 +300,7 @@ exit:
 std::pair<const void *, size_t> WhitelistOfAddrOutEnclave::query_global(const void *ptr, size_t size)
 {
     pthread_rwlock_rdlock(&m_rwlock_global_whitelist);
-    log_debug("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "?", ptr, size);
+    log_trace("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "?", ptr, size);
     iter(true);
     std::map<const void *, size_t>::iterator it;
     std::pair<const void *, size_t> ret, false_ret = std::pair<const void *, size_t>(nullptr, 0);
@@ -345,7 +345,7 @@ bool WhitelistOfAddrOutEnclave::global_propagate(const void *ptr)
     if (is_at_global == false && find_size != 0 /* return case 2 */)
     {
         assert(sgx_is_outside_enclave(find_start, find_size));
-        log_debug("[Whitelist] [Thread(0x%p)] => 0x%p => [Global]\n", m_whitelist, ptr);
+        log_trace("[Whitelist] [Thread(0x%p)] => 0x%p => [Global]\n", m_whitelist, ptr);
         assert(add_global(find_start, find_size));
     }
     return true;

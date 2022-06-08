@@ -48,6 +48,8 @@ uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
 		 kHighMemBeg = 0, kHighMemEnd = 0;
 static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
+thread_local std::vector<SGXSanMMapInfo> tls_mmap_infos;
+
 std::string sgxsan_exec(const char *cmd);
 
 static const char *log_level_to_prefix[] = {
@@ -204,7 +206,7 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 	if (std::regex_search(result, match, mmap_min_addr_patten))
 	{
 		auto mmap_min_addr_str = match[1].str();
-		auto mmap_min_addr = std::stoll(mmap_min_addr_str, nullptr, 0);
+		auto mmap_min_addr = std::stoull(mmap_min_addr_str, nullptr, 0);
 		if (mmap_min_addr == 0)
 			sgxsan_error(MAP_FAILED == mmap((void *)0, 0x10000,
 											PROT_NONE,
@@ -317,49 +319,39 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size
 	return;
 }
 
-void sgxsan_ocall_get_mmap_infos(void *mmap_infos, size_t max_size, size_t *real_cnt)
+void sgxsan_ocall_get_mmap_infos(void **mmap_infos, size_t *real_cnt)
 {
-	SGXSanMMapInfo *infos = (SGXSanMMapInfo *)mmap_infos;
-	size_t max_cnt = max_size / sizeof(SGXSanMMapInfo);
-	assert(max_size % sizeof(SGXSanMMapInfo) == 0);
-
+	tls_mmap_infos.clear();
 	std::fstream f("/proc/self/maps", std::ios::in);
 	std::string line;
-	size_t cnt = 0;
-	while (std::getline(f, line) && cnt < max_cnt)
+	while (std::getline(f, line))
 	{
 		std::regex map_pattern("([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
 		std::smatch match;
 		if (std::regex_search(line, match, map_pattern))
 		{
-			try
-			{
-				SGXSanMMapInfo &info = infos[cnt];
-				info.start = std::stoll(match[1].str(), nullptr, 16);
-				info.end = std::stoll(match[2].str(), nullptr, 16) - 1;
-				info.is_readable = match[3] == "r";
-				info.is_writable = match[4] == "w";
-				info.is_executable = match[5] == "x";
-				info.is_shared = match[6] == "s";
-				info.is_private = match[6] == "p";
-				// std::string remained = match[7];
-				// std::regex remained_pattern("([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*):([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*)[ ]+([\\S]*)");
-				// std::smatch remained_match;
-				// if (std::regex_search(remained, remained_match, remained_pattern))
-				// {
-				// 	auto description = remained_match[5].str();
-				// 	auto cpLen = std::min(description.length(), (size_t)63);
-				// 	memcpy(info.description, description.c_str(), cpLen);
-				// 	info.description[cpLen] = 0;
-				// }
-				cnt++;
-			}
-			catch (const std::exception &e)
-			{
-				// std::cerr << "MMap line can't recognize:\n\t" << line << "\n";
-			}
+			SGXSanMMapInfo info;
+			info.start = std::stoull(match[1].str(), nullptr, 16);
+			info.end = std::stoull(match[2].str(), nullptr, 16) - 1;
+			info.is_readable = match[3] == "r";
+			info.is_writable = match[4] == "w";
+			info.is_executable = match[5] == "x";
+			info.is_shared = match[6] == "s";
+			info.is_private = match[6] == "p";
+			// std::string remained = match[7];
+			// std::regex remained_pattern("([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*):([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*)[ ]+([\\S]*)");
+			// std::smatch remained_match;
+			// if (std::regex_search(remained, remained_match, remained_pattern))
+			// {
+			// 	auto description = remained_match[5].str();
+			// 	auto cpLen = std::min(description.length(), (size_t)63);
+			// 	memcpy(info.description, description.c_str(), cpLen);
+			// 	info.description[cpLen] = 0;
+			// }
+			tls_mmap_infos.push_back(info);
 		}
 	}
 
-	*real_cnt = cnt;
+	*real_cnt = tls_mmap_infos.size();
+	*mmap_infos = &tls_mmap_infos[0];
 }

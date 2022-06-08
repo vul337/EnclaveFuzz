@@ -45,7 +45,8 @@ SGXSanRTApp_Cpp_Flags := $(SGXSanRTApp_C_Flags)
 
 SGXSanRTApp_Cpp_Objects := $(SGXSanRTApp_Cpp_Files:.cpp=.o)
 
-LibSGXSanRTApp := libSGXSanRTApp.a
+LibSGXSanRTApp_a := libSGXSanRTApp.a
+LibSGXSanRTApp_so := libSGXSanRTApp.so
 
 ######## SGXSanRT Enclave Settings ########
 
@@ -66,8 +67,8 @@ SGXSanRTEnclave_Cpp_Objects := $(sort $(SGXSanRTEnclave_Cpp_Files:.cpp=.o))
 
 LibSGXSanRTEnclave := libSGXSanRTEnclave.a
 
-.PHONY: all
-all: $(LibSGXSanRTApp) $(LibSGXSanRTEnclave)
+.PHONY: all LibSGXSanRTApp
+all: LibSGXSanRTApp $(LibSGXSanRTEnclave)
 	@rm -f ../output/SGXSanRTEnclave.edl
 	@ln -s ../SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl ../output/SGXSanRTEnclave.edl
 
@@ -87,10 +88,17 @@ SGXSanRTApp/%.o: SGXSanRTApp/%.cpp ../SGXSanManifest/SGXSanManifest.h
 	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(SGXSanRTApp_Cpp_Flags) -c $< -o $@
 	@echo "CXX  <=  $<"
 
-$(LibSGXSanRTApp): $(SGXSanRTApp_Cpp_Objects)
+LibSGXSanRTApp: $(LibSGXSanRTApp_a) $(LibSGXSanRTApp_so)
+
+$(LibSGXSanRTApp_a): $(SGXSanRTApp_Cpp_Objects)
 	@$(AR) rcs $@ $^
-	@ln -fs ../SGXSanRT/$(LibSGXSanRTApp) ../output/$(LibSGXSanRTApp)
+	@ln -fs ../SGXSanRT/$(LibSGXSanRTApp_a) ../output/$(LibSGXSanRTApp_a)
 	@echo "AR   =>  $@"
+
+$(LibSGXSanRTApp_so): $(SGXSanRTApp_Cpp_Objects)
+	@$(CXX) -shared $^ -o $@
+	@ln -fs ../SGXSanRT/$(LibSGXSanRTApp_so) ../output/$(LibSGXSanRTApp_so)
+	@echo "CXX  =>  $@"
 
 ######## SGXSanRT Enclave Objects ########
 
@@ -115,5 +123,5 @@ $(LibSGXSanRTEnclave): $(SGXSanRTEnclave_Cpp_Objects)
 
 .PHONY: clean
 clean:
-	@rm -f $(LibSGXSanRTApp) $(SGXSanRTApp_Cpp_Objects) $(LibSGXSanRTEnclave) $(SGXSanRTEnclave_Cpp_Objects)
-	@rm -f ../output/$(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTApp) ../output/SGXSanRTEnclave.edl
+	@rm -f $(LibSGXSanRTApp_a) $(LibSGXSanRTApp_so) $(SGXSanRTApp_Cpp_Objects) $(LibSGXSanRTEnclave) $(SGXSanRTEnclave_Cpp_Objects)
+	@rm -f ../output/$(LibSGXSanRTEnclave) ../output/$(LibSGXSanRTApp_a) ../output/$(LibSGXSanRTApp_so) ../output/SGXSanRTEnclave.edl

@@ -6,7 +6,7 @@
 // 2 -> LOG_LEVEL_WARNING, (Default)
 // 3 -> LOG_LEVEL_DEBUG,
 // 4 -> LOG_LEVEL_TRACE,
-#define USED_LOG_LEVEL 2
+#define USED_LOG_LEVEL 3
 
 #define SHOW_TID 0
 
