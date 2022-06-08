@@ -32,7 +32,7 @@ void adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F)
     }
 
     // instrument
-    IRB.SetInsertPoint(&F.getEntryBlock().getInstList().front());
+    IRB.SetInsertPoint(&F.front().front());
     Value *usp = IRB.CreateAlloca(IRB.getInt64Ty());
     for (auto CI : OcallocVec)
     {

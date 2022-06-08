@@ -1,5 +1,5 @@
 #include "PassCommon.hpp"
-
+#include "llvm/Support/Debug.h"
 namespace llvm
 {
 
@@ -271,7 +271,7 @@ namespace llvm
 
     void dump(Value *val)
     {
-        errs() << toString(val) << "\n\n";
+        dbgs() << toString(val) << "\n\n";
     }
 
     uint64_t getAllocaSizeInBytes(const AllocaInst &AI)

@@ -20,7 +20,7 @@ namespace
 
         bool runOnModule(Module &M) override
         {
-            errs() << "[SGXSanPass] " << M.getName().str() << "\n";
+            dbgs() << "[SGXSanPass] " << M.getName().str() << "\n";
             // std::error_code EC;
             // raw_fd_stream f(M.getName().str() + ".dump", EC);
             // M.print(f, nullptr);
@@ -31,18 +31,17 @@ namespace
             AddressSanitizer ASan(M);
             for (Function &F : M)
             {
-                // errs() << "[SGXSanPass] [Function] " << F.getName().str() << "\n";
                 if (F.isDeclaration())
                     continue;
 
-                std::set<std::string> OCallsOnlyAdjustUSP{"sgxsan_ocall_print_string", "sgxsan_ocall_addr2line", "sgxsan_ocall_addr2line_ex", "sgxsan_ocall_addr2func_name", "sgxsan_ocall_depcit_distribute", "sgxsan_ocall_get_mmap_infos"};
-                StringRef func_name = F.getName();
-                if (std::find(OCallsOnlyAdjustUSP.begin(), OCallsOnlyAdjustUSP.end(), func_name.str()) != OCallsOnlyAdjustUSP.end())
+                if (F.getName().startswith("sgxsan_ocall_") ||
+                    F.getName().startswith("fuzzer_ocall_"))
                 {
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
+                    // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
+                    // don't call instrumentFunction()
                 }
-                // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
-                else if (func_name != "sgxsan_ocall_init_shadow_memory")
+                else
                 {
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.

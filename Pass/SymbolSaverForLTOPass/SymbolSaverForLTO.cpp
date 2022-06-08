@@ -32,7 +32,6 @@ bool SymbolSaverForLTO::runOnModule(Module &M)
     {
         if (!F.isDeclaration())
         {
-            // errs() << "[SymbolSaverForLTOPass] " << F.getName().str() << "\n";
             saveArgName2Metadata(F);
             saveInstName2Metadata(F);
         }

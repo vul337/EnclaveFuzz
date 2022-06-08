@@ -15,7 +15,6 @@ namespace
 
         bool runOnModule(Module &M) override
         {
-            // errs() << "[SymbolSaverForLTOPass] " << M.getName().str() << "\n";
             SymbolSaverForLTO saver(M);
             return saver.runOnModule(M);
         }

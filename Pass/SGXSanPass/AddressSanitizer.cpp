@@ -836,9 +836,11 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
 
     for (auto RetInst : SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec)
     {
-        const DataLayout &DL = (dyn_cast<Instruction>(RetInst))->getModule()->getDataLayout();
+        const DataLayout &DL = RetInst->getModule()->getDataLayout();
         for (Argument &arg : OcallWrapper.args())
         {
+            IRB.SetInsertPoint(RetInst);
+            IRB.CreateCall(get_mmap_infos);
             // treat ocall-wrapper argument as _in_ prefixed parameter in real-ecall
             IRB.SetInsertPoint(RetInst);
             Type *argType = arg.getType();
@@ -873,7 +875,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper)
 
 bool AddressSanitizer::instrumentFunction(Function &F)
 {
-    // errs() << "[SGXSan] Processing " << F.getName() << " ...\n";
+    // dbgs() << "[SGXSan] Processing " << F.getName() << " ...\n";
     isFuncAtEnclaveTBridge = false;
     if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
         return false;

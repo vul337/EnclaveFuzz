@@ -905,7 +905,7 @@ void SensitiveLeakSan::collectHeapAllocators()
     for (auto heapAllocator : heapAllocators)
     {
         auto funcName = heapAllocator->getName().str();
-        errs() << "[HeapAllocator] " << funcName << "\n";
+        dbgs() << "[HeapAllocator] " << funcName << "\n";
         heapAllocatorNames.insert(funcName);
         if (heapAllocatorBaseNames.count(funcName) == 0)
         {
@@ -924,13 +924,13 @@ void SensitiveLeakSan::analyseDIType(DIType *type)
         auto tyName = compositeTy->getName();
         if (tyName != "")
         {
-            // errs() << "[Struct Name]" << tyName << "\n";
+            // dbgs() << "[Struct Name]" << tyName << "\n";
             DICompositeTypeMap[tyName.str()] = compositeTy;
         }
         auto tyIdName = compositeTy->getIdentifier();
         if (tyIdName != "")
         {
-            // errs() << "[Struct Identifier]" << tyName << "\n";
+            // dbgs() << "[Struct Identifier]" << tyName << "\n";
             DICompositeTypeMap[tyIdName.str()] = compositeTy;
         }
         analyseDIType(compositeTy->getBaseType());
@@ -1549,14 +1549,10 @@ bool SensitiveLeakSan::runOnModule()
 #ifdef DUMP_VALUE_FLOW
     for (auto &F : *M)
     {
-        if (F.isDeclaration())
-            continue;
-        std::set<std::string> OCallsIgnore{"sgxsan_ocall_print_string", "sgxsan_ocall_addr2line", "sgxsan_ocall_addr2line_ex", "sgxsan_ocall_addr2func_name", "sgxsan_ocall_depcit_distribute", "sgxsan_ocall_init_shadow_memory", "sgxsan_ocall_get_mmap_infos"};
-        StringRef func_name = F.getName();
-        if (std::find(OCallsIgnore.begin(), OCallsIgnore.end(), func_name.str()) != OCallsIgnore.end())
+        if (F.isDeclaration() || F.getName().startswith("sgxsan_ocall_"))
             continue;
         IRBuilder<> IRB(&(F.front().front()));
-        printStrAtRT(IRB, "[RUN FUNC] " + func_name.str() + " " + SVF::SVFUtil::getSourceLoc(&F.front().front()) + "\n");
+        printStrAtRT(IRB, "[RUN FUNC] " + F.getName().str() + " " + SVF::SVFUtil::getSourceLoc(&F.front().front()) + "\n");
     }
 #endif
     collectAndPoisonSensitiveObj();
@@ -1577,9 +1573,9 @@ bool SensitiveLeakSan::runOnModule()
         std::unordered_set<SVF::ValPN *> ptrValPNs;
         getPtrValPNs(workObjPN, ptrValPNs);
 #ifdef SHOW_WORK_OBJ_PTS
-        errs() << "============== Show point-to set ==============\n";
+        dbgs() << "============== Show point-to set ==============\n";
         dump(workObjPN);
-        errs() << "-----------------------------------------------\n";
+        dbgs() << "-----------------------------------------------\n";
 #endif
         for (auto ptrValPN : ptrValPNs)
         {
@@ -1590,7 +1586,7 @@ bool SensitiveLeakSan::runOnModule()
             doVFA(ptrVal);
         }
 #ifdef SHOW_WORK_OBJ_PTS
-        errs() << "========= End of showing point-to set ==========\n";
+        dbgs() << "========= End of showing point-to set ==========\n";
 #endif
     }
     return true;
@@ -1641,7 +1637,7 @@ void SensitiveLeakSan::dump(SVF::NodeID nodeID)
 
 void SensitiveLeakSan::dump(SVF::PAGNode *PN)
 {
-    errs() << toString(PN) << "\n\n";
+    dbgs() << toString(PN) << "\n\n";
 }
 
 std::string SensitiveLeakSan::toString(Value *val)
@@ -1651,5 +1647,5 @@ std::string SensitiveLeakSan::toString(Value *val)
 
 void SensitiveLeakSan::dump(Value *val)
 {
-    errs() << toString(val) << "\n\n";
+    dbgs() << toString(val) << "\n\n";
 }
