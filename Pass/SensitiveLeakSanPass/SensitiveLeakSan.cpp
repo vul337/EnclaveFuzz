@@ -1549,7 +1549,11 @@ bool SensitiveLeakSan::runOnModule()
 #ifdef DUMP_VALUE_FLOW
     for (auto &F : *M)
     {
-        if (F.isDeclaration() || F.getName().startswith("sgxsan_ocall_"))
+        if (F.isDeclaration() ||
+            F.getName().startswith("sgxsan_ocall_") ||
+            F.getName().startswith("sgxsan_ecall_") ||
+            F.getName().startswith("fuzzer_ocall_") ||
+            F.getName().startswith("fuzzer_ecall_"))
             continue;
         IRBuilder<> IRB(&(F.front().front()));
         printStrAtRT(IRB, "[RUN FUNC] " + F.getName().str() + " " + SVF::SVFUtil::getSourceLoc(&F.front().front()) + "\n");

@@ -41,11 +41,7 @@ void sgxsan_print_stack_trace(log_level ll, unsigned int level, uint64_t bp, uin
     {
         addr_arr[i] = ret_addrs[i] - 1;
     }
-    sgxsan_ocall_addr2line_ex(addr_arr, ret_addr_arr_size);
-    // for (size_t i = 0; i < ret_addrs.size(); i++)
-    // {
-    //     sgxsan_ocall_addr2line(ret_addrs[i] - 1, (int)i);
-    // }
+    sgxsan_ocall_addr2line(addr_arr, ret_addr_arr_size);
     sgxsan_log(ll, false, "============== Stack Trace End ===============\n");
 #endif
 }

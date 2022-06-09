@@ -83,7 +83,7 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...)
 	va_end(ap);
 	std::string content = prefix + buf;
 
-	printf("%s", content.c_str());
+	std::cerr << content;
 }
 
 void PrintAddressSpaceLayout()
@@ -258,21 +258,16 @@ std::string addr2line(uint64_t addr)
 	return sgxsan_exec(cmd_str.c_str());
 }
 
-void string_rtrim(std::string &str)
-{
-	str.erase(std::find_if(str.rbegin(), str.rend(), [](unsigned char ch)
-						   { return !std::isspace(ch); })
-				  .base(),
-			  str.end());
-}
-
 std::string addr2func_name(uint64_t addr)
 {
-	std::stringstream cmd;
-	cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr << "|cut -d \" \" -f 2";
-	std::string cmd_str = cmd.str(), ret_str = sgxsan_exec(cmd_str.c_str());
-	string_rtrim(ret_str);
-	return ret_str;
+	auto line = addr2line(addr);
+	std::regex line_pattern("(\\S+?):[ ]+(\\S+)[ ]+(\\S+)[ ]+(\\S+)");
+	std::smatch match;
+	if (std::regex_search(line, match, line_pattern))
+	{
+		return match[2].str();
+	}
+	return "";
 }
 
 void sgxsan_ocall_addr2func_name(uint64_t addr, char *func_name, size_t buf_size)
@@ -283,17 +278,12 @@ void sgxsan_ocall_addr2func_name(uint64_t addr, char *func_name, size_t buf_size
 	func_name[cp_size] = '\0';
 }
 
-void sgxsan_ocall_addr2line(uint64_t addr, int level)
-{
-	std::cerr << "    #" << level << " " << addr2line(addr);
-}
-
-void sgxsan_ocall_addr2line_ex(uint64_t *addr_arr, size_t arr_cnt, int level)
+void sgxsan_ocall_addr2line(uint64_t *addr_arr, size_t arr_cnt, int level)
 {
 	(void)level;
 	for (size_t i = 0; i < arr_cnt; i++)
 	{
-		sgxsan_ocall_addr2line(addr_arr[i], (int)i);
+		std::cerr << "    #" << i << " " << addr2line(addr_arr[i]);
 	}
 }
 
