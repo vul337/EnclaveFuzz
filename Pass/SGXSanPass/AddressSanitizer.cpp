@@ -776,7 +776,6 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI)
     __instrumentTLSMgr(CI->getFunction());
 
     IRBuilder<> IRB(CI);
-    IRB.CreateCall(get_mmap_infos);
     const DataLayout &DL = CI->getModule()->getDataLayout();
     // instrument `sgxsan_edge_check` for each actual parameter of RealEcall before RealEcall
     for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++)

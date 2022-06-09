@@ -48,7 +48,8 @@ uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
 		 kHighMemBeg = 0, kHighMemEnd = 0;
 static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
-thread_local std::vector<SGXSanMMapInfo> tls_mmap_infos;
+// don't touch it at app side, since there is a rwlock applied at enclave side
+std::vector<SGXSanMMapInfo> g_mmap_infos;
 
 std::string sgxsan_exec(const char *cmd);
 
@@ -319,9 +320,10 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr, size
 	return;
 }
 
+// write lock is applied at enclave side
 void sgxsan_ocall_get_mmap_infos(void **mmap_infos, size_t *real_cnt)
 {
-	tls_mmap_infos.clear();
+	g_mmap_infos.clear();
 	std::fstream f("/proc/self/maps", std::ios::in);
 	std::string line;
 	while (std::getline(f, line))
@@ -348,10 +350,10 @@ void sgxsan_ocall_get_mmap_infos(void **mmap_infos, size_t *real_cnt)
 			// 	memcpy(info.description, description.c_str(), cpLen);
 			// 	info.description[cpLen] = 0;
 			// }
-			tls_mmap_infos.push_back(info);
+			g_mmap_infos.push_back(info);
 		}
 	}
 
-	*real_cnt = tls_mmap_infos.size();
-	*mmap_infos = &tls_mmap_infos[0];
+	*real_cnt = g_mmap_infos.size();
+	*mmap_infos = &g_mmap_infos[0];
 }

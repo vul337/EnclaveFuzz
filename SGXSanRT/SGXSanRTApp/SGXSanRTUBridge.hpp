@@ -1,12 +1,16 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include <sgx_error.h>
+#include <sgx_eid.h>
+
 typedef unsigned long uptr;
 
 #if defined(__cplusplus)
 extern "C"
 {
 #endif
+    sgx_status_t sgxsan_ecall_notify_update_mmap_infos(sgx_enclave_id_t eid);
     void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr *shadow_beg_ptr, uptr *shadow_end_ptr);
     void sgxsan_ocall_print_string(const char *str);
     void sgxsan_ocall_addr2line(uint64_t addr, int level = 0);

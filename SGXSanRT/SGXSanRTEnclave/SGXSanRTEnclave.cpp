@@ -24,8 +24,9 @@ struct SGXSanMMapInfo
     bool is_private = false;
 };
 
-__thread size_t SGXSanMMapInfoRealCount = 0;
-__thread SGXSanMMapInfo *SGXSanMMapInfos = nullptr;
+pthread_rwlock_t mmap_info_rwlock = PTHREAD_RWLOCK_INITIALIZER;
+size_t SGXSanMMapInfoRealCount = 0;
+SGXSanMMapInfo *SGXSanMMapInfos = nullptr;
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -47,20 +48,16 @@ int sgxsan_exception_handler(sgx_exception_info_t *info)
 static void init_shadow_memory_out_enclave()
 {
     // only use LowMem and LowShadow
-    if (SGX_SUCCESS != sgxsan_ocall_init_shadow_memory(g_enclave_base, g_enclave_size, &kLowShadowBeg, &kLowShadowEnd))
-    {
-        abort();
-    }
-    if (sgx_register_exception_handler(1, sgxsan_exception_handler) == nullptr)
-    {
-        abort();
-    }
+    sgxsan_error(SGX_SUCCESS != sgxsan_ocall_init_shadow_memory(g_enclave_base, g_enclave_size, &kLowShadowBeg, &kLowShadowEnd), "sgxsan_ocall_init_shadow_memory failed");
+    sgxsan_error(sgx_register_exception_handler(1, sgxsan_exception_handler) == nullptr, "sgx_register_exception_handler failed");
     kLowMemBeg = g_enclave_base;
     kLowMemEnd = g_enclave_base + g_enclave_size - 1;
     assert(kLowShadowBeg == SGXSAN_SHADOW_MAP_BASE);
+    // collect_layout_infos will store result to static global STL variable, however, these STL variable will initialize to 0 afer __asan_init, so if need to use it again, must collect_layout_infos again
     SensitivePoisoner::collect_layout_infos();
     SensitivePoisoner::shallow_poison_senitive();
     init_real_malloc_usable_size();
+    get_mmap_infos();
 }
 
 static void AsanInitInternal()
@@ -86,9 +83,16 @@ void __asan_init()
     AsanInitInternal();
 }
 
-extern "C" void get_mmap_infos()
+void sgxsan_ecall_notify_update_mmap_infos()
 {
+    get_mmap_infos();
+}
+
+void get_mmap_infos()
+{
+    pthread_rwlock_wrlock(&mmap_info_rwlock);
     sgxsan_error(SGX_SUCCESS != sgxsan_ocall_get_mmap_infos((void **)&SGXSanMMapInfos, &SGXSanMMapInfoRealCount), "Fail to get mmap info\n");
+    pthread_rwlock_unlock(&mmap_info_rwlock);
 }
 
 // assume SGXSanMMapInfos is sorted, and info range is [info.start, info.end]
@@ -117,13 +121,15 @@ bool _is_addr_readable(uint64_t addr, size_t length, size_t mmap_info_start_inde
     return false;
 }
 
-extern "C" bool is_pointer_readable(void *ptr, size_t element_size, int count)
+bool is_pointer_readable(void *ptr, size_t element_size, int count)
 {
     if (ptr == nullptr)
         return false;
     auto length = element_size * std::max(1, count);
     assert(length > 0);
+    pthread_rwlock_rdlock(&mmap_info_rwlock);
     auto result = _is_addr_readable((uint64_t)ptr, length, 0);
+    pthread_rwlock_unlock(&mmap_info_rwlock);
     sgxsan_warning(result == false, "Pass non-null unreadable pointer parameter\n");
     return result;
 }

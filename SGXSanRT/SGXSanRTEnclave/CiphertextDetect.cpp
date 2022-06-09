@@ -59,13 +59,6 @@ text_encryption_t isCiphertext(uint64_t addr, uint64_t size)
     if (size < 0x100)
         return Unknown;
 
-    std::string func_name;
-    __get_func_name(func_name);
-    // if (func_name.find("print") != std::string::npos)
-    // {
-    //     return Unknown;
-    // }
-
     int bucket_num = getBucketNum(size);
 
     int map[256 /* 2^8 */] = {0};
@@ -83,7 +76,7 @@ text_encryption_t isCiphertext(uint64_t addr, uint64_t size)
 
     bool is_cipher = true;
     int step = 0x100 / bucket_num;
-    log_debug("[Cipher Detect] CountPerBacket = %f \n", CountPerBacket);
+    log_trace("[Cipher Detect] CountPerBacket = %f \n", CountPerBacket);
 
     for (int i = 0; i < 256; i += step)
     {
@@ -99,6 +92,8 @@ text_encryption_t isCiphertext(uint64_t addr, uint64_t size)
 
     if (!is_cipher)
     {
+        std::string func_name;
+        __get_func_name(func_name);
         log_warning("[Cipher Detector] \'%s()\' plaintext transfering...\n", func_name.c_str());
     }
     return is_cipher ? Ciphertext : Plaintext;

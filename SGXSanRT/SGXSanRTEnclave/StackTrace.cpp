@@ -54,7 +54,7 @@ void sgxsan_print_stack_trace(log_level ll, unsigned int level, uint64_t bp, uin
 uint64_t get_last_return_address(uint64_t enclave_base_addr, unsigned int level)
 {
     std::vector<uint64_t> ret_addrs;
-    get_ret_addrs_in_stack(ret_addrs, enclave_base_addr, level, 1);
+    get_ret_addrs_in_stack(ret_addrs, enclave_base_addr, level, 1, (uint64_t)__builtin_frame_address(0));
     assert(ret_addrs.size() == 1);
     return ret_addrs[0];
 }
