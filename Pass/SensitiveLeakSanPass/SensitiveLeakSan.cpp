@@ -1551,9 +1551,9 @@ bool SensitiveLeakSan::runOnModule()
     {
         if (F.isDeclaration() ||
             F.getName().startswith("sgxsan_ocall_") ||
-            F.getName().startswith("sgxsan_ecall_") ||
+            F.getName().startswith("sgx_sgxsan_ecall_") ||
             F.getName().startswith("fuzzer_ocall_") ||
-            F.getName().startswith("fuzzer_ecall_"))
+            F.getName().startswith("sgx_fuzzer_ecall_"))
             continue;
         IRBuilder<> IRB(&(F.front().front()));
         printStrAtRT(IRB, "[RUN FUNC] " + F.getName().str() + " " + SVF::SVFUtil::getSourceLoc(&F.front().front()) + "\n");

@@ -35,9 +35,9 @@ namespace
                     continue;
 
                 if (F.getName().startswith("sgxsan_ocall_") ||
-                    F.getName().startswith("sgxsan_ecall_") ||
+                    F.getName().startswith("sgx_sgxsan_ecall_") ||
                     F.getName().startswith("fuzzer_ocall_") ||
-                    F.getName().startswith("fuzzer_ecall_"))
+                    F.getName().startswith("sgx_fuzzer_ecall_"))
                 {
                     adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                     // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
