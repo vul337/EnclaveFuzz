@@ -3,3 +3,5 @@
 *.so
 output/
 build
+Debug-build
+Release-build
