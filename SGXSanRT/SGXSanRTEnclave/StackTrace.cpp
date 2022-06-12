@@ -43,6 +43,11 @@ void sgxsan_print_stack_trace(log_level ll, unsigned int level, uint64_t bp, uin
     }
     sgxsan_ocall_addr2line(addr_arr, ret_addr_arr_size);
     sgxsan_log(ll, false, "============== Stack Trace End ===============\n");
+#else
+    (void)ll;
+    (void)level;
+    (void)bp;
+    (void)ip;
 #endif
 }
 
