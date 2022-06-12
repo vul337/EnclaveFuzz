@@ -317,10 +317,10 @@ void sgxsan_ocall_get_mmap_infos(void **mmap_infos, size_t *real_cnt)
 	g_mmap_infos.clear();
 	std::fstream f("/proc/self/maps", std::ios::in);
 	std::string line;
+	std::regex map_pattern("([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
+	std::smatch match;
 	while (std::getline(f, line))
 	{
-		std::regex map_pattern("([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
-		std::smatch match;
 		if (std::regex_search(line, match, map_pattern))
 		{
 			bool is_readable = match[3] == "r";
