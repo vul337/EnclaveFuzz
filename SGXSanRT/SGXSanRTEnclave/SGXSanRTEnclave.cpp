@@ -121,6 +121,26 @@ bool _is_addr_readable(uint64_t addr, size_t length, size_t mmap_info_start_inde
     return false;
 }
 
+int64_t _search_closest_mmap_info_index(uint64_t addr, int64_t range_start_index, int64_t range_end_index)
+{
+    if (range_start_index < 0 || range_start_index > range_end_index)
+        return -1;
+    int64_t range_middle_index = (range_start_index + range_end_index) / 2;
+    auto &info = SGXSanMMapInfos[range_middle_index];
+    if (info.start <= addr and addr <= info.end)
+    {
+        return range_middle_index;
+    }
+    else if (addr < info.start)
+    {
+        return _search_closest_mmap_info_index(addr, range_start_index, range_middle_index - 1);
+    }
+    else /* addr > info.end */
+    {
+        return _search_closest_mmap_info_index(addr, range_middle_index + 1, range_end_index);
+    }
+}
+
 bool is_pointer_readable(void *ptr, size_t element_size, int count)
 {
     if (ptr == nullptr)
@@ -128,7 +148,12 @@ bool is_pointer_readable(void *ptr, size_t element_size, int count)
     auto length = element_size * std::max(1, count);
     assert(length > 0);
     pthread_rwlock_rdlock(&mmap_info_rwlock);
-    auto result = _is_addr_readable((uint64_t)ptr, length, 0);
+    auto result = false;
+    auto index = _search_closest_mmap_info_index((uint64_t)ptr, 0, SGXSanMMapInfoRealCount);
+    if (index != -1)
+    {
+        result = _is_addr_readable((uint64_t)ptr, length, index);
+    }
     pthread_rwlock_unlock(&mmap_info_rwlock);
     sgxsan_warning(result == false, "Pass non-null unreadable pointer parameter\n");
     return result;

@@ -50,6 +50,7 @@ static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
 // don't touch it at app side, since there is a rwlock applied at enclave side
 std::vector<SGXSanMMapInfo> g_mmap_infos;
+const bool only_record_readable_mmap_info = true;
 
 std::string sgxsan_exec(const char *cmd);
 
@@ -322,10 +323,15 @@ void sgxsan_ocall_get_mmap_infos(void **mmap_infos, size_t *real_cnt)
 		std::smatch match;
 		if (std::regex_search(line, match, map_pattern))
 		{
+			bool is_readable = match[3] == "r";
+			if (only_record_readable_mmap_info && !is_readable)
+			{
+				continue;
+			}
 			SGXSanMMapInfo info;
 			info.start = std::stoull(match[1].str(), nullptr, 16);
 			info.end = std::stoull(match[2].str(), nullptr, 16) - 1;
-			info.is_readable = match[3] == "r";
+			info.is_readable = is_readable;
 			info.is_writable = match[4] == "w";
 			info.is_executable = match[5] == "x";
 			info.is_shared = match[6] == "s";

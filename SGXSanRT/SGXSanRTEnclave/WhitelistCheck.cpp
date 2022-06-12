@@ -30,11 +30,11 @@ public:
     static void init();
     static void destroy();
     static void iter(bool is_global = false);
-    static bool add(const void *ptr, size_t size);
+    static void add(const void *ptr, size_t size);
     static bool add_global(const void *ptr, size_t size);
     static std::tuple<const void *, size_t, bool /* is_at_global? */> query(const void *ptr, size_t size);
     static std::pair<const void *, size_t> query_global(const void *ptr, size_t size);
-    static bool global_propagate(const void *ptr);
+    static void global_propagate(const void *ptr);
     static void active();
     static void deactive();
     static bool double_fetch_detect(const void *ptr, size_t size, bool used_to_cmp, char *parent_func);
@@ -131,11 +131,11 @@ std::pair<const void *, size_t> merge_adjacent_memory(const void *addr1, size_t 
     return std::pair<const void *, size_t>(result_addr, result_len);
 }
 
-bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
+void WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
 {
     // there may be ocall and ocall return before enter first ecall
     if (!m_whitelist)
-        return true;
+        return;
     assert(ptr && size > 0 && !m_whitelist_active && sgx_is_outside_enclave(ptr, size));
     iter();
     log_trace("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "+", ptr, size);
@@ -161,7 +161,7 @@ bool WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size)
 
     auto ret = m_whitelist->emplace(target_addr, target_len);
     iter();
-    return ret.second;
+    sgxsan_error(ret.second == false, "Insertion conflict?\n");
 }
 
 bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size)
@@ -334,10 +334,10 @@ exit:
 }
 
 // input ptr may be in Enclave or out of Enclave
-bool WhitelistOfAddrOutEnclave::global_propagate(const void *ptr)
+void WhitelistOfAddrOutEnclave::global_propagate(const void *ptr)
 {
     if (sgx_is_within_enclave(ptr, 1))
-        return true;
+        return;
     const void *find_start = nullptr;
     size_t find_size = 0;
     bool is_at_global = false;
@@ -346,9 +346,8 @@ bool WhitelistOfAddrOutEnclave::global_propagate(const void *ptr)
     {
         assert(sgx_is_outside_enclave(find_start, find_size));
         log_trace("[Whitelist] [Thread(0x%p)] => 0x%p => [Global]\n", m_whitelist, ptr);
-        assert(add_global(find_start, find_size));
+        sgxsan_error(add_global(find_start, find_size) == false, "Fail to propagate to global whitelist\n");
     }
-    return true;
 }
 
 void WhitelistOfAddrOutEnclave::active()
@@ -374,7 +373,7 @@ void WhitelistOfAddrOutEnclave_destroy()
 
 void WhitelistOfAddrOutEnclave_add(const void *start, size_t size)
 {
-    sgxsan_error(WhitelistOfAddrOutEnclave::add(start, size) == false, "Insertion conflict?\n");
+    WhitelistOfAddrOutEnclave::add(start, size);
 }
 
 void WhitelistOfAddrOutEnclave_query_ex(const void *ptr, size_t size, bool is_write, bool used_to_cmp, char *parent_func)
@@ -400,7 +399,7 @@ void WhitelistOfAddrOutEnclave_query(const void *ptr, size_t size)
 
 void WhitelistOfAddrOutEnclave_global_propagate(const void *addr)
 {
-    sgxsan_error(WhitelistOfAddrOutEnclave::global_propagate(addr) == false, "Fail to propagate to global whitelist\n");
+    WhitelistOfAddrOutEnclave::global_propagate(addr);
 }
 
 void WhitelistOfAddrOutEnclave_active()
