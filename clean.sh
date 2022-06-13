@@ -5,7 +5,7 @@ set -e
 cd Pass
 rm -rf  Debug-build \
         Release-build \
-        ../output/lib{SensitiveLeakSanPass,SGXSanPass,SymbolSaverForLTOPass}.so
+        ../output/libSGXSanPass.so
 
 # clean runtime
 cd ../SGXSanRT

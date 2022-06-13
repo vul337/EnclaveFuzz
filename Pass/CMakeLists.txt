@@ -30,7 +30,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/PassCommon PassCommon)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SGXSanPass SGXSanPass)
 # current merge SensitiveLeakSanPass to SGXSanPass
 # add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SensitiveLeakSanPass SensitiveLeakSanPass)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SymbolSaverForLTOPass SymbolSaverForLTOPass)
+# Please use ld.lld option "-save-temps" instead of SymbolSaverForLTOPass, to keep symbol value table on LTO
+# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SymbolSaverForLTOPass SymbolSaverForLTOPass)
 
-install(TARGETS SGXSanPass SymbolSaverForLTOPass
+install(TARGETS SGXSanPass
         LIBRARY DESTINATION .)

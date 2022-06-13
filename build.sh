@@ -17,7 +17,7 @@ fi
 cd Pass
 cmake ${PASS_CMAKE_FLAGS} -B ${PASS_BUILD_MOD}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/../output
 cmake --build ${PASS_BUILD_MOD}-build -j$(nproc)
-rm -rf ../output/lib{SensitiveLeakSanPass,SGXSanPass,SymbolSaverForLTOPass}.so
+rm -rf ../output/libSGXSanPass.so
 cmake --install ${PASS_BUILD_MOD}-build
 
 # build runtime
