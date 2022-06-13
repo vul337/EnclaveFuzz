@@ -3,13 +3,21 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 
 #include "AddressSanitizer.hpp"
 #include "ModuleAddressSanitizer.hpp"
 #include "SGXSanManifest.h"
 #include "AdjustUSP.hpp"
+#include "SensitiveLeakSan.hpp"
 
 using namespace llvm;
+
+static cl::opt<bool> ClEnableSensitiveLeakSan(
+    "enable-sensitive-leak-san",
+    cl::desc("whether enable sensitive leak santizer"),
+    cl::Hidden,
+    cl::init(false));
 
 namespace
 {
@@ -18,15 +26,34 @@ namespace
         static char ID;
         SGXSanPass() : ModulePass(ID) {}
 
+        void getAnalysisUsage(AnalysisUsage &AU) const override
+        {
+            if (ClEnableSensitiveLeakSan)
+            {
+                AU.addRequired<CFLSteensAAWrapperPass>();
+            }
+        }
+
         bool runOnModule(Module &M) override
         {
-            dbgs() << "[SGXSanPass] " << M.getName().str() << "\n";
+            bool Changed = false;
+
             // std::error_code EC;
             // raw_fd_stream f(M.getName().str() + ".dump", EC);
             // M.print(f, nullptr);
-            bool Changed = false;
+
+            // run SensitiveLeakSan Pass
+            if (ClEnableSensitiveLeakSan)
+            {
+                dbgs() << "[SensitiveLeakSan] " << M.getName().str() << "\n";
+                CFLSteensAAResult &AAResult = getAnalysis<CFLSteensAAWrapperPass>().getResult();
+                SensitiveLeakSan SLSan(M, AAResult);
+                Changed |= SLSan.runOnModule();
+            }
+
+            dbgs() << "[SGXSanPass] " << M.getName().str() << "\n";
             ModuleAddressSanitizer MASan(M);
-            MASan.instrumentModule(M);
+            Changed |= MASan.instrumentModule(M);
 
             AddressSanitizer ASan(M);
             for (Function &F : M)

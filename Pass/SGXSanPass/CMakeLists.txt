@@ -1,3 +1,3 @@
-include_directories(${LLVM_INCLUDE_DIRS} ../../SGXSanManifest ../PassCommon)
-add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp FunctionStackPoisoner.cpp AdjustUSP.cpp ModuleAddressSanitizer.cpp)
-target_link_libraries(SGXSanPass PassCommon)
+include_directories(${LLVM_INCLUDE_DIRS} ../../SGXSanManifest ../PassCommon ../SensitiveLeakSanPass ${SVF_DIR}/include)
+add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp FunctionStackPoisoner.cpp AdjustUSP.cpp ModuleAddressSanitizer.cpp ../SensitiveLeakSanPass/SensitiveLeakSan.cpp)
+target_link_libraries(SGXSanPass PassCommon ${SVF_DIR}/${SVF_MODE}-build/lib/libSvf.a ${SVF_DIR}/${SVF_MODE}-build/lib/CUDD/libCudd.a LLVMDemangle)

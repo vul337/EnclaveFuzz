@@ -28,8 +28,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-unused -fno-rtti")
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/PassCommon PassCommon)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SGXSanPass SGXSanPass)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SensitiveLeakSanPass SensitiveLeakSanPass)
+# current merge SensitiveLeakSanPass to SGXSanPass
+# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SensitiveLeakSanPass SensitiveLeakSanPass)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/SymbolSaverForLTOPass SymbolSaverForLTOPass)
 
-install(TARGETS SGXSanPass SensitiveLeakSanPass SymbolSaverForLTOPass
+install(TARGETS SGXSanPass SymbolSaverForLTOPass
         LIBRARY DESTINATION .)
