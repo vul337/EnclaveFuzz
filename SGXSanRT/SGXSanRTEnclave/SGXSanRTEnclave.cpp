@@ -30,11 +30,8 @@ SGXSanMMapInfo *SGXSanMMapInfos = nullptr;
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
-         kLowShadowBeg = 0, kLowShadowEnd = 0,
-         kShadowGapBeg = 0, kShadowGapEnd = 0,
-         kHighShadowBeg = 0, kHighShadowEnd = 0,
-         kHighMemBeg = 0, kHighMemEnd = 0;
+uint64_t kEnclaveMemBeg = 0, kEnclaveMemEnd = 0,
+         kEnclaveShadowBeg = 0, kEnclaveShadowEnd = 0;
 
 int asan_inited = 0;
 
@@ -48,11 +45,11 @@ int sgxsan_exception_handler(sgx_exception_info_t *info)
 static void init_shadow_memory_out_enclave()
 {
     // only use LowMem and LowShadow
-    sgxsan_error(SGX_SUCCESS != sgxsan_ocall_init_shadow_memory(g_enclave_base, g_enclave_size, &kLowShadowBeg, &kLowShadowEnd), "sgxsan_ocall_init_shadow_memory failed");
+    sgxsan_error(SGX_SUCCESS != sgxsan_ocall_init_shadow_memory(g_enclave_base, g_enclave_size, &kEnclaveShadowBeg, &kEnclaveShadowEnd), "sgxsan_ocall_init_shadow_memory failed");
     sgxsan_error(sgx_register_exception_handler(1, sgxsan_exception_handler) == nullptr, "sgx_register_exception_handler failed");
-    kLowMemBeg = g_enclave_base;
-    kLowMemEnd = g_enclave_base + g_enclave_size - 1;
-    assert(kLowShadowBeg == SGXSAN_SHADOW_MAP_BASE);
+    kEnclaveMemBeg = g_enclave_base;
+    kEnclaveMemEnd = g_enclave_base + g_enclave_size - 1;
+    assert(kEnclaveShadowBeg == SGXSAN_SHADOW_MAP_BASE);
     // collect_layout_infos will store result to static global STL variable, however, these STL variable will initialize to 0 afer __asan_init, so if need to use it again, must collect_layout_infos again
     SensitivePoisoner::collect_layout_infos();
     SensitivePoisoner::shallow_poison_senitive();

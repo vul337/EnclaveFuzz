@@ -10,28 +10,23 @@
 extern "C"
 {
 #endif
-    uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask = ~0x70);
+    uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask = 0x8F);
     bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8_t mask);
 #if defined(__cplusplus)
 }
 #endif
 
-static inline bool AddressIsPoisoned(uptr a, uint8_t mask = ~0x70)
+static inline bool AddressIsPoisoned(uptr a, uint8_t mask = 0x8F)
 {
     const uptr kAccessSize = 1;
     u8 *shadow_address = (u8 *)MEM_TO_SHADOW(a);
     // situation of shadow_value >= SHADOW_GRANULARITY (max positive integer for shadow byte is 0x7f) is that sgxsan's shallow poison usage
     s8 shadow_value = (*shadow_address) & mask;
-    if (shadow_value >= 0x8)
-    {
-        return true;
-    }
     if (shadow_value)
     {
         // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
         u8 last_accessed_byte = (a & (SHADOW_GRANULARITY - 1)) + kAccessSize - 1;
-
-        return last_accessed_byte >= shadow_value;
+        return shadow_value >= 0x8 || last_accessed_byte >= shadow_value /* shadow_value is 0x1-0x7 or < 0x0 */;
     }
     return false;
 }
@@ -65,7 +60,7 @@ static inline uint8_t mem_byte_wise_bit_or(uint8_t *beg, uptr size)
     return all;
 }
 
-static inline bool mem_is_zero(uint8_t *beg, uptr size, uint8_t mask = ~0x70)
+static inline bool mem_is_zero(uint8_t *beg, uptr size, uint8_t mask = 0x8F)
 {
     uint8_t all = mem_byte_wise_bit_or((uint8_t *)beg, size);
     return (all & mask) == 0;

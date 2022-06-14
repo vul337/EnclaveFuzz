@@ -18,49 +18,17 @@ extern uint64_t g_enclave_size;
 #define SHADOW_GRANULARITY 8
 #endif
 
-extern uint64_t kLowMemBeg, kLowMemEnd,
-    kLowShadowBeg, kLowShadowEnd,
-    kShadowGapBeg, kShadowGapEnd,
-    kHighShadowBeg, kHighShadowEnd,
-    kHighMemBeg, kHighMemEnd;
-
-static inline bool AddrIsInLowMem(uptr a)
-{
-    return a <= kLowMemEnd;
-}
-
-static inline bool AddrIsInLowShadow(uptr a)
-{
-    return a >= kLowShadowBeg && a <= kLowShadowEnd;
-}
-
-static inline bool AddrIsInHighMem(uptr a)
-{
-    return kHighMemBeg && a >= kHighMemBeg && a <= kHighMemEnd;
-}
-
-static inline bool AddrIsInHighShadow(uptr a)
-{
-    return kHighMemBeg && a >= kHighShadowBeg && a <= kHighShadowEnd;
-}
-
-static inline bool AddrIsInShadowGap(uptr a)
-{
-    // In zero-based shadow mode we treat addresses near zero as addresses
-    // in shadow gap as well.
-    if (kLowShadowBeg == 0)
-        return a <= kShadowGapEnd;
-    return a >= kShadowGapBeg && a <= kShadowGapEnd;
-}
+extern uint64_t kEnclaveMemBeg, kEnclaveMemEnd,
+    kEnclaveShadowBeg, kEnclaveShadowEnd;
 
 static inline bool AddrIsInMem(uptr a)
 {
-    return AddrIsInLowMem(a) || AddrIsInHighMem(a);
+    return a >= kEnclaveMemBeg && a <= kEnclaveMemEnd;
 }
 
 static inline bool AddrIsInShadow(uptr a)
 {
-    return AddrIsInLowShadow(a) || AddrIsInHighShadow(a);
+    return a >= kEnclaveShadowBeg && a <= kEnclaveShadowEnd;
 }
 
 static inline uptr MemToShadow(uptr p)

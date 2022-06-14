@@ -41,11 +41,8 @@ struct SGXSanMMapInfo
 std::string enclave_name(_xstr(ENCLAVE_FILENAME));
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
-uint64_t kLowMemBeg = 0, kLowMemEnd = 0,
-		 kLowShadowBeg = 0, kLowShadowEnd = 0,
-		 kShadowGapBeg = 0, kShadowGapEnd = 0,
-		 kHighShadowBeg = 0, kHighShadowEnd = 0,
-		 kHighMemBeg = 0, kHighMemEnd = 0;
+uint64_t kEnclaveMemBeg = 0, kEnclaveMemEnd = 0,
+		 kEnclaveShadowBeg = 0, kEnclaveShadowEnd = 0;
 static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
 // don't touch it at app side, since there is a rwlock applied at enclave side
@@ -89,7 +86,7 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...)
 
 void PrintAddressSpaceLayout()
 {
-	log_debug("|| `[%16p, %16p]` || Shadow    ||\n", (void *)kLowShadowBeg, (void *)kLowShadowEnd);
+	log_debug("|| `[%16p, %16p]` || Shadow    ||\n", (void *)kEnclaveShadowBeg, (void *)kEnclaveShadowEnd);
 	log_debug("|| `[%16p, %16p]` || LowGuard  ||\n", (void *)g_enclave_low_guard_start, (void *)(g_enclave_base - 1));
 	log_debug("|| `[%16p, %16p]` || Elrange   ||\n", (void *)g_enclave_base, (void *)(g_enclave_base + g_enclave_size - 1));
 	log_debug("|| `[%16p, %16p]` || HighGuard ||\n\n", (void *)(g_enclave_base + g_enclave_size), (void *)g_enclave_high_guard_end);
@@ -173,12 +170,12 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 	g_enclave_size = enclave_size;
 
 	// only use LowMem and LowShadow as ELRANGE and EnclaveShadow
-	kLowShadowBeg = SGXSAN_SHADOW_MAP_BASE;
-	kLowShadowEnd = (enclave_size >> 3) + kLowShadowBeg - 1;
-	kLowMemBeg = g_enclave_base;
-	kLowMemEnd = g_enclave_base + enclave_size - 1;
+	kEnclaveShadowBeg = SGXSAN_SHADOW_MAP_BASE;
+	kEnclaveShadowEnd = (enclave_size >> 3) + kEnclaveShadowBeg - 1;
+	kEnclaveMemBeg = g_enclave_base;
+	kEnclaveMemEnd = g_enclave_base + enclave_size - 1;
 
-	uptr shadow_start = kLowShadowBeg;
+	uptr shadow_start = kEnclaveShadowBeg;
 
 	uptr page_size = getpagesize();
 	sgxsan_error(page_size != 0x1000, "Currently only support 4k page size\n");
@@ -186,20 +183,20 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 
 	// fix-me: may need unmap at destructor
 	// mmap the shadow plus at least one page at the left.
-	sgxsan_error((MAP_FAILED == mmap((void *)shadow_start, kLowShadowEnd - shadow_start + 1,
+	sgxsan_error((MAP_FAILED == mmap((void *)shadow_start, kEnclaveShadowEnd - shadow_start + 1,
 									 PROT_READ | PROT_WRITE,
 									 MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON,
 									 -1, 0)) ||
-					 (-1 == madvise((void *)shadow_start, kLowShadowEnd - shadow_start + 1, MADV_NOHUGEPAGE)),
+					 (-1 == madvise((void *)shadow_start, kEnclaveShadowEnd - shadow_start + 1, MADV_NOHUGEPAGE)),
 				 "Shadow Memory unavailable\n");
 
-	sgxsan_error(((kLowMemBeg & 0xfff) != 0) ||
-					 (((kLowMemEnd + 1) & 0xfff) != 0),
+	sgxsan_error(((kEnclaveMemBeg & 0xfff) != 0) ||
+					 (((kEnclaveMemEnd + 1) & 0xfff) != 0),
 				 "Elrange is not aligned to page\n");
 
 	// consistent with modification in psw/enclave_common/sgx_enclave_common.cpp:enclave_create_ex
-	g_enclave_low_guard_start = kLowMemBeg - page_size;
-	g_enclave_high_guard_end = kLowMemEnd + page_size;
+	g_enclave_low_guard_start = kEnclaveMemBeg - page_size;
+	g_enclave_high_guard_end = kEnclaveMemEnd + page_size;
 
 	// make sure 0 address is not accessible
 	auto result = sgxsan_exec("sysctl vm.mmap_min_addr");
@@ -219,8 +216,8 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 
 	PrintAddressSpaceLayout();
 
-	*shadow_beg_ptr = kLowShadowBeg;
-	*shadow_end_ptr = kLowShadowEnd;
+	*shadow_beg_ptr = kEnclaveShadowBeg;
+	*shadow_end_ptr = kEnclaveShadowEnd;
 
 	reg_sgxsan_sigaction();
 }
