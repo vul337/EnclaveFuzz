@@ -8,8 +8,9 @@
 #include "SGXSanLog.hpp"
 
 // function addr -> poisoned function argument map [-1,0,1,...,MAX_ARG_NUM-2] ( -1 means return value)
-#define MAX_ARG_NUM 320 // must be multiple of 64
-#define MAX_STACK_DEPTH 50000
+// too large will cost too much trts TLS init time (based on memset)
+#define MAX_ARG_NUM 128 // must be multiple of 64
+#define MAX_STACK_DEPTH 512
 struct FuncArgShadowTy
 {
     uint64_t func_addr;
@@ -40,12 +41,12 @@ __thread size_t ThreadFuncArgShadowStack::thread_func_arg_shadow_stack_current_d
 // a serial of c wrapper for instrumentation
 void ThreadFuncArgShadowStack::init()
 {
-    thread_func_arg_shadow_stack_current_depth = 0;
+    assert(thread_func_arg_shadow_stack_current_depth == 0);
 }
 
 void ThreadFuncArgShadowStack::destroy()
 {
-    thread_func_arg_shadow_stack_current_depth = 0;
+    assert(thread_func_arg_shadow_stack_current_depth == 0);
 }
 
 void ThreadFuncArgShadowStack::poison_arg(uint64_t func_addr, int64_t arg_pos)
