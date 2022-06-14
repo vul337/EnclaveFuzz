@@ -424,26 +424,34 @@ bool SensitiveLeakSan::ContainWordExactly(StringRef str, const std::string word)
         return true;
     else if (str == "")
         return false;
-    // filter out non-alphanumeric
+    // filter out non-alphanumeric word
     std::regex nonAlphanumeric("[^0-9a-zA-Z]");
     if (std::regex_search(word, nonAlphanumeric))
     {
         errs() << "[ERROR] Word contain non-alphanumeric\n";
         abort();
     }
+    // filter out non-word str
+    std::regex word_regex("^\\w+$");
+    if (not std::regex_match(str.str(), word_regex))
+    {
+        errs() << "[ERROR] str isn't a valid word\n";
+        abort();
+    }
 
-    std::regex wordRegex("([^0-9a-zA-Z]|^)" + word + "([^0-9a-zA-Z]|$)", std::regex_constants::icase);
-    if (std::regex_search(str.str(), wordRegex))
-        return true;
     // get lowercase word
     std::string lowercaseWord = word;
     std::for_each(lowercaseWord.begin(), lowercaseWord.end(), [](char &c)
                   { c = std::tolower(c); });
+    std::regex wordRegex("([^a-zA-Z]|^)" + lowercaseWord + "([^a-zA-Z]|$)", std::regex_constants::icase);
+    if (std::regex_search(str.str(), wordRegex))
+        return true;
+
     // get capitalized word
     std::string capitalWord = lowercaseWord;
     capitalWord[0] = std::toupper(capitalWord[0]);
     // Camel case naming
-    std::regex capitalWordRegex("(^" + lowercaseWord + "|" + capitalWord + ")([^0-9a-zA-Z]|[A-Z]|$)");
+    std::regex capitalWordRegex("(^" + lowercaseWord + "|" + capitalWord + ")([^a-z]|$)");
     return std::regex_search(str.str(), capitalWordRegex);
 }
 

@@ -163,11 +163,11 @@ namespace llvm
         std::unordered_set<std::string> heapAllocatorBaseNames{"malloc", "calloc", "realloc"},
             heapAllocatorWrapperNames, heapAllocatorNames,
             plaintextKeywords = {"2encrypt", "unencrypt", "2seal", "unseal", "plain", "secret", "decrypt"},
-            ciphertextKeywords = {"encrypt", "seal", "cipher", "2decrypt", "undecrypt"},
-            exactCiphertextKeywords = {"enc"},
+            ciphertextKeywords = {"2decrypt", "undecrypt"},
+            exactCiphertextKeywords = {"enc", "encrypt", "seal", "cipher"},
             inputKeywords = {"source", "input"},
             exactInputKeywords = {"src", "in"},
-            exactSecretKeywords = {"key"};
+            exactSecretKeywords = {"key", "dec"};
         std::map<std::string, DICompositeType *> DICompositeTypeMap;
         std::unordered_set<DIType *> processedDITypes;
     };

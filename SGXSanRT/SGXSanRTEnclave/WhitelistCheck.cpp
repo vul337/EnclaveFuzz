@@ -90,7 +90,7 @@ void WhitelistOfAddrOutEnclave::destroy()
 
 void WhitelistOfAddrOutEnclave::iter(bool is_global)
 {
-#if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
+#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
     std::map<const void *, size_t> *whitelist = is_global ? &m_global_whitelist : m_whitelist;
     log_trace("[Whitelist] [%s(0x%p)] ", is_global ? "Global" : "Thread", whitelist);
     for (auto &item : *whitelist)
@@ -255,7 +255,7 @@ std::tuple<const void *, size_t, bool> WhitelistOfAddrOutEnclave::query(const vo
     if (!m_whitelist_active)
         return ignore_ret;
     assert(m_whitelist);
-#if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
+#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
     m_out_of_enclave_access_cnt++;
 #endif
     log_trace("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist, "?", ptr, size);
@@ -414,7 +414,7 @@ void WhitelistOfAddrOutEnclave_deactive()
 
 void WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt()
 {
-#if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
+#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
     WhitelistOfAddrOutEnclave::add_in_enclave_access_cnt();
 #endif
 }

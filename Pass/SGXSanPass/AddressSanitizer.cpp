@@ -393,7 +393,9 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
 
     // start instrument shadowbyte check
     IRB.SetInsertPoint(ShadowCheckInsertPoint);
+#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
     IRB.CreateCall(WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt);
+#endif
     if (UseCalls)
     {
         IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][AccessSizeIndex],
