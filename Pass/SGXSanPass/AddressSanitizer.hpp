@@ -95,5 +95,6 @@ namespace llvm
         FunctionCallee SGXSanMalloc, SGXSanFree, SGXSanCalloc, SGXSanRealloc;
 #endif
         std::unordered_set<Function *> TLSMgrInstrumentedEcall;
+        Value *SGXSanEnclaveBase = nullptr, *SGXSanEnclaveEndPlus1 = nullptr;
     };
 }

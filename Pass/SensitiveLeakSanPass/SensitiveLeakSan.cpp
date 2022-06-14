@@ -1083,7 +1083,7 @@ Instruction *SensitiveLeakSan::findInstByName(Function *F, std::string InstName)
 
 void SensitiveLeakSan::setNoSanitizeMetadata(Instruction *I)
 {
-    unsigned int MDKindID = M->getMDKindID("nosanitize");
+    unsigned int MDKindID = I->getModule()->getMDKindID("nosanitize");
     MDNode *node = MDNode::get(*C, None);
     I->setMetadata(MDKindID, node);
 }

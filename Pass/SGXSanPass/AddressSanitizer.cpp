@@ -261,7 +261,6 @@ Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB)
     // as shadow memory only map elrange, let Shadow - EnclaveBase
     // EnclaveBase have to be initialied before here
     // check instrumentation is before poison operation
-    Value *SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr);
     Shadow = IRB.CreateSub(Shadow, SGXSanEnclaveBase);
 
     // Shadow >> scale
@@ -346,11 +345,6 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     Value *EndAddrLong = IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1));
 
     // we use page fault of 0 address to find address overflow problem, now start <= end
-    // sgxsdk should ensure SGXSanEnclaveSize > 0 and SGXSanEnclaveEnd do not overflow
-    Value *SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr);
-    Value *SGXSanEnclaveSize = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr);
-    Value *SGXSanEnclaveEnd = IRB.CreateAdd(SGXSanEnclaveBase,
-                                            IRB.CreateSub(SGXSanEnclaveSize, ConstantInt::get(IntptrTy, 1)));
 
     Instruction *ShadowCheckInsertPoint = nullptr;
     // Use elrange guard page to detect cross boundary
@@ -367,7 +361,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     // situation that cross-bound leave to elrange guard check
     // access start address                                                                         <= InsertBefore
     Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
-    Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULE(EndAddrLong, SGXSanEnclaveEnd);
+    Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULT(EndAddrLong, SGXSanEnclaveEndPlus1);
     Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
     if (isFuncAtEnclaveTBridge)
     {
@@ -379,7 +373,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
         SplitBlockAndInsertIfThenElse(IfCond, InsertBefore, &ShadowCheckInsertPoint, &ElseTI, MDBuilder(*C).createBranchWeights(100000, 1));
         IRB.SetInsertPoint(ElseTI);
         Value *CmpEndAddrULTEnclaveBase = IRB.CreateICmpULT(EndAddrLong, SGXSanEnclaveBase);
-        Value *CmpStartAddrUGTEnclaveEnd = IRB.CreateICmpUGT(AddrLong, SGXSanEnclaveEnd);
+        Value *CmpStartAddrUGTEnclaveEnd = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveEndPlus1);
         Value *ElseIfCond = IRB.CreateOr(CmpEndAddrULTEnclaveBase, CmpStartAddrUGTEnclaveEnd);
         Instruction *ElseIfTerm = SplitBlockAndInsertIfThen(ElseIfCond, ElseTI, false);
         IRB.SetInsertPoint(ElseIfTerm);
@@ -414,10 +408,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     {
         ShadowValue = IRB.CreateAnd(ShadowValue, IRB.getInt16(0x8F8F));
     }
-    else
-    {
-        ShadowValue = IRB.CreateAnd(ShadowValue, IRB.getInt8(0x8F));
-    }
+    // else, leave it to slow path
 
     Value *Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
     Instruction *CrashTerm = nullptr;
@@ -975,6 +966,12 @@ bool AddressSanitizer::instrumentFunction(Function &F)
                          (unsigned)ClInstrumentationWithCallsThreshold);
 
     // Instrument.
+
+    // sgxsdk should ensure SGXSanEnclaveSize > 0 and SGXSanEnclaveEnd do not overflow
+    IRBuilder<> IRB(&F.front().front());
+    SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr);
+    SGXSanEnclaveEndPlus1 = IRB.CreateAdd(SGXSanEnclaveBase, IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr));
+
     for (auto &Operand : OperandsToInstrument)
     {
         instrumentMop(Operand, UseCalls);
