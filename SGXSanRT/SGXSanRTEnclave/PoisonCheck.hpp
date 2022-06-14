@@ -10,7 +10,7 @@
 extern "C"
 {
 #endif
-    uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask = 0x8F);
+    uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t mask = 0x8F, bool ret_adddr = false);
     bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size, uint8_t mask);
 #if defined(__cplusplus)
 }
@@ -109,7 +109,7 @@ static inline bool RangesOverlap(const char *offset1, uptr length1,
         sgxsan_error(__offset > __offset + __size,                                               \
                      "[%s:%d] 0x%lx:%lu size overflow\n", __FILE__, __LINE__, __offset, __size); \
         if (!QuickCheckForUnpoisonedRegion(__offset, __size) &&                                  \
-            (__bad = sgxsan_region_is_poisoned(__offset, __size)))                               \
+            (__bad = sgxsan_region_is_poisoned(__offset, __size, 0x8F, true)))                   \
         {                                                                                        \
             GET_CALLER_PC_BP_SP;                                                                 \
             ReportGenericError(pc, bp, sp, __bad, isWrite, __size, true);                        \

@@ -186,27 +186,38 @@ void sgxsan_shallow_poison_object(uptr addr, uptr size, uint8_t value, bool igno
     {
         addr = addr + complement;
         size = size - complement;
-        sgxsan_shallow_poison_aligned_object(addr, size, value, ignore_shadow_after_scope);
+        __sgxsan_shallow_poison_aligned_object(addr, size, value, ignore_shadow_after_scope);
     }
 }
 
-void sgxsan_shallow_poison_aligned_object(uptr addr, uptr size, uint8_t value, bool ignore_shadow_after_scope)
+void __sgxsan_shallow_poison_aligned_object(uptr addr, uptr size, uint8_t value, bool ignore_shadow_after_scope)
 {
-    assert(size > 0 and value < (uint8_t)0x80 and (value & 0x0F) == 0);
+    // checked by parent func
+    // assert(size > 0 and value < (uint8_t)0x80 and (value & 0x0F) == 0);
 
     assert(addr % SHADOW_GRANULARITY == 0);
     uptr shadow_addr = MEM_TO_SHADOW(addr);
     uptr shadow_size = (size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
-    assert(shadow_size >= 1);
+    // assert(shadow_size >= 1);
 
     // process middle shadow bytes
-    if (shadow_size > 2)
+    size_t step_size = 8, remained_size = shadow_size - 1, step = 0;
+    if (remained_size >= 32 /* not touch last byte */)
     {
-        memset((void *)shadow_addr, value, shadow_size - 1);
+        uint64_t copy_value = 0;
+        if (value != 0)
+            for (size_t i = 0; i < step_size; i++)
+                copy_value = (copy_value << 8 /* bit */) + value;
+
+        uint64_t *p = (uint64_t *)shadow_addr;
+        for (; step < remained_size / step_size; step++)
+            p[step] = copy_value;
+
+        remained_size -= (step * step_size);
     }
-    else if (shadow_size == 2)
+    if (remained_size > 0)
     {
-        *(uint8_t *)shadow_addr = value;
+        memset((void *)(shadow_addr + step * step_size), value, remained_size);
     }
 
     // now process last shadow byte

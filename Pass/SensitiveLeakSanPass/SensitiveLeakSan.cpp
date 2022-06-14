@@ -72,28 +72,31 @@ void SensitiveLeakSan::ShallowPoisonAlignedObject(Value *objPtr, Value *objSize,
     // Value *dstShadowSize = RoundUpUDiv(IRB, objSize, SHADOW_GRANULARITY);
     // Value *dstShadowSizeMinus1 = IRB.CreateSub(dstShadowSize, ConstantInt::get(IntptrTy, 1));
 
-    size_t i = 0;
-    for (; i < (srcShadowBytesLen - 1) / 4; i++)
+    size_t step = 0, stepSize = (srcShadowBytesLen - 1 >= 32) ? 8 /* 64bit copy */ : 4 /* 32bit copy */;
+    auto cpIntTy = Type::getIntNTy(*C, stepSize * 8);
+    for (; step < (srcShadowBytesLen - 1) / stepSize; step++)
     {
         // assume little-endian
-        uint32_t value = (srcShadowBytesAddr[i * 4 + 3] << 24) + (srcShadowBytesAddr[i * 4 + 2] << 16) + (srcShadowBytesAddr[i * 4 + 1] << 8) + srcShadowBytesAddr[i * 4];
+        uint64_t value = 0;
+        for (size_t j = 1; j <= stepSize; j++)
+        {
+            value = (value << 8 /* bit */) + srcShadowBytesAddr[step * stepSize + (stepSize - j)];
+        }
         auto storeShadow = IRB.CreateStore(
-            IRB.getInt32(value),
-            IRB.CreateIntToPtr(IRB.CreateAdd(dstShadowAddrInt, ConstantInt::get(IntptrTy, i * 4)), PointerType::get(IRB.getInt32Ty(), 0)));
+            ConstantInt::get(cpIntTy, value),
+            IRB.CreateIntToPtr(IRB.CreateAdd(dstShadowAddrInt, ConstantInt::get(IntptrTy, step * stepSize)), cpIntTy->getPointerTo()));
         setNoSanitizeMetadata(storeShadow);
     }
 
-    uint32_t endCopy = 0;
-    size_t remained = srcShadowBytesLen - 1 - 4 * i;
-    assert(remained < 4);
+    size_t remained = srcShadowBytesLen - 1 - stepSize * step;
+    assert(remained < stepSize);
     for (size_t j = 0; j < remained; j++)
     {
-        endCopy = (endCopy << 8) + srcShadowBytesAddr[4 * i + remained - 1 - j];
+        auto storeShadow = IRB.CreateStore(
+            IRB.getInt8(srcShadowBytesAddr[step * stepSize + j]),
+            IRB.CreateIntToPtr(IRB.CreateAdd(dstShadowAddrInt, ConstantInt::get(IntptrTy, step * stepSize + j)), IRB.getInt8PtrTy()));
+        setNoSanitizeMetadata(storeShadow);
     }
-    auto storeShadow = IRB.CreateStore(
-        IRB.getInt32(endCopy),
-        IRB.CreateIntToPtr(IRB.CreateAdd(dstShadowAddrInt, ConstantInt::get(IntptrTy, i * 4)), PointerType::get(IRB.getInt32Ty(), 0)));
-    setNoSanitizeMetadata(storeShadow);
 
     if ((srcShadowBytesAddr[srcShadowBytesLen - 1] & (~0xF)) != 0)
     {
@@ -793,7 +796,6 @@ void SensitiveLeakSan::includeThreadFuncArgShadow()
 void SensitiveLeakSan::includeSGXSanCheck()
 {
     IRBuilder<> IRB(*C);
-    sgxsan_region_is_poisoned = M->getOrInsertFunction("sgxsan_region_is_poisoned", IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
     sgx_is_within_enclave = M->getOrInsertFunction("sgx_is_within_enclave", IRB.getInt32Ty(), IRB.getInt8PtrTy(), IntptrTy);
     sgxsan_region_is_in_elrange_and_poisoned = M->getOrInsertFunction("sgxsan_region_is_in_elrange_and_poisoned", IRB.getInt1Ty(), IRB.getInt64Ty(), IRB.getInt64Ty(), IRB.getInt8Ty());
 }

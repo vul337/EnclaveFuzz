@@ -41,7 +41,7 @@ void *__asan_memcpy(void *to, const void *from, uptr size)
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
             check_output_hybrid((uint64_t)from, size);
         }
     }
@@ -82,7 +82,7 @@ void *__asan_memmove(void *to, const void *from, uptr size)
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
             check_output_hybrid((uint64_t)from, size);
         }
     }
@@ -114,7 +114,7 @@ errno_t sgxsan_memcpy_s(void *dst, size_t sizeInBytes, const void *src, size_t c
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
             check_output_hybrid((uint64_t)src, count);
         }
     }
@@ -155,7 +155,7 @@ int sgxsan_memmove_s(void *dst, size_t sizeInBytes, const void *src, size_t coun
         SGXSAN_ELRANGE_CHECK_END;
         if (isSrcInEnclave && isDstOutEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, ~0x70 | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
             check_output_hybrid((uint64_t)src, count);
         }
     }
