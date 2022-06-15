@@ -347,16 +347,16 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     // branch step3(or access, TBridge), step1;
     //
     // step1:
-    // cmp (end > EnclaveEnd)
+    // cmp (start > EnclaveEnd)
     // branch step3(or access, TBridge), step2;
     //
     // step2:
-    // shadowbyte check; // now totally in elrange
+    // shadowbyte check; // now totally in elrange, or trigger shadow map guard #PF before enclave guard #PF
     // branch access;
     //
     // <BEGIN: only not at TBridge>
     // step3:
-    // cmp (end < EnclaveBase | start > EnclaveEnd)
+    // cmp (end < EnclaveBase /* | start > EnclaveEnd */)
     // branch step4, access;
     //
     // step4:
@@ -388,11 +388,8 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     step0BBTerm->eraseFromParent();
 
     IRB.SetInsertPoint(step1BB);
-    // we use page fault of 0 address to find address overflow problem, now start <= end
-    Value *EndAddrUGTEnclaveEnd = IRB.CreateICmpUGE(
-        IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
-        SGXSanEnclaveEndPlus1);
-    IRB.CreateCondBr(EndAddrUGTEnclaveEnd, step3BB ? step3BB : accessBB, step2BB, MDBuilder(*C).createBranchWeights(1, 100000));
+    Value *StartAddrUGTEnclaveEnd = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveEndPlus1);
+    IRB.CreateCondBr(StartAddrUGTEnclaveEnd, step3BB ? step3BB : accessBB, step2BB, MDBuilder(*C).createBranchWeights(1, 100000));
 
     IRB.SetInsertPoint(step2BB);
     Instruction *ShadowCheckInsertPoint = IRB.CreateBr(accessBB);
@@ -403,9 +400,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
         Value *EndAddrULTEnclaveBase = IRB.CreateICmpULT(
             IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
             SGXSanEnclaveBase);
-        Value *StartAddrUGTEnclaveEnd = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveEndPlus1);
-        Value *Cond = IRB.CreateAnd(StartAddrUGTEnclaveEnd, EndAddrULTEnclaveBase);
-        IRB.CreateCondBr(Cond, step4BB, accessBB, MDBuilder(*C).createBranchWeights(100000, 1));
+        IRB.CreateCondBr(EndAddrULTEnclaveBase, step4BB, accessBB, MDBuilder(*C).createBranchWeights(100000, 1));
 
         IRB.SetInsertPoint(step4BB);
         Instruction *WhitelistCheckInsertPoint = IRB.CreateBr(accessBB);
