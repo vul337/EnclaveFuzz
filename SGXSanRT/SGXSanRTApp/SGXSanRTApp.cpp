@@ -43,7 +43,8 @@ std::string enclave_name(_xstr(ENCLAVE_FILENAME));
 uptr g_enclave_base = 0, g_enclave_size = 0;
 uint64_t kEnclaveMemBeg = 0, kEnclaveMemEnd = 0,
 		 kEnclaveShadowBeg = 0, kEnclaveShadowEnd = 0;
-static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
+static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0,
+				g_shadow_low_guard_start = 0, g_shadow_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
 // don't touch it at app side, since there is a rwlock applied at enclave side
 std::vector<SGXSanMMapInfo> g_mmap_infos;
@@ -111,6 +112,15 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 		{
 			log_error("Infer pointer dereference overflows enclave boundray, as mprotect's effort is page-granularity and si_addr only give page-granularity address\n");
 		}
+		else if ((g_shadow_low_guard_start <= page_fault_addr && page_fault_addr < kEnclaveShadowBeg) ||
+				 (kEnclaveShadowEnd < page_fault_addr && page_fault_addr <= g_shadow_high_guard_end))
+		{
+			log_error("Pointer dereference overflows shadow map boundray (Overlapping memory access)\n");
+		}
+		else if ((kEnclaveShadowEnd + 1 - 0x1000) <= page_fault_addr && page_fault_addr <= kEnclaveShadowEnd)
+		{
+			log_error("Infer pointer dereference overflows shadow map boundray, as mprotect's effort is page-granularity and si_addr only give page-granularity address\n");
+		}
 	}
 
 	// call previous signal handler
@@ -175,21 +185,26 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size, uptr 
 	kEnclaveMemBeg = g_enclave_base;
 	kEnclaveMemEnd = g_enclave_base + enclave_size - 1;
 
-	uptr shadow_start = kEnclaveShadowBeg;
-
 	uptr page_size = getpagesize();
 	sgxsan_error(page_size != 0x1000, "Currently only support 4k page size\n");
-	shadow_start -= page_size;
+
+	g_shadow_low_guard_start = kEnclaveShadowBeg - page_size;
+	g_shadow_high_guard_end = kEnclaveShadowEnd + page_size;
 
 	// fix-me: may need unmap at destructor
 	// mmap the shadow plus at least one page at the left.
-	sgxsan_error((MAP_FAILED == mmap((void *)shadow_start, kEnclaveShadowEnd - shadow_start + 1,
+	sgxsan_error((MAP_FAILED == mmap((void *)g_shadow_low_guard_start,
+									 g_shadow_high_guard_end - g_shadow_low_guard_start + 1,
 									 PROT_READ | PROT_WRITE,
 									 MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON,
 									 -1, 0)) ||
-					 (-1 == madvise((void *)shadow_start, kEnclaveShadowEnd - shadow_start + 1, MADV_NOHUGEPAGE)),
+					 (-1 == madvise((void *)g_shadow_low_guard_start,
+									g_shadow_high_guard_end - g_shadow_low_guard_start + 1,
+									MADV_NOHUGEPAGE)),
 				 "Shadow Memory unavailable\n");
-
+	sgxsan_error(mprotect((void *)g_shadow_low_guard_start, page_size, PROT_NONE) ||
+					 mprotect((void *)(kEnclaveShadowEnd + 1), page_size, PROT_NONE),
+				 "Failed to make guard page for shadow map");
 	sgxsan_error(((kEnclaveMemBeg & 0xfff) != 0) ||
 					 (((kEnclaveMemEnd + 1) & 0xfff) != 0),
 				 "Elrange is not aligned to page\n");
