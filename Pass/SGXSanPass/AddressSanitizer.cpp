@@ -335,48 +335,82 @@ void AddressSanitizer::declareExternElrangeSymbol(Module &M)
 void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *InsertBefore, Value *Addr,
                                          uint32_t TypeSize, bool IsWrite, Value *SizeArgument, bool UseCalls)
 {
+    assert(TypeSize > 0 && TypeSize % 8 == 0);
 
     IRBuilder<> IRB(InsertBefore);
     Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
     size_t AccessSizeIndex = TypeSizeToSizeIndex(TypeSize);
 
-    // check elrange
-    assert(TypeSize > 0 && TypeSize % 8 == 0);
-    Value *EndAddrLong = IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1));
-
-    // we use page fault of 0 address to find address overflow problem, now start <= end
-
-    Instruction *ShadowCheckInsertPoint = nullptr;
-    // Use elrange guard page to detect cross boundary
-    // below is c-like code
-    // if (EnclaveBase <= start (1-bit)& end <= EnclaveEnd) // totally in elrange
-    // {
-    //     shadowbyte check; // so (start >= EnclaveBase and end <= EnclaveEnd)
-    //                                                                                              <= ShadowCheckInsertPoint
-    // }
-    // else if (end < EnclaveBase (1-bit)| start > EnclaveEnd) // totally outside enclave
-    // {
-    //     Out-Addr Whitelist check(start, size);
-    // }
-    // situation that cross-bound leave to elrange guard check
-    // access start address                                                                         <= InsertBefore
-    Value *CmpStartAddrUGEEnclaveBase = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveBase);
-    Value *CmpEndAddrULEEnclaveEnd = IRB.CreateICmpULT(EndAddrLong, SGXSanEnclaveEndPlus1);
-    Value *IfCond = IRB.CreateAnd(CmpStartAddrUGEEnclaveBase, CmpEndAddrULEEnclaveEnd);
+    // <Use elrange guard page to detect cross boundary, below is c-like code>
+    // step0:
+    // cmp (start < EnclaveBase)
+    // branch step3(or access, TBridge), step1;
+    //
+    // step1:
+    // cmp (end > EnclaveEnd)
+    // branch step3(or access, TBridge), step2;
+    //
+    // step2:
+    // shadowbyte check; // now totally in elrange
+    // branch access;
+    //
+    // <BEGIN: only not at TBridge>
+    // step3:
+    // cmp (end < EnclaveBase | start > EnclaveEnd)
+    // branch step4, access;
+    //
+    // step4:
+    // Out-Enclave-Addr Whitelist Check; // now totally out elrange
+    // branch access;
+    // <END: only not at TBridge>
+    //
+    // access:
+    BasicBlock *step0BB = nullptr, *step1BB = nullptr, *step2BB = nullptr,
+               *step3BB = nullptr, *step4BB = nullptr, *accessBB = nullptr;
+    step0BB = InsertBefore->getParent();
+    accessBB = SplitBlock(step0BB, InsertBefore);
     if (isFuncAtEnclaveTBridge)
     {
-        ShadowCheckInsertPoint = SplitBlockAndInsertIfThen(IfCond, InsertBefore, false);
+        step2BB = BasicBlock::Create(*C, "step2", step0BB->getParent(), accessBB);
     }
     else
     {
-        Instruction *ElseTI = nullptr;
-        SplitBlockAndInsertIfThenElse(IfCond, InsertBefore, &ShadowCheckInsertPoint, &ElseTI, MDBuilder(*C).createBranchWeights(100000, 1));
-        IRB.SetInsertPoint(ElseTI);
-        Value *CmpEndAddrULTEnclaveBase = IRB.CreateICmpULT(EndAddrLong, SGXSanEnclaveBase);
-        Value *CmpStartAddrUGTEnclaveEnd = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveEndPlus1);
-        Value *ElseIfCond = IRB.CreateOr(CmpEndAddrULTEnclaveBase, CmpStartAddrUGTEnclaveEnd);
-        Instruction *ElseIfTerm = SplitBlockAndInsertIfThen(ElseIfCond, ElseTI, false);
-        IRB.SetInsertPoint(ElseIfTerm);
+        step4BB = BasicBlock::Create(*C, "step4", step0BB->getParent(), accessBB);
+        step3BB = BasicBlock::Create(*C, "step3", step0BB->getParent(), step4BB);
+        step2BB = BasicBlock::Create(*C, "step2", step0BB->getParent(), step3BB);
+    }
+    step1BB = BasicBlock::Create(*C, "step1", step0BB->getParent(), step2BB);
+
+    Instruction *step0BBTerm = step0BB->getTerminator();
+    IRB.SetInsertPoint(step0BBTerm);
+    Value *StartAddrULTEnclaveBase = IRB.CreateICmpULT(AddrLong, SGXSanEnclaveBase);
+    IRB.CreateCondBr(StartAddrULTEnclaveBase, step3BB ? step3BB : accessBB, step1BB, MDBuilder(*C).createBranchWeights(1, 100000));
+    step0BBTerm->eraseFromParent();
+
+    IRB.SetInsertPoint(step1BB);
+    // we use page fault of 0 address to find address overflow problem, now start <= end
+    Value *EndAddrUGTEnclaveEnd = IRB.CreateICmpUGE(
+        IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
+        SGXSanEnclaveEndPlus1);
+    IRB.CreateCondBr(EndAddrUGTEnclaveEnd, step3BB ? step3BB : accessBB, step2BB, MDBuilder(*C).createBranchWeights(1, 100000));
+
+    IRB.SetInsertPoint(step2BB);
+    Instruction *ShadowCheckInsertPoint = IRB.CreateBr(accessBB);
+
+    if (not isFuncAtEnclaveTBridge)
+    {
+        IRB.SetInsertPoint(step3BB);
+        Value *EndAddrULTEnclaveBase = IRB.CreateICmpULT(
+            IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
+            SGXSanEnclaveBase);
+        Value *StartAddrUGTEnclaveEnd = IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveEndPlus1);
+        Value *Cond = IRB.CreateAnd(StartAddrUGTEnclaveEnd, EndAddrULTEnclaveBase);
+        IRB.CreateCondBr(Cond, step4BB, accessBB, MDBuilder(*C).createBranchWeights(100000, 1));
+
+        IRB.SetInsertPoint(step4BB);
+        Instruction *WhitelistCheckInsertPoint = IRB.CreateBr(accessBB);
+
+        IRB.SetInsertPoint(WhitelistCheckInsertPoint);
         IRB.CreateCall(WhitelistOfAddrOutEnclave_query_ex,
                        {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
                         ConstantInt::get(IntptrTy, (TypeSize >> 3)),
@@ -408,26 +442,24 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     {
         ShadowValue = IRB.CreateAnd(ShadowValue, IRB.getInt16(0x8F8F));
     }
-    // else, leave it to slow path
+    // else, leave it to slow path if not 0
 
     Value *Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
-    Instruction *CrashTerm = nullptr;
 
     // We use branch weights for the slow path check, to indicate that the slow
     // path is rarely taken. This seems to be the case for SPEC benchmarks.
-    // fixme: avoid extra branch
-    Instruction *CheckTerm = SplitBlockAndInsertIfThen(
-        Cmp, ShadowCheckInsertPoint, false, MDBuilder(*C).createBranchWeights(1, 100000));
-    assert(cast<BranchInst>(CheckTerm)->isUnconditional());
-    BasicBlock *NextBB = CheckTerm->getSuccessor(0);
-    IRB.SetInsertPoint(CheckTerm);
-    Value *Cmp2 = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    // here we know ShadowCheckInsertPoint must be a BranchInst
+    BasicBlock *SlowPathBB = BasicBlock::Create(*C, "slow_path", step2BB->getParent(), step2BB->getNextNode());
+    IRB.CreateCondBr(Cmp, SlowPathBB, accessBB, MDBuilder(*C).createBranchWeights(1, 100000));
+    ShadowCheckInsertPoint->eraseFromParent();
 
-    BasicBlock *CrashBlock =
-        BasicBlock::Create(*C, "", NextBB->getParent(), NextBB);
-    CrashTerm = new UnreachableInst(*C, CrashBlock);
-    BranchInst *NewTerm = BranchInst::Create(CrashBlock, NextBB, Cmp2);
-    ReplaceInstWithInst(CheckTerm, NewTerm);
+    IRB.SetInsertPoint(SlowPathBB);
+    Value *Cmp2 = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    BasicBlock *CrashBlock = BasicBlock::Create(*C, "crash", SlowPathBB->getParent(), SlowPathBB->getNextNode());
+    IRB.CreateCondBr(Cmp2, CrashBlock, accessBB, MDBuilder(*C).createBranchWeights(1, 100000));
+
+    IRB.SetInsertPoint(CrashBlock);
+    Instruction *CrashTerm = IRB.CreateUnreachable();
     // Load/Store instrumentations almost finish here
 
     // Crash code
@@ -969,8 +1001,8 @@ bool AddressSanitizer::instrumentFunction(Function &F)
 
     // sgxsdk should ensure SGXSanEnclaveSize > 0 and SGXSanEnclaveEnd do not overflow
     IRBuilder<> IRB(&F.front().front());
-    SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr);
-    SGXSanEnclaveEndPlus1 = IRB.CreateAdd(SGXSanEnclaveBase, IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr));
+    SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr, "enclave_base");
+    SGXSanEnclaveEndPlus1 = IRB.CreateAdd(SGXSanEnclaveBase, IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr, "enclave_size"), "enclave_end_plus1");
 
     for (auto &Operand : OperandsToInstrument)
     {
