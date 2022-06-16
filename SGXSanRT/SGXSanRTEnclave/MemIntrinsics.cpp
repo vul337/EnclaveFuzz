@@ -26,24 +26,24 @@ void *__asan_memcpy(void *to, const void *from, uptr size)
             sgxsan_error(RangesOverlap((const char *)to, size, (const char *)from, size),
                          "[%s] %p:%lu overlap with %p:%lu\n", "memcpy", to, size, from, size);
         }
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        bool isSrcInEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(from, size)
         ASAN_READ_RANGE(from, size);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query_ex(from, size, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
+
         SGXSAN_ELRANGE_CHECK_BEG(to, size)
         ASAN_WRITE_RANGE(to, size);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query(to, size);
-        SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
+        if (isSrcInEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned_filtered((uint64_t)from, size, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
             check_output_hybrid((uint64_t)from, size);
         }
+        SGXSAN_ELRANGE_CHECK_END;
     }
     return memcpy(to, from, size);
 }
@@ -67,24 +67,24 @@ void *__asan_memmove(void *to, const void *from, uptr size)
     if (LIKELY(asan_inited))
     {
         ENSURE_ASAN_INITED();
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        bool isSrcInEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(from, size)
         ASAN_READ_RANGE(from, size);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query_ex(from, size, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
+
         SGXSAN_ELRANGE_CHECK_BEG(to, size)
         ASAN_WRITE_RANGE(to, size);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query(to, size);
-        SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
+        if (isSrcInEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)from, size, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned_filtered((uint64_t)from, size, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)from, size);
             check_output_hybrid((uint64_t)from, size);
         }
+        SGXSAN_ELRANGE_CHECK_END;
     }
     return memmove(to, from, size);
 }
@@ -99,24 +99,24 @@ errno_t sgxsan_memcpy_s(void *dst, size_t sizeInBytes, const void *src, size_t c
             sgxsan_error(RangesOverlap((const char *)dst, sizeInBytes, (const char *)src, count),
                          "[%s] %p:%lu overlap with %p:%lu\n", "memcpy_s", dst, sizeInBytes, src, count);
         }
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        bool isSrcInEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(src, count)
         ASAN_READ_RANGE(src, count);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query_ex(src, count, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
+
         SGXSAN_ELRANGE_CHECK_BEG(dst, sizeInBytes)
         ASAN_WRITE_RANGE(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query(dst, sizeInBytes);
-        SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
+        if (isSrcInEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned_filtered((uint64_t)src, count, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
             check_output_hybrid((uint64_t)src, count);
         }
+        SGXSAN_ELRANGE_CHECK_END;
     }
     return memcpy_s(dst, sizeInBytes, src, count);
 }
@@ -140,24 +140,24 @@ int sgxsan_memmove_s(void *dst, size_t sizeInBytes, const void *src, size_t coun
     if (LIKELY(asan_inited))
     {
         ENSURE_ASAN_INITED();
-        bool isSrcInEnclave = false, isDstOutEnclave = false;
+        bool isSrcInEnclave = false;
         SGXSAN_ELRANGE_CHECK_BEG(src, count)
         ASAN_READ_RANGE(src, count);
         isSrcInEnclave = true;
         SGXSAN_ELRANGE_CHECK_MID
         WhitelistOfAddrOutEnclave_query_ex(src, count, false, false, nullptr);
         SGXSAN_ELRANGE_CHECK_END;
+
         SGXSAN_ELRANGE_CHECK_BEG(dst, sizeInBytes)
         ASAN_WRITE_RANGE(dst, sizeInBytes);
         SGXSAN_ELRANGE_CHECK_MID
-        isDstOutEnclave = true;
         WhitelistOfAddrOutEnclave_query(dst, sizeInBytes);
-        SGXSAN_ELRANGE_CHECK_END;
-        if (isSrcInEnclave && isDstOutEnclave)
+        if (isSrcInEnclave)
         {
-            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned((uint64_t)src, count, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
+            SGXSAN_WARNING_DETAIL(sgxsan_region_is_poisoned_filtered((uint64_t)src, count, 0x8F | kSGXSanSensitiveObjData), "Plaintext Transfer", (uint64_t)src, count);
             check_output_hybrid((uint64_t)src, count);
         }
+        SGXSAN_ELRANGE_CHECK_END;
     }
     return memmove_s(dst, sizeInBytes, src, count);
 }

@@ -13,7 +13,7 @@ void sgxsan_edge_check(void *ptr, uint64_t len, int cnt)
         min_size = len;
     }
     SGXSAN_ELRANGE_CHECK_BEG((uptr)ptr, min_size)
-    if (sgxsan_region_is_poisoned((uptr)ptr, min_size, 0x8F | kSGXSanSensitiveLayout))
+    if (sgxsan_region_is_poisoned_filtered((uptr)ptr, min_size, 0x8F | kSGXSanSensitiveLayout))
     {
         GET_CALLER_PC_BP_SP;
         ReportGenericError(pc, bp, sp, (uptr)ptr, 0, min_size, false);
