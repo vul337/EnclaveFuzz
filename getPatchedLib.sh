@@ -22,6 +22,7 @@ cd ${SGXSAN_DIR}/output
 ln -fs libsgx_enclave_common.so libsgx_enclave_common.so.1
 
 # patch trts tcxx
+cd ../SGXSDKPatches
 patch -p1 -d ${LINUX_SGX_SRC_DIR} < lld_compatible_trts_tcxx.patch
 # get newer libsgx_trts.a
 echo "<<<Patching trts...>>>"
