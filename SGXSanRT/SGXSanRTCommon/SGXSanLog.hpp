@@ -36,7 +36,7 @@ extern "C"
 #endif
     void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
 #ifdef IN_ENCLAVE
-    void sgxsan_print_stack_trace(log_level ll = LOG_LEVEL_ERROR, unsigned int level = 0, uint64_t bp = 0, uint64_t ip = 0);
+    void sgxsan_print_stack_trace(log_level ll = LOG_LEVEL_ERROR);
 #endif
 #if defined(__cplusplus)
 }

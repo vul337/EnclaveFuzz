@@ -35,10 +35,11 @@ uint64_t kEnclaveMemBeg = 0, kEnclaveMemEnd = 0,
 
 int asan_inited = 0;
 
-// only usable for SGXv2 when MiscSelect is 1
+// #PF etc. need platform (e.g. SGXv2 CPU) support conditonal exception handling
 int sgxsan_exception_handler(sgx_exception_info_t *info)
 {
-    sgxsan_print_stack_trace(LOG_LEVEL_ERROR, 0, info->cpu_context.rbp, info->cpu_context.rip);
+    (void)info;
+    sgxsan_print_stack_trace();
     return EXCEPTION_CONTINUE_SEARCH;
 }
 

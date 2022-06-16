@@ -435,7 +435,7 @@ bool SensitiveLeakSan::ContainWordExactly(StringRef str, const std::string word)
         abort();
     }
     // filter out non-word str
-    std::regex word_regex("^\\w+$");
+    std::regex word_regex("^\\S+$");
     if (not std::regex_match(str.str(), word_regex))
     {
         errs() << "[ERROR] str isn't a valid word\n";
