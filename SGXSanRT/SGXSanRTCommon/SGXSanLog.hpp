@@ -42,31 +42,46 @@ extern "C"
 }
 #endif
 
-static inline void sgxsan_error(bool cond, const char *fmt, ...)
-{
-    if (cond)
-    {
-        va_list ap;
-        va_start(ap, fmt);
-        log_error(fmt, ap);
-        va_end(ap);
 #ifdef IN_ENCLAVE
-        sgxsan_print_stack_trace();
+#define sgxsan_error(cond, ...)         \
+    do                                  \
+    {                                   \
+        if (!!(cond))                   \
+        {                               \
+            log_error(__VA_ARGS__);     \
+            sgxsan_print_stack_trace(); \
+            abort();                    \
+        }                               \
+    } while (0);
+#else
+#define sgxsan_error(cond, ...)     \
+    do                              \
+    {                               \
+        if (!!(cond))               \
+        {                           \
+            log_error(__VA_ARGS__); \
+            abort();                \
+        }                           \
+    } while (0);
 #endif
-        abort();
-    }
-}
 
-static inline void sgxsan_warning(bool cond, const char *fmt, ...)
-{
-    if (cond)
-    {
-        va_list ap;
-        va_start(ap, fmt);
-        log_warning(fmt, ap);
-        va_end(ap);
 #ifdef IN_ENCLAVE
-        sgxsan_print_stack_trace();
+#define sgxsan_warning(cond, ...)       \
+    do                                  \
+    {                                   \
+        if (!!(cond))                   \
+        {                               \
+            log_warning(__VA_ARGS__);   \
+            sgxsan_print_stack_trace(); \
+        }                               \
+    } while (0);
+#else
+#define sgxsan_warning(cond, ...)     \
+    do                                \
+    {                                 \
+        if (!!(cond))                 \
+        {                             \
+            log_warning(__VA_ARGS__); \
+        }                             \
+    } while (0);
 #endif
-    }
-}
