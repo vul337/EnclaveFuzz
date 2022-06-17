@@ -71,6 +71,12 @@ static cl::opt<bool> ClUseAfterScope(
     cl::Hidden,
     cl::init(true));
 
+static cl::opt<bool> ClAlwaysSlowPath(
+    "sgxsan-always-slow-path",
+    cl::desc("use instrumentation with slow path for all accesses"),
+    cl::Hidden,
+    cl::init(false));
+
 bool isFuncAtEnclaveTBridge = false;
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
@@ -351,7 +357,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     // branch step3(or access, TBridge), step2;
     //
     // step2:
-    // shadowbyte check; // now totally in elrange, or trigger shadow map guard #PF before enclave guard #PF
+    // shadowbyte check; // now totally in elrange(, or trigger shadow map guard #PF before enclave guard #PF only if operation is not aligned)
     // branch access;
     //
     // <BEGIN: only not at TBridge>
@@ -437,21 +443,30 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     {
         ShadowValue = IRB.CreateAnd(ShadowValue, IRB.getInt16(0x8F8F));
     }
-    // else, leave it to slow path if not 0
+    else if (!ClAlwaysSlowPath)
+    {
+        ShadowValue = IRB.CreateAnd(ShadowValue, IRB.getInt8(0x8F));
+    }
 
     Value *Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
+    size_t Granularity = 1ULL << Mapping.Scale;
 
-    // We use branch weights for the slow path check, to indicate that the slow
-    // path is rarely taken. This seems to be the case for SPEC benchmarks.
-    // here we know ShadowCheckInsertPoint must be a BranchInst
-    BasicBlock *SlowPathBB = BasicBlock::Create(*C, "slow_path", step2BB->getParent(), step2BB->getNextNode());
-    IRB.CreateCondBr(Cmp, SlowPathBB, accessBB, MDBuilder(*C).createBranchWeights(1, 100000));
+    BasicBlock *SlowPathBB = nullptr;
+    if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity))
+    {
+        // We use branch weights for the slow path check, to indicate that the slow
+        // path is rarely taken. This seems to be the case for SPEC benchmarks.
+        // here we know ShadowCheckInsertPoint must be a BranchInst
+        SlowPathBB = BasicBlock::Create(*C, "slow_path", step2BB->getParent(), step2BB->getNextNode());
+        IRB.CreateCondBr(Cmp, SlowPathBB, accessBB, MDBuilder(*C).createBranchWeights(1, 100000));
+
+        IRB.SetInsertPoint(SlowPathBB);
+        Cmp = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    }
+
+    BasicBlock *CrashBlock = BasicBlock::Create(*C, "crash", accessBB->getParent(), (SlowPathBB ? SlowPathBB : step2BB)->getNextNode());
+    IRB.CreateCondBr(Cmp, CrashBlock, accessBB, MDBuilder(*C).createBranchWeights(1, 100000));
     ShadowCheckInsertPoint->eraseFromParent();
-
-    IRB.SetInsertPoint(SlowPathBB);
-    Value *Cmp2 = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
-    BasicBlock *CrashBlock = BasicBlock::Create(*C, "crash", SlowPathBB->getParent(), SlowPathBB->getNextNode());
-    IRB.CreateCondBr(Cmp2, CrashBlock, accessBB, MDBuilder(*C).createBranchWeights(1, 100000));
 
     IRB.SetInsertPoint(CrashBlock);
     Instruction *CrashTerm = IRB.CreateUnreachable();

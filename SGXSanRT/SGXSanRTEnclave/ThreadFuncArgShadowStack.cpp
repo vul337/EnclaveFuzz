@@ -9,7 +9,7 @@
 
 // function addr -> poisoned function argument map [-1,0,1,...,MAX_ARG_NUM-2] ( -1 means return value)
 // too large will cost too much trts TLS init time (based on memset)
-#define MAX_ARG_NUM 128 // must be multiple of 64
+#define MAX_ARG_NUM 128 // must be multiple of 8
 #define MAX_STACK_DEPTH 512
 struct FuncArgShadowTy
 {
@@ -113,7 +113,7 @@ void ThreadFuncArgShadowStack::clear_frame(uint64_t func_addr)
     assert(top.func_addr == func_addr);
     // clear arg_shadow
     uint64_t *p = (uint64_t *)top.arg_shadow;
-    for (size_t step = 0; step < (MAX_ARG_NUM / 64); step++)
+    for (size_t step = 0; step < (MAX_ARG_NUM / 8); step++)
     {
         p[step] = 0;
     }
@@ -127,7 +127,7 @@ void ThreadFuncArgShadowStack::push_frame(uint64_t func_addr)
     top.func_addr = func_addr;
     // clear arg_shadow
     uint64_t *p = (uint64_t *)top.arg_shadow;
-    for (size_t step = 0; step < (MAX_ARG_NUM / 64); step++)
+    for (size_t step = 0; step < (MAX_ARG_NUM / 8); step++)
     {
         p[step] = 0;
     }
