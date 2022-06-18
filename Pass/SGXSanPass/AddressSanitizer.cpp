@@ -75,7 +75,7 @@ static cl::opt<bool> ClAlwaysSlowPath(
     "sgxsan-always-slow-path",
     cl::desc("use instrumentation with slow path for all accesses"),
     cl::Hidden,
-    cl::init(false));
+    cl::init(true));
 
 bool isFuncAtEnclaveTBridge = false;
 
@@ -377,15 +377,15 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns, Instruction *Inse
     accessBB = SplitBlock(step0BB, InsertBefore);
     if (isFuncAtEnclaveTBridge)
     {
-        step2BB = BasicBlock::Create(*C, "step2", step0BB->getParent(), accessBB);
+        step2BB = BasicBlock::Create(*C, "step2_BB", step0BB->getParent(), accessBB);
     }
     else
     {
-        step4BB = BasicBlock::Create(*C, "step4", step0BB->getParent(), accessBB);
-        step3BB = BasicBlock::Create(*C, "step3", step0BB->getParent(), step4BB);
-        step2BB = BasicBlock::Create(*C, "step2", step0BB->getParent(), step3BB);
+        step4BB = BasicBlock::Create(*C, "step4_BB", step0BB->getParent(), accessBB);
+        step3BB = BasicBlock::Create(*C, "step3_BB", step0BB->getParent(), step4BB);
+        step2BB = BasicBlock::Create(*C, "step2_BB", step0BB->getParent(), step3BB);
     }
-    step1BB = BasicBlock::Create(*C, "step1", step0BB->getParent(), step2BB);
+    step1BB = BasicBlock::Create(*C, "step1_BB", step0BB->getParent(), step2BB);
 
     Instruction *step0BBTerm = step0BB->getTerminator();
     IRB.SetInsertPoint(step0BBTerm);

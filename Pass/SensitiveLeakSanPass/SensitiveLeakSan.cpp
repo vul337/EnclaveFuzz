@@ -1221,6 +1221,7 @@ void SensitiveLeakSan::PoisonCIOperand(Value *src, Value *isPoisoned, CallInst *
     // instrument to poison argument shadow
     if (poisonedCI[CI].count(operandPosition) == 0)
     {
+        propagateCnt++;
         IRBuilder<> IRB(CI);
         Value *callee = CI->getCalledOperand();
         Value *calleeAddrInt = IRB.CreatePtrToInt(callee, IRB.getInt64Ty());
@@ -1251,6 +1252,7 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI)
 {
     if (poisonedInst.count(SI) == 0)
     {
+        propagateCnt++;
         Instruction *srcIsPoisonedTerm = SplitBlockAndInsertIfThen(isPoisoned, SI, false);
 
         IRBuilder<> IRB(srcIsPoisonedTerm);
@@ -1285,6 +1287,7 @@ void SensitiveLeakSan::PoisonRetShadow(Value *src, Value *isPoisoned, ReturnInst
 {
     if (poisonedInst.count(calleeRI) == 0)
     {
+        propagateCnt++;
         Instruction *isPoisonedTerm = SplitBlockAndInsertIfThen(isPoisoned, calleeRI, false);
         IRBuilder<> IRB(isPoisonedTerm);
         Value *calleeAddrInt = IRB.CreatePtrToInt(calleeRI->getFunction(), IRB.getInt64Ty());
@@ -1371,6 +1374,7 @@ void SensitiveLeakSan::propagateShadowInMemTransfer(CallInst *CI, Instruction *i
     assert(CI != nullptr && not isa<Function>(destPtr));
     if (processedMemTransferInst.count(CI) == 0)
     {
+        propagateCnt++;
         // current memory transfer instruction has never been instrumented
 
         IRBuilder<> IRB(insertPoint);
@@ -1454,6 +1458,7 @@ void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned, CallIns
 {
     if (poisonedInst.count(MSI) == 0)
     {
+        propagateCnt++;
         Instruction *srcIsPoisonedTerm = SplitBlockAndInsertIfThen(isSrcPoisoned, MSI, false);
         IRBuilder<> IRB(srcIsPoisonedTerm);
         assert(not isa<Function>(dstPtr));
@@ -1575,8 +1580,9 @@ bool SensitiveLeakSan::runOnModule()
     {
         dump(objPN);
     }
-
+    dbgs() << "[SLSan] Num of collected sensitive objs: " << this->SensitiveObjs.size() << "\n";
     WorkList = this->SensitiveObjs;
+    propagateCnt = 0;
     while (!WorkList.empty())
     {
         // update work status
@@ -1603,6 +1609,7 @@ bool SensitiveLeakSan::runOnModule()
         dbgs() << "========= End of showing point-to set ==========\n";
 #endif
     }
+    dbgs() << "[SLSan] Num of instrumented propagation: " << propagateCnt << "\n";
     return true;
 }
 

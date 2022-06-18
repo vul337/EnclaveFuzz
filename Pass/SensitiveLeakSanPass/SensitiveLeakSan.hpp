@@ -170,5 +170,6 @@ namespace llvm
             exactSecretKeywords = {"key", "dec"};
         std::map<std::string, DICompositeType *> DICompositeTypeMap;
         std::unordered_set<DIType *> processedDITypes;
+        size_t propagateCnt = 0;
     };
 }
