@@ -209,7 +209,7 @@ namespace llvm
         }
         else if (lenValue != nullptr)
         {
-            return IRB.CreateIntCast(IRB.CreateExactSDiv(IRB.CreateLoad(lenValue), IRB.getInt64(elementSz)),
+            return IRB.CreateIntCast(IRB.CreateExactSDiv(IRB.CreateLoad(lenValue->getType()->getScalarType()->getPointerElementType(), lenValue), IRB.getInt64(elementSz)),
                                      IRB.getInt32Ty(), true);
         }
         else

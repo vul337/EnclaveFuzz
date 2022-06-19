@@ -7,7 +7,7 @@
 
 using namespace llvm;
 
-void adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F)
+bool adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F)
 {
     // initialize
     Module *M = F.getParent();
@@ -42,6 +42,7 @@ void adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F)
     for (auto CI : OcfreeVec)
     {
         IRB.SetInsertPoint(CI->getNextNode());
-        IRB.CreateCall(SetUSP, IRB.CreateLoad(usp));
+        IRB.CreateCall(SetUSP, IRB.CreateLoad(IRB.getInt64Ty(), usp));
     }
+    return true;
 }

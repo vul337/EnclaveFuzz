@@ -101,7 +101,7 @@ void SensitiveLeakSan::ShallowPoisonAlignedObject(Value *objPtr, Value *objSize,
     if ((srcShadowBytesAddr[srcShadowBytesLen - 1] & (~0xF)) != 0)
     {
         Value *lastShadowBytePtr = IRB.CreateIntToPtr(IRB.CreateAdd(dstShadowAddrInt, ConstantInt::get(IntptrTy, srcShadowBytesLen - 1)), IRB.getInt8PtrTy());
-        LoadInst *lastShadowByte = IRB.CreateLoad(lastShadowBytePtr);
+        LoadInst *lastShadowByte = IRB.CreateLoad(IRB.getInt8Ty(), lastShadowBytePtr);
         setNoSanitizeMetadata(lastShadowByte);
 
         Value *lastCopyVal = IRB.CreateAdd(IRB.getInt8(srcShadowBytesAddr[srcShadowBytesLen - 1] & (~0xF)), IRB.CreateAnd(lastShadowByte, IRB.getInt8(0xF)));
@@ -146,7 +146,7 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(SVF::ObjPN *objPN, std::pai
     if (SVF::GepObjPN *gepObjPN = dyn_cast<SVF::GepObjPN>(objPN))
     {
         auto inStructOffset = gepObjPN->getLocationSet().getOffset();
-        obj = IRB.CreateGEP(objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
+        obj = IRB.CreateGEP(objI->getType()->getScalarType()->getPointerElementType(), objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
         auto _objSize = M->getDataLayout().getTypeAllocSize(cast<PointerType>(obj->getType())->getElementType());
         assert(_objSize > 0);
         objSize = IRB.getInt64(_objSize);
@@ -771,6 +771,7 @@ void SensitiveLeakSan::initSVF()
     SVF::ExtAPI::getExtAPI()->registerDefinedFunc(heapAllocatorWrapperNames, SVF::ExtAPI::EFT_ALLOC);
 
     svfModule = SVF::LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(*M);
+    svfModule->buildSymbolTableInfo();
     SVF::PAGBuilder builder;
 
     pag = builder.build(svfModule);

@@ -2,4 +2,4 @@
 
 #include "llvm/IR/Function.h"
 
-void adjustUntrustedSPRegisterAtOcallAllocAndFree(llvm::Function &F);
+bool adjustUntrustedSPRegisterAtOcallAllocAndFree(llvm::Function &F);

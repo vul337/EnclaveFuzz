@@ -4,6 +4,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Analysis/CFLSteensAliasAnalysis.h"
+#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Passes/PassBuilder.h"
 
 #include "AddressSanitizer.hpp"
 #include "ModuleAddressSanitizer.hpp"
@@ -21,6 +23,59 @@ static cl::opt<bool> ClEnableSensitiveLeakSan(
 
 namespace
 {
+    // New PM implementation
+    struct SGXSanNewPass : PassInfoMixin<SGXSanNewPass>
+    {
+        PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM)
+        {
+            bool Changed = false;
+
+            // std::error_code EC;
+            // raw_fd_stream f(M.getName().str() + ".dump", EC);
+            // M.print(f, nullptr);
+
+            // run SensitiveLeakSan Pass
+            if (ClEnableSensitiveLeakSan)
+            {
+                dbgs() << "<< SensitiveLeakSan: " << M.getName().str() << " >>\n";
+                SensitiveLeakSan SLSan(M, MAM.getResult<CFLSteensAA>(M));
+                Changed |= SLSan.runOnModule();
+            }
+
+            dbgs() << "<< SGXSanPass: " << M.getName().str() << " >>\n";
+            ModuleAddressSanitizer MASan(M);
+            Changed |= MASan.instrumentModule(M);
+
+            AddressSanitizer ASan(M);
+            for (Function &F : M)
+            {
+                if (F.isDeclaration())
+                    continue;
+
+                if (F.getName().startswith("sgxsan_ocall_") ||
+                    F.getName().startswith("sgx_sgxsan_ecall_") ||
+                    F.getName().startswith("fuzzer_ocall_") ||
+                    F.getName().startswith("sgx_fuzzer_ecall_"))
+                {
+                    Changed |= adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
+                    // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
+                    // don't call instrumentFunction()
+                }
+                else
+                {
+                    // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
+                    // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.
+                    Changed |= ASan.instrumentFunction(F);
+                }
+            }
+            return Changed ? PreservedAnalyses::none()
+                           : PreservedAnalyses::all();
+        }
+
+        static bool isRequired() { return true; }
+    };
+
+    // Legacy PM implementation
     struct SGXSanPass : public ModulePass
     {
         static char ID;
@@ -45,13 +100,13 @@ namespace
             // run SensitiveLeakSan Pass
             if (ClEnableSensitiveLeakSan)
             {
-                dbgs() << "[SensitiveLeakSan] " << M.getName().str() << "\n";
+                dbgs() << "<< SensitiveLeakSan: " << M.getName().str() << " >>\n";
                 CFLSteensAAResult &AAResult = getAnalysis<CFLSteensAAWrapperPass>().getResult();
                 SensitiveLeakSan SLSan(M, AAResult);
                 Changed |= SLSan.runOnModule();
             }
 
-            dbgs() << "[SGXSanPass] " << M.getName().str() << "\n";
+            dbgs() << "<< SGXSanPass: " << M.getName().str() << " >>\n";
             ModuleAddressSanitizer MASan(M);
             Changed |= MASan.instrumentModule(M);
 
@@ -66,7 +121,7 @@ namespace
                     F.getName().startswith("fuzzer_ocall_") ||
                     F.getName().startswith("sgx_fuzzer_ecall_"))
                 {
-                    adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
+                    Changed |= adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
                     // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial function, (linkonce_odr type function) in library which will check shadowbyte whether instrumented or not is not necessary.
                     // don't call instrumentFunction()
                 }
@@ -82,6 +137,27 @@ namespace
     }; // end of struct SGXSanPass
 } // end of anonymous namespace
 
+// New Pass Manager
+llvm::PassPluginLibraryInfo getSGXSanNewPassPluginInfo()
+{
+    return {LLVM_PLUGIN_API_VERSION, "SGXSanNewPass", LLVM_VERSION_STRING,
+            [](PassBuilder &PB)
+            {
+                // now only llvm-15 support register new lto pass
+                // PB.registerFullLinkTimeOptimizationEarlyEPCallback(
+                //     [](ModulePassManager &MPM, PassBuilder::OptimizationLevel)
+                //     {
+                //         MPM.addPass(SGXSanNewPass());
+                //     });
+            }};
+}
+
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo()
+{
+    return getSGXSanNewPassPluginInfo();
+}
+
+// Old Pass Manager
 char SGXSanPass::ID = 0;
 static RegisterPass<SGXSanPass> register_sgxsan_pass("SGXSanPass", "SGXSanPass",
                                                      false /* Only looks at CFG */,

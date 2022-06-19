@@ -706,8 +706,8 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
         {
             // multi element
             FOR_LOOP_BEG(PointerCheckTerm, eleCnt)
-            Value *eleAddr = IRB.CreateGEP(operand, phi);
-            auto ele = IRB.CreateLoad(eleAddr);
+            Value *eleAddr = IRB.CreateGEP(pointerType->getElementType(), operand, phi);
+            auto ele = IRB.CreateLoad(eleAddr->getType()->getScalarType()->getPointerElementType(), eleAddr);
             /* if element is pointer then nullptr means no idea about element's sub-element count */
             instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
             FOR_LOOP_END(eleCnt)
@@ -715,7 +715,7 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
         else
         {
             // one element
-            auto ele = IRB.CreateLoad(operand);
+            auto ele = IRB.CreateLoad(pointerType->getElementType(), operand);
             bool result = instrumentParameterCheck(ele, IRB, DL, depth, nullptr, operand);
             if (not result)
                 ele->eraseFromParent();
@@ -756,8 +756,8 @@ bool AddressSanitizer::instrumentParameterCheck(Value *operand, IRBuilder<> &IRB
             // lvalue case, that has memobj
             auto cnt = IRB.getInt32(arrayType->getNumElements());
             FOR_LOOP_BEG(insertPoint, cnt)
-            Value *eleAddr = IRB.CreateGEP(operandAddr, {IRB.getInt32(0), phi});
-            auto ele = IRB.CreateLoad(eleAddr);
+            Value *eleAddr = IRB.CreateGEP(operandAddr->getType()->getScalarType()->getPointerElementType(), operandAddr, {IRB.getInt32(0), phi});
+            auto ele = IRB.CreateLoad(eleAddr->getType()->getScalarType()->getPointerElementType(), eleAddr);
             instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
             FOR_LOOP_END(cnt)
             has_modified = true;

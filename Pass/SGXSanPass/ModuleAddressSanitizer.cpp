@@ -172,7 +172,11 @@ bool ModuleAddressSanitizer::shouldInstrumentGlobal(GlobalVariable *G) const
         {
         case Comdat::Any:
         case Comdat::ExactMatch:
+#if (LLVM_VERSION_MAJOR <= 12)
         case Comdat::NoDuplicates:
+#else
+        case Comdat::NoDeduplicate:
+#endif
             break;
         case Comdat::Largest:
         case Comdat::SameSize:
