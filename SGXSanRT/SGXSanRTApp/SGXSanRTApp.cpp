@@ -98,8 +98,10 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv)
 	if (signum == SIGSEGV)
 	{
 		// process siginfo
-		uint64_t page_fault_addr = (uint64_t)siginfo->si_addr;
-		if ((void *)page_fault_addr == nullptr)
+		void *pf_addr_p = siginfo->si_addr;
+		log_error("#PF Addr: %p\n", pf_addr_p);
+		uint64_t page_fault_addr = (uint64_t)pf_addr_p;
+		if (pf_addr_p == nullptr)
 		{
 			log_error("Null-Pointer dereference\n");
 		}
