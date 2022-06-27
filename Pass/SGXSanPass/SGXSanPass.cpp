@@ -3,12 +3,12 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/PassBuilder.h"
 
 #include "AddressSanitizer.hpp"
-#include "ModuleAddressSanitizer.hpp"
 #include "SGXSanManifest.h"
 #include "AdjustUSP.hpp"
 #include "SensitiveLeakSan.hpp"
@@ -43,10 +43,9 @@ namespace
             }
 
             dbgs() << "<< SGXSanPass: " << M.getName().str() << " >>\n";
-            ModuleAddressSanitizer MASan(M);
-            Changed |= MASan.instrumentModule(M);
-
-            AddressSanitizer ASan(M);
+            GlobalsMetadata GlobalsMD = GlobalsMetadata(M);
+            const TargetLibraryInfo *TLI = &MAM.getResult<TargetLibraryAnalysis>(M);
+            AddressSanitizer ASan(M, &GlobalsMD, false, false, true, AsanDetectStackUseAfterReturnMode::Never);
             for (Function &F : M)
             {
                 if (F.isDeclaration())
@@ -65,9 +64,12 @@ namespace
                 {
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.
-                    Changed |= ASan.instrumentFunction(F);
+                    Changed |= ASan.instrumentFunction(F, TLI);
                 }
             }
+            ModuleAddressSanitizer MASan(M, &GlobalsMD);
+            Changed |= MASan.instrumentModule(M);
+
             return Changed ? PreservedAnalyses::none()
                            : PreservedAnalyses::all();
         }
@@ -87,6 +89,7 @@ namespace
             {
                 AU.addRequired<CFLSteensAAWrapperPass>();
             }
+            AU.addRequired<TargetLibraryInfoWrapperPass>();
         }
 
         bool runOnModule(Module &M) override
@@ -107,10 +110,8 @@ namespace
             }
 
             dbgs() << "<< SGXSanPass: " << M.getName().str() << " >>\n";
-            ModuleAddressSanitizer MASan(M);
-            Changed |= MASan.instrumentModule(M);
-
-            AddressSanitizer ASan(M);
+            GlobalsMetadata GlobalsMD = GlobalsMetadata(M);
+            AddressSanitizer ASan(M, &GlobalsMD, false, false, true, AsanDetectStackUseAfterReturnMode::Never);
             for (Function &F : M)
             {
                 if (F.isDeclaration())
@@ -127,11 +128,15 @@ namespace
                 }
                 else
                 {
+                    const TargetLibraryInfo *TLI =
+                        &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);
                     // hook sgx-specifical callee, normal asan, elrange check, Out-Addr Whitelist check, GlobalPropageteWhitelist
                     // Sensitive area check, Whitelist fill, Whitelist (De)Active, poison etc.
-                    Changed |= ASan.instrumentFunction(F);
+                    Changed |= ASan.instrumentFunction(F, TLI);
                 }
             }
+            ModuleAddressSanitizer MASan(M, &GlobalsMD);
+            Changed |= MASan.instrumentModule(M);
             return Changed;
         }
     }; // end of struct SGXSanPass

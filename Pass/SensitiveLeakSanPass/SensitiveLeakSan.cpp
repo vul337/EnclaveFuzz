@@ -1,4 +1,5 @@
 #include "SensitiveLeakSan.hpp"
+#include "AddressSanitizer.hpp"
 #include "SGXSanManifest.h"
 #include "llvm/Demangle/Demangle.h"
 
@@ -21,7 +22,7 @@ static cl::opt<int> heapAllocatorsMaxCollectionTimes(
 
 #define SGXSAN_SENSITIVE_OBJ_FLAG 0x20
 
-ShadowMapping Mapping = {3, SGXSAN_SHADOW_MAP_BASE};
+ShadowMapping Mapping;
 
 Value *SensitiveLeakSan::memToShadow(Value *Shadow, IRBuilder<> &IRB)
 {
@@ -40,8 +41,10 @@ Value *SensitiveLeakSan::memToShadow(Value *Shadow, IRBuilder<> &IRB)
 
     // (Shadow >> scale) + offset
     Value *ShadowBase = ConstantInt::get(IntptrTy, Mapping.Offset);
-
-    return IRB.CreateAdd(Shadow, ShadowBase);
+    if (Mapping.OrShadowOffset)
+        return IRB.CreateOr(Shadow, ShadowBase);
+    else
+        return IRB.CreateAdd(Shadow, ShadowBase);
 }
 
 Value *SensitiveLeakSan::memPtrToShadowPtr(Value *memPtr, IRBuilder<> &IRB)
@@ -69,7 +72,7 @@ void SensitiveLeakSan::ShallowPoisonAlignedObject(Value *objPtr, Value *objSize,
     IRB.CreateCall(sgxsan_check_shadow_bytes_match_obj, {objPtrInt, objSize, ConstantInt::get(IntptrTy, srcShadowBytesLen)});
 
     Value *dstShadowAddrInt = memToShadow(objPtrInt, IRB);
-    // Value *dstShadowSize = RoundUpUDiv(IRB, objSize, SHADOW_GRANULARITY);
+    // Value *dstShadowSize = RoundUpUDiv(IRB, objSize, (1UL << Mapping.Scale));
     // Value *dstShadowSizeMinus1 = IRB.CreateSub(dstShadowSize, ConstantInt::get(IntptrTy, 1));
 
     size_t step = 0, stepSize = (srcShadowBytesLen - 1 >= 32) ? 8 /* 64bit copy */ : 4 /* 32bit copy */;
@@ -600,8 +603,8 @@ bool SensitiveLeakSan::poisonStructSensitiveShadowOnTemp(DICompositeType *compos
                 size_t startBit = eleTy->getOffsetInBits() + offset;
                 size_t endBit = startBit + eleTy->getSizeInBits() - 1;
                 assert(endBit >= startBit);
-                size_t startShadowByte = startBit / (8 * SHADOW_GRANULARITY);
-                size_t endShadowByte = endBit / (8 * SHADOW_GRANULARITY);
+                size_t startShadowByte = startBit / (8 * (1UL << Mapping.Scale));
+                size_t endShadowByte = endBit / (8 * (1UL << Mapping.Scale));
                 assert(endShadowByte <= shadowBytesPair->second);
                 memset(shadowBytesPair->first + startShadowByte, SGXSAN_SENSITIVE_OBJ_FLAG, endShadowByte - startShadowByte + 1);
             }
@@ -628,7 +631,7 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN, SensitiveLeve
             auto compositeTy = getDICompositeType(getStructTypeOfHeapObj(objPN));
             if (compositeTy && compositeTy->getSizeInBits() != 0 && compositeTy->getTag() == dwarf::DW_TAG_structure_type)
             {
-                size_t shadowBytesLen = (compositeTy->getSizeInBits() + 8 * SHADOW_GRANULARITY - 1) / (8 * SHADOW_GRANULARITY);
+                size_t shadowBytesLen = (compositeTy->getSizeInBits() + 8 * (1UL << Mapping.Scale) - 1) / (8 * (1UL << Mapping.Scale));
                 uint8_t shadowBytes[shadowBytesLen];
                 memset(shadowBytes, 0, shadowBytesLen);
                 std::pair<uint8_t *, size_t> shadowBytesPair(shadowBytes, shadowBytesLen);
@@ -992,6 +995,8 @@ SensitiveLeakSan::SensitiveLeakSan(Module &ArgM, CFLSteensAAResult &AAResult)
     C = &(M->getContext());
     int LongSize = M->getDataLayout().getPointerSizeInBits();
     IntptrTy = Type::getIntNTy(*C, LongSize);
+    auto TargetTriple = Triple(ArgM.getTargetTriple());
+    Mapping = ASanGetShadowMapping(TargetTriple, LongSize, false);
     includeThreadFuncArgShadow();
     includeElrange();
     includeSGXSanCheck();

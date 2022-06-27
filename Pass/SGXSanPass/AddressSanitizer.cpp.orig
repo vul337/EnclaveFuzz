@@ -15,8 +15,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
-#include "PassCommon.hpp"
-#include "SGXSanInstVisitor.hpp"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -90,11 +88,10 @@
 #include <sstream>
 #include <string>
 #include <tuple>
-#include <unordered_set>
 
 using namespace llvm;
 
-#define DEBUG_TYPE "sgxsan"
+#define DEBUG_TYPE "asan"
 
 static const uint64_t kDefaultShadowScale = 3;
 static const uint64_t kDefaultShadowOffset32 = 1ULL << 29;
@@ -130,7 +127,7 @@ static const uintptr_t kRetiredStackFrameMagic = 0x45E0360E;
 
 const char kAsanModuleCtorName[] = "asan.module_ctor";
 const char kAsanModuleDtorName[] = "asan.module_dtor";
-static const uint64_t kAsanCtorAndDtorPriority = 102;
+static const uint64_t kAsanCtorAndDtorPriority = 1;
 // On Emscripten, the system needs more than one priorities for constructors.
 static const uint64_t kAsanEmscriptenCtorAndDtorPriority = 50;
 const char kAsanReportErrorTemplate[] = "__asan_report_";
@@ -183,58 +180,58 @@ static const unsigned kAllocaRzSize = 32;
 // Command-line flags.
 
 static cl::opt<bool>
-    ClEnableKasan("sgxsan-kernel",
+    ClEnableKasan("asan-kernel",
                   cl::desc("Enable KernelAddressSanitizer instrumentation"),
                   cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
-    ClRecover("sgxsan-recover",
+    ClRecover("asan-recover",
               cl::desc("Enable recovery mode (continue-after-error)."),
               cl::Hidden, cl::init(false));
 
 static cl::opt<bool> ClInsertVersionCheck(
-    "sgxsan-guard-against-version-mismatch",
+    "asan-guard-against-version-mismatch",
     cl::desc("Guard against compiler/runtime version mismatch."), cl::Hidden,
-    cl::init(false));
+    cl::init(true));
 
 // This flag may need to be replaced with -f[no-]asan-reads.
-static cl::opt<bool> ClInstrumentReads("sgxsan-instrument-reads",
+static cl::opt<bool> ClInstrumentReads("asan-instrument-reads",
                                        cl::desc("instrument read instructions"),
                                        cl::Hidden, cl::init(true));
 
 static cl::opt<bool>
-    ClInstrumentWrites("sgxsan-instrument-writes",
+    ClInstrumentWrites("asan-instrument-writes",
                        cl::desc("instrument write instructions"), cl::Hidden,
                        cl::init(true));
 
 static cl::opt<bool> ClInstrumentAtomics(
-    "sgxsan-instrument-atomics",
+    "asan-instrument-atomics",
     cl::desc("instrument atomic instructions (rmw, cmpxchg)"), cl::Hidden,
     cl::init(true));
 
 static cl::opt<bool>
-    ClInstrumentByval("sgxsan-instrument-byval",
+    ClInstrumentByval("asan-instrument-byval",
                       cl::desc("instrument byval call arguments"), cl::Hidden,
                       cl::init(true));
 
 static cl::opt<bool> ClAlwaysSlowPath(
-    "sgxsan-always-slow-path",
+    "asan-always-slow-path",
     cl::desc("use instrumentation with slow path for all accesses"), cl::Hidden,
     cl::init(false));
 
 static cl::opt<bool> ClForceDynamicShadow(
-    "sgxsan-force-dynamic-shadow",
+    "asan-force-dynamic-shadow",
     cl::desc("Load shadow address into a local variable for each function"),
     cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
-    ClWithIfunc("sgxsan-with-ifunc",
+    ClWithIfunc("asan-with-ifunc",
                 cl::desc("Access dynamic shadow through an ifunc global on "
                          "platforms that support this"),
                 cl::Hidden, cl::init(true));
 
 static cl::opt<bool> ClWithIfuncSuppressRemat(
-    "sgxsan-with-ifunc-suppress-remat",
+    "asan-with-ifunc-suppress-remat",
     cl::desc("Suppress rematerialization of dynamic shadow address by passing "
              "it through inline asm in prologue."),
     cl::Hidden, cl::init(true));
@@ -244,21 +241,21 @@ static cl::opt<bool> ClWithIfuncSuppressRemat(
 // but due to http://llvm.org/bugs/show_bug.cgi?id=12652 we temporary
 // set it to 10000.
 static cl::opt<int> ClMaxInsnsToInstrumentPerBB(
-    "sgxsan-max-ins-per-bb", cl::init(10000),
+    "asan-max-ins-per-bb", cl::init(10000),
     cl::desc("maximal number of instructions to instrument in any given BB"),
     cl::Hidden);
 
 // This flag may need to be replaced with -f[no]asan-stack.
-static cl::opt<bool> ClStack("sgxsan-stack", cl::desc("Handle stack memory"),
+static cl::opt<bool> ClStack("asan-stack", cl::desc("Handle stack memory"),
                              cl::Hidden, cl::init(true));
 static cl::opt<uint32_t> ClMaxInlinePoisoningSize(
-    "sgxsan-max-inline-poisoning-size",
+    "asan-max-inline-poisoning-size",
     cl::desc(
         "Inline shadow poisoning for blocks up to the given size in bytes."),
     cl::Hidden, cl::init(64));
 
 static cl::opt<AsanDetectStackUseAfterReturnMode> ClUseAfterReturn(
-    "sgxsan-use-after-return",
+    "asan-use-after-return",
     cl::desc("Sets the mode of detection for stack-use-after-return."),
     cl::values(
         clEnumValN(AsanDetectStackUseAfterReturnMode::Never, "never",
@@ -271,64 +268,64 @@ static cl::opt<AsanDetectStackUseAfterReturnMode> ClUseAfterReturn(
                    "Always detect stack use after return.")),
     cl::Hidden, cl::init(AsanDetectStackUseAfterReturnMode::Runtime));
 
-static cl::opt<bool> ClRedzoneByvalArgs("sgxsan-redzone-byval-args",
+static cl::opt<bool> ClRedzoneByvalArgs("asan-redzone-byval-args",
                                         cl::desc("Create redzones for byval "
                                                  "arguments (extra copy "
                                                  "required)"),
                                         cl::Hidden, cl::init(true));
 
-static cl::opt<bool> ClUseAfterScope("sgxsan-use-after-scope",
+static cl::opt<bool> ClUseAfterScope("asan-use-after-scope",
                                      cl::desc("Check stack-use-after-scope"),
                                      cl::Hidden, cl::init(false));
 
 // This flag may need to be replaced with -f[no]asan-globals.
-static cl::opt<bool> ClGlobals("sgxsan-globals",
+static cl::opt<bool> ClGlobals("asan-globals",
                                cl::desc("Handle global objects"), cl::Hidden,
                                cl::init(true));
 
-static cl::opt<bool> ClInitializers("sgxsan-initialization-order",
+static cl::opt<bool> ClInitializers("asan-initialization-order",
                                     cl::desc("Handle C++ initializer order"),
-                                    cl::Hidden, cl::init(false));
+                                    cl::Hidden, cl::init(true));
 
 static cl::opt<bool> ClInvalidPointerPairs(
-    "sgxsan-detect-invalid-pointer-pair",
+    "asan-detect-invalid-pointer-pair",
     cl::desc("Instrument <, <=, >, >=, - with pointer operands"), cl::Hidden,
     cl::init(false));
 
 static cl::opt<bool> ClInvalidPointerCmp(
-    "sgxsan-detect-invalid-pointer-cmp",
+    "asan-detect-invalid-pointer-cmp",
     cl::desc("Instrument <, <=, >, >= with pointer operands"), cl::Hidden,
     cl::init(false));
 
 static cl::opt<bool> ClInvalidPointerSub(
-    "sgxsan-detect-invalid-pointer-sub",
+    "asan-detect-invalid-pointer-sub",
     cl::desc("Instrument - operations with pointer operands"), cl::Hidden,
     cl::init(false));
 
 static cl::opt<unsigned> ClRealignStack(
-    "sgxsan-realign-stack",
+    "asan-realign-stack",
     cl::desc("Realign stack to the value of this flag (power of two)"),
     cl::Hidden, cl::init(32));
 
 static cl::opt<int> ClInstrumentationWithCallsThreshold(
-    "sgxsan-instrumentation-with-call-threshold",
+    "asan-instrumentation-with-call-threshold",
     cl::desc("If the function being instrumented contains more than "
              "this number of memory accesses, use callbacks instead of "
              "inline checks (-1 means never use callbacks)."),
     cl::Hidden, cl::init(7000));
 
 static cl::opt<std::string>
-    ClMemoryAccessCallbackPrefix("sgxsan-memory-access-callback-prefix",
+    ClMemoryAccessCallbackPrefix("asan-memory-access-callback-prefix",
                                  cl::desc("Prefix for memory access callbacks"),
                                  cl::Hidden, cl::init("__asan_"));
 
 static cl::opt<bool>
-    ClInstrumentDynamicAllocas("sgxsan-instrument-dynamic-allocas",
+    ClInstrumentDynamicAllocas("asan-instrument-dynamic-allocas",
                                cl::desc("instrument dynamic allocas"),
                                cl::Hidden, cl::init(true));
 
 static cl::opt<bool>
-    ClSkipPromotableAllocas("sgxsan-skip-promotable-allocas",
+    ClSkipPromotableAllocas("asan-skip-promotable-allocas",
                             cl::desc("Do not instrument promotable allocas"),
                             cl::Hidden, cl::init(true));
 
@@ -336,70 +333,70 @@ static cl::opt<bool>
 // The shadow mapping looks like
 //    Shadow = (Mem >> scale) + offset
 
-static cl::opt<int> ClMappingScale("sgxsan-mapping-scale",
+static cl::opt<int> ClMappingScale("asan-mapping-scale",
                                    cl::desc("scale of asan shadow mapping"),
                                    cl::Hidden, cl::init(0));
 
 static cl::opt<uint64_t>
-    ClMappingOffset("sgxsan-mapping-offset",
+    ClMappingOffset("asan-mapping-offset",
                     cl::desc("offset of asan shadow mapping [EXPERIMENTAL]"),
                     cl::Hidden, cl::init(0));
 
 // Optimization flags. Not user visible, used mostly for testing
 // and benchmarking the tool.
 
-static cl::opt<bool> ClOpt("sgxsan-opt", cl::desc("Optimize instrumentation"),
+static cl::opt<bool> ClOpt("asan-opt", cl::desc("Optimize instrumentation"),
                            cl::Hidden, cl::init(true));
 
 static cl::opt<bool>
-    ClOptSameTemp("sgxsan-opt-same-temp",
+    ClOptSameTemp("asan-opt-same-temp",
                   cl::desc("Instrument the same temp just once"), cl::Hidden,
                   cl::init(true));
 
-static cl::opt<bool> ClOptGlobals("sgxsan-opt-globals",
+static cl::opt<bool> ClOptGlobals("asan-opt-globals",
                                   cl::desc("Don't instrument scalar globals"),
                                   cl::Hidden, cl::init(true));
 
 static cl::opt<bool>
-    ClOptStack("sgxsan-opt-stack",
+    ClOptStack("asan-opt-stack",
                cl::desc("Don't instrument scalar stack variables"), cl::Hidden,
                cl::init(false));
 
 static cl::opt<bool> ClDynamicAllocaStack(
-    "sgxsan-stack-dynamic-alloca",
+    "asan-stack-dynamic-alloca",
     cl::desc("Use dynamic alloca to represent stack variables"), cl::Hidden,
-    cl::init(false));
+    cl::init(true));
 
 static cl::opt<uint32_t>
-    ClForceExperiment("sgxsan-force-experiment",
+    ClForceExperiment("asan-force-experiment",
                       cl::desc("Force optimization experiment (for testing)"),
                       cl::Hidden, cl::init(0));
 
 static cl::opt<bool>
-    ClUsePrivateAlias("sgxsan-use-private-alias",
+    ClUsePrivateAlias("asan-use-private-alias",
                       cl::desc("Use private aliases for global variables"),
                       cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
-    ClUseOdrIndicator("sgxsan-use-odr-indicator",
+    ClUseOdrIndicator("asan-use-odr-indicator",
                       cl::desc("Use odr indicators to improve ODR reporting"),
                       cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
-    ClUseGlobalsGC("sgxsan-globals-live-support",
+    ClUseGlobalsGC("asan-globals-live-support",
                    cl::desc("Use linker features to support dead "
                             "code stripping of globals"),
-                   cl::Hidden, cl::init(false));
+                   cl::Hidden, cl::init(true));
 
 // This is on by default even though there is a bug in gold:
 // https://sourceware.org/bugzilla/show_bug.cgi?id=19002
 static cl::opt<bool>
-    ClWithComdat("sgxsan-with-comdat",
+    ClWithComdat("asan-with-comdat",
                  cl::desc("Place ASan constructors in comdat sections"),
-                 cl::Hidden, cl::init(false));
+                 cl::Hidden, cl::init(true));
 
 static cl::opt<AsanDtorKind> ClOverrideDestructorKind(
-    "sgxsan-destructor-kind",
+    "asan-destructor-kind",
     cl::desc("Sets the ASan destructor kind. The default is to use the value "
              "provided to the pass constructor"),
     cl::values(clEnumValN(AsanDtorKind::None, "none", "No destructors"),
@@ -409,19 +406,19 @@ static cl::opt<AsanDtorKind> ClOverrideDestructorKind(
 
 // Debug flags.
 
-static cl::opt<int> ClDebug("sgxsan-debug", cl::desc("debug"), cl::Hidden,
+static cl::opt<int> ClDebug("asan-debug", cl::desc("debug"), cl::Hidden,
                             cl::init(0));
 
-static cl::opt<int> ClDebugStack("sgxsan-debug-stack", cl::desc("debug stack"),
+static cl::opt<int> ClDebugStack("asan-debug-stack", cl::desc("debug stack"),
                                  cl::Hidden, cl::init(0));
 
-static cl::opt<std::string> ClDebugFunc("sgxsan-debug-func", cl::Hidden,
+static cl::opt<std::string> ClDebugFunc("asan-debug-func", cl::Hidden,
                                         cl::desc("Debug func"));
 
-static cl::opt<int> ClDebugMin("sgxsan-debug-min", cl::desc("Debug min inst"),
+static cl::opt<int> ClDebugMin("asan-debug-min", cl::desc("Debug min inst"),
                                cl::Hidden, cl::init(-1));
 
-static cl::opt<int> ClDebugMax("sgxsan-debug-max", cl::desc("Debug max inst"),
+static cl::opt<int> ClDebugMax("asan-debug-max", cl::desc("Debug max inst"),
                                cl::Hidden, cl::init(-1));
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
@@ -578,7 +575,7 @@ static uint64_t GetCtorAndDtorPriority(Triple &TargetTriple) {
   }
 }
 
-namespace llvm {
+namespace {
 
 /// Module analysis for getting various metadata about the module.
 class ASanGlobalsMetadataWrapperPass : public ModulePass {
@@ -682,19 +679,6 @@ struct AddressSanitizer {
   bool maybeInsertAsanInitAtFunctionEntry(Function &F);
   bool maybeInsertDynamicShadowAtFunctionEntry(Function &F);
   void markEscapedLocalAllocas(Function &F);
-  void declareAdditionalSymbol(Module &M);
-  void instrumentSecMemIntrinsic(CallInst *CI);
-  void instrumentHeapCall(CallInst *CI);
-  static Type *unpackArrayType(Type *type);
-  void __instrumentTLSMgr(Function *ecallWrapper);
-  void instrumentGlobalPropageteWhitelist(StoreInst *SI);
-  bool instrumentRealEcall(CallInst *CI);
-  bool instrumentOcallWrapper(Function &OcallWrapper);
-  bool instrumentParameterCheck(Value *operand, IRBuilder<> &IRB,
-                                const DataLayout &DL, int depth,
-                                Value *eleCnt = nullptr,
-                                Value *operandAddr = nullptr,
-                                bool checkCurrentLevelPtr = true);
 
 private:
   friend struct FunctionStackPoisoner;
@@ -741,8 +725,7 @@ private:
 
   // These arrays is indexed by AccessIsWrite and Experiment.
   FunctionCallee AsanErrorCallbackSized[2][2];
-  FunctionCallee AsanMemoryAccessCallbackSizedLoad[2],
-      AsanMemoryAccessCallbackSizedStore[2];
+  FunctionCallee AsanMemoryAccessCallbackSized[2][2];
 
   FunctionCallee AsanMemmove, AsanMemcpy, AsanMemset;
   Value *LocalDynamicShadow = nullptr;
@@ -751,20 +734,6 @@ private:
 
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
-
-  GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
-  FunctionCallee WhitelistOfAddrOutEnclave_active,
-      WhitelistOfAddrOutEnclave_deactive, WhitelistOfAddrOutEnclave_query_ex,
-      WhitelistOfAddrOutEnclave_global_propagate,
-      WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt, sgxsan_edge_check,
-      SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
-      EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd,
-      is_pointer_readable, SGXSanMalloc, SGXSanFree, SGXSanCalloc,
-      SGXSanRealloc;
-  std::unordered_set<Function *> TLSMgrInstrumentedEcall;
-  Value *SGXSanEnclaveBase = nullptr, *SGXSanEnclaveEndPlus1 = nullptr;
-  bool isFuncAtEnclaveTBridge = false;
-  SmallVector<StoreInst *> GlobalVariableStoreInsts;
 };
 
 class AddressSanitizerLegacyPass : public FunctionPass {
@@ -1200,7 +1169,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
                      Instruction *ThenTerm, Value *ValueIfFalse);
 };
 
-} // namespace llvm
+} // end anonymous namespace
 
 void LocationMetadata::parse(MDNode *MDN) {
   assert(MDN->getNumOperands() == 3);
@@ -1384,8 +1353,6 @@ static bool isUnsupportedAMDGPUAddrspace(Value *Addr) {
 }
 
 Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
-  // as shadow memory only map elrange, let Shadow - EnclaveBase
-  Shadow = IRB.CreateSub(Shadow, SGXSanEnclaveBase);
   // Shadow >> scale
   Shadow = IRB.CreateLShr(Shadow, Mapping.Scale);
   if (Mapping.Offset == 0)
@@ -1487,14 +1454,6 @@ void AddressSanitizer::getInterestingMemoryOperands(
   } else if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
     if (!ClInstrumentWrites || ignoreAccess(SI->getPointerOperand()))
       return;
-    if (isa<GlobalVariable>(SI->getPointerOperand())) {
-      GlobalVariableStoreInsts.emplace_back(SI);
-    } else if (auto CE = dyn_cast<ConstantExpr>(SI->getPointerOperand())) {
-      if (CE->getOpcode() == Instruction::GetElementPtr and
-          isa<GlobalVariable>(CE->getOperand(0))) {
-        GlobalVariableStoreInsts.emplace_back(SI);
-      }
-    }
     Interesting.emplace_back(I, SI->getPointerOperandIndex(), true,
                              SI->getValueOperand()->getType(), SI->getAlign());
   } else if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(I)) {
@@ -1789,101 +1748,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   IRBuilder<> IRB(InsertBefore);
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   size_t AccessSizeIndex = TypeSizeToSizeIndex(TypeSize);
-  // <Use elrange guard page to detect cross boundary, below is pseudo-code>
-  // Cmp1_BB:
-  // cmp (Start < EnclaveBase)
-  // branch Cmp3_BB(or Access_BB, TBridge), Cmp2_BB;
-  //
-  // Cmp2_BB:
-  // cmp (Start > EnclaveEnd)
-  // branch Cmp3_BB(or Access_BB, TBridge), ShadowByteCheck_BB;
-  //
-  // ShadowByteCheck_BB: // totally in elrange(, or trigger shadow map guard
-  // #PF before enclave guard #PF only if operation is not aligned)
-  // get ShadowByte;
-  // cmp (ShadowByte != 0)
-  // branch SlowPath1_BB, Access_BB
-  //
-  // SlowPath1_BB:
-  // ShadowByte = and ShadowByte, 0x8F
-  // cmp (ShadowByte != 0)
-  // branch SlowPath2_BB(or Crash_BB, if don't need), Access_BB
-  //
-  // <BEGIN: if need>
-  // SlowPath2_BB:
-  // cmp (LastAccessByte > ShadowByte)
-  // branch Crash_BB, Access_BB
-  // <END: if need>
-  //
-  // Crash_BB:
-  // Report Error;
-  // Unreachable Inst;
-  //
-  // <BEGIN: only not at TBridge>
-  // Cmp3_BB:
-  // cmp (end < EnclaveBase /* | start > EnclaveEnd */)
-  // branch TotallyOutELRANGE_BB, Access_BB;
-  //
-  // TotallyOutELRANGE_BB:
-  // Out-Enclave-Addr Whitelist Check;
-  // branch Access_BB;
-  // <END: only not at TBridge>
-  //
-  // Access_BB:
-  BasicBlock *Cmp1_BB = nullptr, *Cmp2_BB = nullptr,
-             *ShadowByteCheck_BB = nullptr, *Cmp3_BB = nullptr,
-             *TotallyOutELRANGE_BB = nullptr, *Access_BB = nullptr;
-  Cmp1_BB = InsertBefore->getParent();
-  Access_BB = SplitBlock(Cmp1_BB, InsertBefore);
-  Function *curFunc = Cmp1_BB->getParent();
-  if (not isFuncAtEnclaveTBridge) {
-    TotallyOutELRANGE_BB =
-        BasicBlock::Create(*C, "TotallyOutELRANGE_BB", curFunc, Access_BB);
-    Cmp3_BB = BasicBlock::Create(*C, "Cmp3_BB", curFunc, TotallyOutELRANGE_BB);
-  }
-  ShadowByteCheck_BB = BasicBlock::Create(*C, "ShadowByteCheck_BB", curFunc,
-                                          Cmp3_BB ? Cmp3_BB : Access_BB);
-  Cmp2_BB = BasicBlock::Create(*C, "Cmp2_BB", curFunc, ShadowByteCheck_BB);
 
-  Instruction *Cmp1_BBTerm = Cmp1_BB->getTerminator();
-  IRB.SetInsertPoint(Cmp1_BBTerm);
-  Value *StartAddrULTEnclaveBase =
-      IRB.CreateICmpULT(AddrLong, SGXSanEnclaveBase);
-  IRB.CreateCondBr(StartAddrULTEnclaveBase, Cmp3_BB ? Cmp3_BB : Access_BB,
-                   Cmp2_BB, MDBuilder(*C).createBranchWeights(1, 100000));
-  Cmp1_BBTerm->eraseFromParent();
-
-  IRB.SetInsertPoint(Cmp2_BB);
-  Value *StartAddrUGTEnclaveEnd =
-      IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveEndPlus1);
-  IRB.CreateCondBr(StartAddrUGTEnclaveEnd, Cmp3_BB ? Cmp3_BB : Access_BB,
-                   ShadowByteCheck_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-
-  if (not isFuncAtEnclaveTBridge) {
-    assert(Cmp3_BB);
-    IRB.SetInsertPoint(Cmp3_BB);
-    Value *EndAddrULTEnclaveBase = IRB.CreateICmpULT(
-        IRB.CreateAdd(AddrLong,
-                      ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
-        SGXSanEnclaveBase);
-    IRB.CreateCondBr(EndAddrULTEnclaveBase, TotallyOutELRANGE_BB, Access_BB,
-                     MDBuilder(*C).createBranchWeights(100000, 1));
-
-    IRB.SetInsertPoint(TotallyOutELRANGE_BB);
-    IRB.CreateCall(
-        WhitelistOfAddrOutEnclave_query_ex,
-        {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
-         ConstantInt::get(IntptrTy, (TypeSize >> 3)), IRB.getInt1(IsWrite),
-         IRB.getInt1(hasCmpUser(OrigIns)),
-         IRB.CreateGlobalStringPtr(OrigIns->getFunction()->getName())});
-    IRB.CreateBr(Access_BB);
-  }
-
-  IRB.SetInsertPoint(ShadowByteCheck_BB);
-#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt);
-#endif
   if (UseCalls) {
     if (Exp == 0)
       IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][0][AccessSizeIndex],
@@ -1906,38 +1771,27 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   size_t Granularity = 1ULL << Mapping.Scale;
   Instruction *CrashTerm = nullptr;
 
-  BasicBlock *SlowPath1_BB =
-                 BasicBlock::Create(*C, "SlowPath1_BB", curFunc,
-                                    ShadowByteCheck_BB->getNextNode()),
-             *Crash_BB = BasicBlock::Create(*C, "Crash_BB", curFunc,
-                                            SlowPath1_BB->getNextNode());
-  IRB.CreateCondBr(Cmp, SlowPath1_BB, Access_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-
-  IRB.SetInsertPoint(SlowPath1_BB);
-  // filte out sensitive poison value, then sensitive partial valid object oob
-  // access can be detected
-  ShadowValue = IRB.CreateAnd(ShadowValue, ShadowTy == Type::getInt16Ty(*C)
-                                               ? IRB.getInt16(0x8F8F)
-                                               : IRB.getInt8(0x8F));
-  Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
-
   if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
     // We use branch weights for the slow path check, to indicate that the slow
     // path is rarely taken. This seems to be the case for SPEC benchmarks.
-    BasicBlock *SlowPath2_BB =
-        BasicBlock::Create(*C, "SlowPath2_BB", curFunc, Crash_BB);
-    IRB.CreateCondBr(Cmp, SlowPath2_BB, Access_BB,
-                     MDBuilder(*C).createBranchWeights(1, 100000));
-
-    IRB.SetInsertPoint(SlowPath2_BB);
-    Cmp = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    Instruction *CheckTerm = SplitBlockAndInsertIfThen(
+        Cmp, InsertBefore, false, MDBuilder(*C).createBranchWeights(1, 100000));
+    assert(cast<BranchInst>(CheckTerm)->isUnconditional());
+    BasicBlock *NextBB = CheckTerm->getSuccessor(0);
+    IRB.SetInsertPoint(CheckTerm);
+    Value *Cmp2 = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    if (Recover) {
+      CrashTerm = SplitBlockAndInsertIfThen(Cmp2, CheckTerm, false);
+    } else {
+      BasicBlock *CrashBlock =
+          BasicBlock::Create(*C, "", NextBB->getParent(), NextBB);
+      CrashTerm = new UnreachableInst(*C, CrashBlock);
+      BranchInst *NewTerm = BranchInst::Create(CrashBlock, NextBB, Cmp2);
+      ReplaceInstWithInst(CheckTerm, NewTerm);
+    }
+  } else {
+    CrashTerm = SplitBlockAndInsertIfThen(Cmp, InsertBefore, !Recover);
   }
-  IRB.CreateCondBr(Cmp, Crash_BB, Access_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-
-  IRB.SetInsertPoint(Crash_BB);
-  CrashTerm = IRB.CreateUnreachable();
 
   Instruction *Crash = generateCrashCode(CrashTerm, AddrLong, IsWrite,
                                          AccessSizeIndex, SizeArgument, Exp);
@@ -1955,23 +1809,12 @@ void AddressSanitizer::instrumentUnusualSizeOrAlignment(
   Value *Size = ConstantInt::get(IntptrTy, TypeSize / 8);
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   if (UseCalls) {
-    if (Exp == 0) {
-      if (IsWrite)
-        IRB.CreateCall(AsanMemoryAccessCallbackSizedStore[0], {AddrLong, Size});
-      else
-        IRB.CreateCall(
-            AsanMemoryAccessCallbackSizedLoad[0],
-            {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
-             IRB.CreateGlobalStringPtr(I->getFunction()->getName())});
-    } else {
-      if (IsWrite)
-        IRB.CreateCall(AsanMemoryAccessCallbackSizedStore[1], {AddrLong, Size});
-      else
-        IRB.CreateCall(
-            AsanMemoryAccessCallbackSizedLoad[1],
-            {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
-             IRB.CreateGlobalStringPtr(I->getFunction()->getName())});
-    }
+    if (Exp == 0)
+      IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][0],
+                     {AddrLong, Size});
+    else
+      IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][1],
+                     {AddrLong, Size, ConstantInt::get(IRB.getInt32Ty(), Exp)});
   } else {
     Value *LastByte = IRB.CreateIntToPtr(
         IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, TypeSize / 8 - 1)),
@@ -2229,13 +2072,11 @@ StringRef ModuleAddressSanitizer::getGlobalMetadataSection() const {
 void ModuleAddressSanitizer::initializeCallbacks(Module &M) {
   IRBuilder<> IRB(*C);
 
-#if (0)
   // Declare our poisoning and unpoisoning functions.
   AsanPoisonGlobals =
       M.getOrInsertFunction(kAsanPoisonGlobalsName, IRB.getVoidTy(), IntptrTy);
   AsanUnpoisonGlobals =
       M.getOrInsertFunction(kAsanUnpoisonGlobalsName, IRB.getVoidTy());
-#endif
 
   // Declare functions that register/unregister globals.
   AsanRegisterGlobals = M.getOrInsertFunction(
@@ -2243,7 +2084,6 @@ void ModuleAddressSanitizer::initializeCallbacks(Module &M) {
   AsanUnregisterGlobals = M.getOrInsertFunction(
       kAsanUnregisterGlobalsName, IRB.getVoidTy(), IntptrTy, IntptrTy);
 
-#if (0)
   // Declare the functions that find globals in a shared object and then invoke
   // the (un)register function on them.
   AsanRegisterImageGlobals = M.getOrInsertFunction(
@@ -2257,7 +2097,6 @@ void ModuleAddressSanitizer::initializeCallbacks(Module &M) {
   AsanUnregisterElfGlobals =
       M.getOrInsertFunction(kAsanUnregisterElfGlobalsName, IRB.getVoidTy(),
                             IntptrTy, IntptrTy, IntptrTy);
-#endif
 }
 
 // Put the metadata and the instrumented global in the same group. This ensures
@@ -2810,7 +2649,7 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
   IRBuilder<> IRB(*C);
   // Create __asan_report* callbacks.
   // IsWrite, TypeSize and Exp are encoded in the function name.
-  for (int Exp = 0; Exp < 1 /* 2 */; Exp++) {
+  for (int Exp = 0; Exp < 2; Exp++) {
     for (size_t AccessIsWrite = 0; AccessIsWrite <= 1; AccessIsWrite++) {
       const std::string TypeStr = AccessIsWrite ? "store" : "load";
       const std::string ExpStr = Exp ? "exp_" : "";
@@ -2826,18 +2665,10 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
       AsanErrorCallbackSized[AccessIsWrite][Exp] = M.getOrInsertFunction(
           kAsanReportErrorTemplate + ExpStr + TypeStr + "_n" + EndingStr,
           FunctionType::get(IRB.getVoidTy(), Args2, false));
-      if (AccessIsWrite == 0) {
-        AsanMemoryAccessCallbackSizedLoad[Exp] = M.getOrInsertFunction(
-            ClMemoryAccessCallbackPrefix + ExpStr + "Load" + "N" + EndingStr,
-            FunctionType::get(
-                IRB.getVoidTy(),
-                {IntptrTy, IntptrTy, IRB.getInt1Ty(), IRB.getInt8PtrTy()},
-                false));
-      } else {
-        AsanMemoryAccessCallbackSizedStore[Exp] = M.getOrInsertFunction(
-            ClMemoryAccessCallbackPrefix + ExpStr + "Store" + "N" + EndingStr,
-            FunctionType::get(IRB.getVoidTy(), Args2, false));
-      }
+
+      AsanMemoryAccessCallbackSized[AccessIsWrite][Exp] = M.getOrInsertFunction(
+          ClMemoryAccessCallbackPrefix + ExpStr + TypeStr + "N" + EndingStr,
+          FunctionType::get(IRB.getVoidTy(), Args2, false));
 
       for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
            AccessSizeIndex++) {
@@ -2866,7 +2697,7 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
   AsanMemset = M.getOrInsertFunction(MemIntrinCallbackPrefix + "memset",
                                      IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
                                      IRB.getInt32Ty(), IntptrTy);
-#if (0)
+
   AsanHandleNoReturnFunc =
       M.getOrInsertFunction(kAsanHandleNoReturnName, IRB.getVoidTy());
 
@@ -2882,8 +2713,6 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
       kAMDGPUAddressSharedName, IRB.getInt1Ty(), IRB.getInt8PtrTy());
   AMDGPUAddressPrivate = M.getOrInsertFunction(
       kAMDGPUAddressPrivateName, IRB.getInt1Ty(), IRB.getInt8PtrTy());
-#endif
-  declareAdditionalSymbol(M);
 }
 
 bool AddressSanitizer::maybeInsertAsanInitAtFunctionEntry(Function &F) {
@@ -2971,7 +2800,6 @@ bool AddressSanitizer::suppressInstrumentationSiteForDebug(int &Instrumented) {
 
 bool AddressSanitizer::instrumentFunction(Function &F,
                                           const TargetLibraryInfo *TLI) {
-  isFuncAtEnclaveTBridge = false;
   if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
     return false;
   if (!ClDebugFunc.empty() && ClDebugFunc == F.getName())
@@ -2987,11 +2815,9 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   if (maybeInsertAsanInitAtFunctionEntry(F))
     FunctionModified = true;
 
-#if (0)
   // Leave if the function doesn't need instrumentation.
   if (!F.hasFnAttribute(Attribute::SanitizeAddress))
     return FunctionModified;
-#endif
 
   LLVM_DEBUG(dbgs() << "ASAN instrumenting:\n" << F << "\n");
 
@@ -3013,12 +2839,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   SmallVector<Instruction *, 8> NoReturnCalls;
   SmallVector<BasicBlock *, 16> AllBlocks;
   SmallVector<Instruction *, 16> PointerComparisonsOrSubtracts;
-  SmallVector<CallInst *, 16> SecIntrinToInstrument;
-  SmallVector<CallInst *, 16> HeapCIToInstrument;
-  // there may be several `tail call` RealEcall when compiling with `-O2`
-  SmallVector<CallInst *, 16> RealEcallInsts;
-  SmallVector<CallInst *, 16> SGXOcallInsts;
-  GlobalVariableStoreInsts.clear();
   int NumAllocas = 0;
 
   // Fill the set of memory operations to instrument.
@@ -3071,24 +2891,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, TLI);
       }
-      if (CallInst *CI = dyn_cast<CallInst>(&Inst)) {
-        StringRef callee_name = getDirectCalleeName(CI);
-        if (F.getName() ==
-            ("sgx_" /* ecall wrapper prefix */ + callee_name.str())) {
-          // it's an ecall wrapper
-          RealEcallInsts.push_back(CI);
-          isFuncAtEnclaveTBridge = true;
-        } else if (callee_name == "sgx_ocall") {
-          SGXOcallInsts.push_back(CI);
-          isFuncAtEnclaveTBridge = true;
-        } else if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
-                   callee_name == "memmove_s") {
-          SecIntrinToInstrument.push_back(CI);
-        } else if (callee_name == "malloc" || callee_name == "free" ||
-                   callee_name == "calloc" || callee_name == "realloc") {
-          HeapCIToInstrument.push_back(CI);
-        }
-      }
       if (NumInsnsPerBB >= ClMaxInsnsToInstrumentPerBB)
         break;
     }
@@ -3103,15 +2905,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   ObjectSizeOffsetVisitor ObjSizeVis(DL, TLI, F.getContext(), ObjSizeOpts);
 
   // Instrument.
-  // sgxsdk should ensure EnclaveSize > 0 and EnclaveEnd do not overflow
-  IRBuilder<> IRB(&F.front().front());
-  SGXSanEnclaveBase =
-      IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr, "enclave_base");
-  SGXSanEnclaveEndPlus1 = IRB.CreateAdd(
-      SGXSanEnclaveBase,
-      IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr, "enclave_size"),
-      "enclave_end_plus1");
-
   int NumInstrumented = 0;
   for (auto &Operand : OperandsToInstrument) {
     if (!suppressInstrumentationSiteForDebug(NumInstrumented))
@@ -3124,54 +2917,23 @@ bool AddressSanitizer::instrumentFunction(Function &F,
       instrumentMemIntrinsic(Inst);
     FunctionModified = true;
   }
-  for (auto CI : SecIntrinToInstrument) {
-    if (!suppressInstrumentationSiteForDebug(NumInstrumented))
-      instrumentSecMemIntrinsic(CI);
-    FunctionModified = true;
-  }
-#if (USE_SGXSAN_MALLOC)
-  for (auto CI : HeapCIToInstrument) {
-    if (!suppressInstrumentationSiteForDebug(NumInstrumented))
-      instrumentHeapCall(CI);
-    FunctionModified = true;
-  }
-#endif
-  if (!isFuncAtEnclaveTBridge) {
-    for (auto Inst : GlobalVariableStoreInsts) {
-      if (!suppressInstrumentationSiteForDebug(NumInstrumented))
-        instrumentGlobalPropageteWhitelist(Inst);
-      FunctionModified = true;
-    }
-  }
 
   FunctionStackPoisoner FSP(F, *this);
   bool ChangedStack = FSP.runOnFunction();
 
-  for (auto RealEcallInst : RealEcallInsts) {
-    // when it is an ecall wrapper
-    instrumentRealEcall(RealEcallInst);
-    FunctionModified = true;
-  }
-
-  if (SGXOcallInsts.size() > 0) {
-    instrumentOcallWrapper(F);
-    FunctionModified = true;
-  }
-#if (0)
   // We must unpoison the stack before NoReturn calls (throw, _exit, etc).
   // See e.g. https://github.com/google/sanitizers/issues/37
   for (auto CI : NoReturnCalls) {
     IRBuilder<> IRB(CI);
     IRB.CreateCall(AsanHandleNoReturnFunc, {});
   }
-#endif
 
   for (auto Inst : PointerComparisonsOrSubtracts) {
     instrumentPointerComparisonOrSubtraction(Inst);
     FunctionModified = true;
   }
 
-  if (ChangedStack /* || !NoReturnCalls.empty() */)
+  if (ChangedStack || !NoReturnCalls.empty())
     FunctionModified = true;
 
   LLVM_DEBUG(dbgs() << "ASAN done instrumenting: " << FunctionModified << " "
@@ -3863,507 +3625,4 @@ bool AddressSanitizer::isSafeAccess(ObjectSizeOffsetVisitor &ObjSizeVis,
   // . Size - Offset >= NeededSize  (unsigned)
   return Offset >= 0 && Size >= uint64_t(Offset) &&
          Size - uint64_t(Offset) >= TypeSize / 8;
-}
-
-Value *getEDLInPrefixedValue(Value *val) {
-  // directly first level
-  if (SGXSanGetName(val).startswith("_in_"))
-    return val;
-  else {
-    val = stripCast(val);
-    if (Instruction *I = dyn_cast<Instruction>(val)) {
-      val = I->getOperand(0);
-      // second level
-      if (SGXSanGetName(val).startswith("_in_"))
-        return val;
-    }
-    return nullptr;
-  }
-}
-
-std::pair<int64_t, Value *>
-getLenAndValueByNameInEDL(Function *F, std::string lenPrefixedValueName) {
-  int64_t length = -1;
-  Value *lenValue = nullptr;
-  SmallVector<Value *> values =
-      getValuesByStrInFunction(F, isValueNameEqualWith, lenPrefixedValueName);
-  assert(values.size() <= 1);
-  if (values.size() == 0) {
-    goto exit;
-  }
-  // now values.size()==1
-  lenValue = values.front();
-  assert(lenValue != nullptr);
-  // find lenValue
-  for (auto user : lenValue->users()) {
-    if (StoreInst *SI = dyn_cast<StoreInst>(user)) {
-      if (ConstantInt *cInt = dyn_cast<ConstantInt>(SI->getOperand(0))) {
-        length = cInt->getSExtValue();
-        assert(length > 0);
-        if (length <= 0) {
-          length = -1;
-        }
-        goto exit;
-      }
-    }
-  }
-exit:
-  return std::pair<int64_t, Value *>(length, lenValue);
-}
-
-// fix-me: implementation is tricky
-// if (int64_t) length is not -1, then (Value *) lenValue must not be nullptr
-std::pair<int64_t, Value *> getLenAndValueByParamInEDL(Function *F,
-                                                       Value *param) {
-  int64_t length = -1;
-  Value *lenValue = nullptr;
-
-  std::pair<int64_t, llvm::Value *> lenAndValue;
-  param = getEDLInPrefixedValue(param);
-  if (param) {
-    // now param prefixed with _in_
-    // then find _len_ prefixed value
-    lenAndValue = getLenAndValueByNameInEDL(
-        F, "_len_" + SGXSanGetName(param).substr(4).str());
-    length = lenAndValue.first;
-    lenValue = lenAndValue.second;
-  }
-
-  return std::pair<int64_t, Value *>(length, lenValue);
-}
-
-// param means passed parameter at real ecall (not ecall wrapper) instruction
-// Return:
-// ElementCnt   ElementSize LenValue
-//|-1           -1          nullptr             /* not a pointer or a function
-// pointer */
-//|-1           >=1         nullptr             /* [user_check] pointer */
-//|-1           >=1         (Value *) _len_xxx  /* [in]/[out] pointer, but
-// length is not a ConstantInt */
-//|>=1          >=1         (Value *) _len_xxx  /* [in]/[out] pointer, and
-// length is a ConstantInt */
-std::tuple<int, int, Value *>
-convertParamLenAndValue2Tuple(Value *param, Function *F,
-                              std::pair<int64_t, Value *> lenAndValue) {
-  int elementCnt = -1;
-  int elementSize = -1;
-
-  if (PointerType *pointerType = dyn_cast<PointerType>(param->getType())) {
-    if (pointerType->getElementType()->isSized()) {
-      elementSize = F->getParent()->getDataLayout().getTypeAllocSize(
-          pointerType->getElementType());
-      assert(elementSize >= 1);
-    }
-  }
-  if (elementSize != -1 && lenAndValue.first > 0 &&
-      lenAndValue.second != nullptr) {
-    // this param is a (array-)pointer and has length, means [in]/[out]
-    assert(param->getType()->isPointerTy() && (elementSize != -1));
-    elementCnt = lenAndValue.first / elementSize;
-    assert(elementCnt >= 1);
-  }
-  // else: it's a user_check (array-)ptr/string/primitive variable
-  return std::tuple<int, int, Value *>(elementCnt, elementSize,
-                                       lenAndValue.second);
-}
-
-Value *
-convertPointerLenAndValue2CountValue(Value *ptr, Instruction *insertPoint,
-                                     std::pair<int64_t, Value *> lenAndValue) {
-  int elementCnt = -1, elementSz = -1;
-  Value *lenValue = nullptr;
-  Function *F = insertPoint->getFunction();
-  std::tie(elementCnt, elementSz, lenValue) =
-      convertParamLenAndValue2Tuple(ptr, F, lenAndValue);
-  IRBuilder<> IRB(insertPoint);
-  if (elementCnt >= 1) {
-    return IRB.getInt32(elementCnt);
-  } else if (lenValue != nullptr) {
-    return IRB.CreateIntCast(
-        IRB.CreateExactSDiv(
-            IRB.CreateLoad(
-                lenValue->getType()->getScalarType()->getPointerElementType(),
-                lenValue),
-            IRB.getInt64(elementSz)),
-        IRB.getInt32Ty(), true);
-  } else {
-    return IRB.getInt32(-1);
-  }
-}
-
-void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI) {
-  IRBuilder<> IRB(SI);
-  Value *val = SI->getValueOperand();
-
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_global_propagate,
-                 {val->getType()->isPointerTy()
-                      ? IRB.CreatePointerCast(val, IRB.getInt8PtrTy())
-                      : IRB.CreateIntToPtr(val, IRB.getInt8PtrTy())});
-}
-
-// Instrument memset_s/memmove_s/memcpy_s
-void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI) {
-  StringRef callee_name = getDirectCalleeName(CI);
-  IRBuilder<> IRB(CI);
-  CallInst *tempCI = nullptr;
-  if (callee_name == "memcpy_s") {
-    tempCI =
-        IRB.CreateCall(SGXSanMemcpyS, {CI->getOperand(0), CI->getOperand(1),
-                                       CI->getOperand(2), CI->getOperand(3)});
-  } else if (callee_name == "memset_s") {
-    tempCI =
-        IRB.CreateCall(SGXSanMemsetS, {CI->getOperand(0), CI->getOperand(1),
-                                       CI->getOperand(2), CI->getOperand(3)});
-  } else if (callee_name == "memmove_s") {
-    tempCI =
-        IRB.CreateCall(SGXSanMemmoveS, {CI->getOperand(0), CI->getOperand(1),
-                                        CI->getOperand(2), CI->getOperand(3)});
-  } else
-    abort();
-  CI->replaceAllUsesWith(tempCI);
-  CI->eraseFromParent();
-}
-
-// Instrument malloc/free/calloc/realloc
-void AddressSanitizer::instrumentHeapCall(CallInst *CI) {
-  StringRef callee_name = getDirectCalleeName(CI);
-  IRBuilder<> IRB(CI);
-  CallInst *tempCI = nullptr;
-  if (callee_name == "malloc") {
-    tempCI = IRB.CreateCall(SGXSanMalloc, CI->getOperand(0));
-  } else if (callee_name == "free") {
-    tempCI = IRB.CreateCall(SGXSanFree, CI->getOperand(0));
-  } else if (callee_name == "calloc") {
-    tempCI =
-        IRB.CreateCall(SGXSanCalloc, {CI->getOperand(0), CI->getOperand(1)});
-  } else if (callee_name == "realloc") {
-    tempCI =
-        IRB.CreateCall(SGXSanRealloc, {CI->getOperand(0), CI->getOperand(1)});
-  } else
-    abort();
-  CI->replaceAllUsesWith(tempCI);
-  CI->eraseFromParent();
-}
-
-// instrument `EnclaveTLSConstructorAtTBridgeBegin` and
-// `EnclaveTLSDestructorAtTBridgeEnd` at ecallWrapper function begin and end
-// respectively
-void AddressSanitizer::__instrumentTLSMgr(Function *ecallWrapper) {
-  assert(ecallWrapper);
-  if (TLSMgrInstrumentedEcall.count(ecallWrapper) == 0) {
-    auto &firstFuncInsertPoint = ecallWrapper->front().front();
-    IRBuilder<> IRB(&firstFuncInsertPoint);
-    IRB.CreateCall(EnclaveTLSConstructorAtTBridgeBegin);
-
-    for (auto RetInst :
-         SGXSanInstVisitor::visitFunction(*ecallWrapper).BroadReturnInstVec) {
-      IRB.SetInsertPoint(RetInst);
-      IRB.CreateCall(EnclaveTLSDestructorAtTBridgeEnd);
-    }
-    TLSMgrInstrumentedEcall.emplace(ecallWrapper);
-  }
-}
-
-bool AddressSanitizer::instrumentRealEcall(CallInst *CI) {
-  if (CI == nullptr)
-    return false;
-
-  __instrumentTLSMgr(CI->getFunction());
-
-  IRBuilder<> IRB(CI);
-  const DataLayout &DL = CI->getModule()->getDataLayout();
-  // instrument `sgxsan_edge_check` for each actual parameter of RealEcall
-  // before RealEcall
-  for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++) {
-    IRB.SetInsertPoint(CI);
-    Value *operand = CI->getOperand(i);
-    // fix-me: currently find array is also passed as pointer
-    if (isa<PointerType>(operand->getType())) {
-      // Instruction *PointerCheckTerm =
-      // SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)),
-      // CI, false); maybe operand is a (array-)pointer and it has more then
-      // 1 element accroding to EDL Sementics
-      auto lenAndValue = getLenAndValueByParamInEDL(CI->getFunction(), operand);
-      Value *ptrEleCnt =
-          convertPointerLenAndValue2CountValue(operand, CI, lenAndValue);
-      // if it is [in]/[out] (array-)pointer, sub-element still need to be
-      // filled into whitelist
-      instrumentParameterCheck(
-          operand, IRB, DL, 0, ptrEleCnt, nullptr,
-          lenAndValue.second == nullptr /* _in_ prefixed ptr, needn't check */);
-    } else if (ArrayType *arrType = dyn_cast<ArrayType>(operand->getType())) {
-      // seems never trigger(hopefully)
-      assert(false);
-      Value *tempOp = operand;
-      while (isa<CastInst>(tempOp)) {
-        tempOp = cast<CastInst>(tempOp)->getOperand(0);
-      }
-      if (Instruction *I = dyn_cast<Instruction>(tempOp)) {
-        Value *addr = I->getOperand(0);
-        assert(addr->getType()->getPointerElementType() == arrType);
-        instrumentParameterCheck(addr, IRB, DL, 0, IRB.getInt32(1), nullptr,
-                                 false);
-      } else {
-        instrumentParameterCheck(operand, IRB, DL, 0);
-      }
-    } else {
-      instrumentParameterCheck(operand, IRB, DL, 0);
-    }
-  }
-  // instrument `WhitelistOfAddrOutEnclave_active` before RealEcall
-  IRB.SetInsertPoint(CI);
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
-  // instrument `WhitelistOfAddrOutEnclave_deactive` after RealEcall
-  IRB.SetInsertPoint(CI->getNextNode());
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
-
-  return true;
-}
-
-bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
-  IRBuilder<> IRB(&OcallWrapper.front().front());
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
-
-  for (auto RetInst :
-       SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec) {
-    const DataLayout &DL = RetInst->getModule()->getDataLayout();
-    for (Argument &arg : OcallWrapper.args()) {
-      // treat ocall-wrapper argument as _in_ prefixed parameter in
-      // real-ecall
-      IRB.SetInsertPoint(RetInst);
-      Type *argType = arg.getType();
-      if (argType->isPointerTy()) {
-        std::string argName = SGXSanGetName(&arg).str();
-        Value *ptrEleCnt = nullptr;
-        if (argName != "") {
-          // make sure parameter is passed in enclave
-          // '__tmp_xxx' exist, then means there is routine that use xxx at
-          // untrusted side, and copy xxx back to trusted side fix-me:
-          // implementation is tricky
-          if (getValuesByStrInFunction(&OcallWrapper, isValueNameEqualWith,
-                                       "__tmp_" + argName)
-                  .size() == 0)
-            continue;
-
-          auto lenAndValue = getLenAndValueByNameInEDL(RetInst->getFunction(),
-                                                       "_len_" + argName);
-          ptrEleCnt =
-              convertPointerLenAndValue2CountValue(&arg, RetInst, lenAndValue);
-        }
-        instrumentParameterCheck(&arg, IRB, DL, 0, ptrEleCnt, nullptr, false);
-      }
-      // it seem func arg will never be an array or a struct
-      else {
-        instrumentParameterCheck(&arg, IRB, DL, 0);
-      }
-    }
-    IRB.SetInsertPoint(RetInst);
-    IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
-  }
-  return true;
-}
-
-Type *AddressSanitizer::unpackArrayType(Type *type) {
-  Type *elementType = nullptr;
-  if (type->isPointerTy()) {
-    elementType = type->getPointerElementType();
-  } else if (type->isArrayTy()) {
-    elementType = type->getArrayElementType();
-  } else {
-    return type;
-  }
-  while (elementType->isArrayTy()) {
-    elementType = elementType->getArrayElementType();
-  }
-  return elementType;
-}
-
-#define FOR_LOOP_BEG(insert_point, count)                                      \
-  Instruction *forBodyTerm = SplitBlockAndInsertIfThen(                        \
-      IRB.CreateICmpSGT(count, IRB.getInt32(0), ""), insert_point, false);     \
-  IRB.SetInsertPoint(forBodyTerm);                                             \
-  PHINode *phi = IRB.CreatePHI(IRB.getInt32Ty(), 2, "");                       \
-  phi->addIncoming(IRB.getInt32(0), forBodyTerm->getParent()->getPrevNode());  \
-  BasicBlock *forBodyEntry = phi->getParent();
-
-#define FOR_LOOP_END(count)                                                    \
-  /*  instrumentParameterCheck may insert new bb, so forBodyTerm may not       \
-   * belong to forBodyEntry BB */                                              \
-  IRB.SetInsertPoint(forBodyTerm);                                             \
-  Value *inc = IRB.CreateAdd(phi, IRB.getInt32(1), "", true, true);            \
-  phi->addIncoming(inc, forBodyTerm->getParent());                             \
-  ReplaceInstWithInst(                                                         \
-      forBodyTerm, BranchInst::Create(forBodyEntry,                            \
-                                      forBodyTerm->getParent()->getNextNode(), \
-                                      IRB.CreateICmpSLT(inc, count)));
-
-// Must already set insert point properly in IRB
-bool AddressSanitizer::instrumentParameterCheck(
-    Value *operand, IRBuilder<> &IRB, const DataLayout &DL, int depth,
-    Value *eleCnt, Value *operandAddr, bool checkCurrentLevelPtr) {
-  if (depth++ > 10)
-    return false;
-
-  Type *operandType = operand->getType();
-  // fix-me: how about FunctionType
-  if (PointerType *pointerType = dyn_cast<PointerType>(operandType)) {
-    if (!pointerType->getElementType()->isSized())
-      return false; // ignore unsized, e.g. function pointer
-    auto _eleSize = DL.getTypeAllocSize(pointerType->getElementType());
-    if (_eleSize <= 0)
-      return false;
-    auto operandInt8ptr = IRB.CreatePointerCast(operand, IRB.getInt8PtrTy());
-    auto eleSize = IRB.getInt64(_eleSize);
-    if (eleCnt == nullptr)
-      eleCnt = IRB.getInt32(-1);
-    CallInst *isReadable =
-        IRB.CreateCall(is_pointer_readable, {operandInt8ptr, eleSize, eleCnt});
-    Instruction *PointerCheckTerm =
-        SplitBlockAndInsertIfThen(isReadable, &(*IRB.GetInsertPoint()), false);
-    IRB.SetInsertPoint(PointerCheckTerm);
-
-    // now pointer is loadable
-    if (checkCurrentLevelPtr)
-      IRB.CreateCall(sgxsan_edge_check, {operandInt8ptr, eleSize, eleCnt});
-
-    if (eleCnt == IRB.getInt32(0))
-      abort();
-    else if (eleCnt != IRB.getInt32(-1) && eleCnt != IRB.getInt32(1)) {
-      // multi element
-      FOR_LOOP_BEG(PointerCheckTerm, eleCnt)
-      Value *eleAddr =
-          IRB.CreateGEP(pointerType->getElementType(), operand, phi);
-      auto ele = IRB.CreateLoad(
-          eleAddr->getType()->getScalarType()->getPointerElementType(),
-          eleAddr);
-      /* if element is pointer then nullptr means no idea about element's
-       * sub-element count */
-      instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
-      FOR_LOOP_END(eleCnt)
-    } else {
-      // one element
-      auto ele = IRB.CreateLoad(pointerType->getElementType(), operand);
-      bool result =
-          instrumentParameterCheck(ele, IRB, DL, depth, nullptr, operand);
-      if (not result)
-        ele->eraseFromParent();
-    }
-
-    return true;
-  } else if (StructType *structType = dyn_cast<StructType>(operandType)) {
-    Instruction *insertPoint = &(*IRB.GetInsertPoint());
-    bool has_modified = false;
-    // struct type cannot GEP with phi, since elements of struct may be
-    // different from each other
-    for (size_t index = 0; index < structType->elements().size(); index++) {
-      IRB.SetInsertPoint(insertPoint);
-      Value *element = IRB.CreateExtractValue(operand, index);
-      bool result = instrumentParameterCheck(element, IRB, DL, depth);
-      if (result)
-        has_modified = true;
-      else {
-        if (auto I = dyn_cast<Instruction>(element))
-          I->eraseFromParent();
-      }
-    }
-    return has_modified;
-  } else if (ArrayType *arrayType = dyn_cast<ArrayType>(operandType)) {
-    Type *unpackedType = unpackArrayType(arrayType);
-    if (!unpackedType->isPointerTy() && !unpackedType->isStructTy())
-      // do not need instrument
-      return false;
-    Instruction *insertPoint = &(*IRB.GetInsertPoint());
-    bool has_modified = false;
-    if (operandAddr) {
-      // lvalue case, that has memobj
-      auto cnt = IRB.getInt32(arrayType->getNumElements());
-      FOR_LOOP_BEG(insertPoint, cnt)
-      Value *eleAddr = IRB.CreateGEP(
-          operandAddr->getType()->getScalarType()->getPointerElementType(),
-          operandAddr, {IRB.getInt32(0), phi});
-      auto ele = IRB.CreateLoad(
-          eleAddr->getType()->getScalarType()->getPointerElementType(),
-          eleAddr);
-      instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
-      FOR_LOOP_END(cnt)
-      has_modified = true;
-    } else {
-      // rvalue case, that only in register
-      for (uint64_t index = 0; index < arrayType->getNumElements(); index++) {
-        IRB.SetInsertPoint(insertPoint);
-        Value *element = IRB.CreateExtractValue(operand, index);
-        bool result = instrumentParameterCheck(element, IRB, DL, depth);
-        if (result)
-          has_modified = true;
-        else {
-          if (auto I = dyn_cast<Instruction>(element))
-            I->eraseFromParent();
-        }
-      }
-    }
-    return has_modified;
-  }
-  return false;
-}
-
-void AddressSanitizer::declareAdditionalSymbol(Module &M) {
-  IRBuilder<> IRB(*C);
-
-  ExternSGXSanEnclaveBaseAddr =
-      cast<GlobalVariable>(M.getOrInsertGlobal("g_enclave_base", IntptrTy));
-  ExternSGXSanEnclaveBaseAddr->setLinkage(GlobalValue::ExternalLinkage);
-  ExternSGXSanEnclaveSizeAddr =
-      cast<GlobalVariable>(M.getOrInsertGlobal("g_enclave_size", IntptrTy));
-  ExternSGXSanEnclaveSizeAddr->setLinkage(GlobalValue::ExternalLinkage);
-
-  EnclaveTLSConstructorAtTBridgeBegin = M.getOrInsertFunction(
-      "EnclaveTLSConstructorAtTBridgeBegin", IRB.getVoidTy());
-  EnclaveTLSDestructorAtTBridgeEnd = M.getOrInsertFunction(
-      "EnclaveTLSDestructorAtTBridgeEnd", IRB.getVoidTy());
-
-  WhitelistOfAddrOutEnclave_active = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_active", IRB.getVoidTy());
-  WhitelistOfAddrOutEnclave_deactive = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
-  WhitelistOfAddrOutEnclave_query_ex = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_query_ex", IRB.getVoidTy(), IRB.getInt8PtrTy(),
-      IntptrTy, IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
-  WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt", IRB.getVoidTy());
-  WhitelistOfAddrOutEnclave_global_propagate =
-      M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
-                            IRB.getVoidTy(), IRB.getInt8PtrTy());
-
-  sgxsan_edge_check = M.getOrInsertFunction("sgxsan_edge_check",
-                                            IRB.getVoidTy(), IRB.getInt8PtrTy(),
-                                            IRB.getInt64Ty(), IRB.getInt32Ty());
-
-  SGXSanMemcpyS = M.getOrInsertFunction("sgxsan_memcpy_s", IRB.getInt32Ty(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty());
-  SGXSanMemsetS = M.getOrInsertFunction("sgxsan_memset_s", IRB.getInt32Ty(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty(),
-                                        IRB.getInt32Ty(), IRB.getInt64Ty());
-  SGXSanMemmoveS = M.getOrInsertFunction("sgxsan_memmove_s", IRB.getInt32Ty(),
-                                         IRB.getInt8PtrTy(), IRB.getInt64Ty(),
-                                         IRB.getInt8PtrTy(), IRB.getInt64Ty());
-#if (USE_SGXSAN_MALLOC)
-  SGXSanMalloc = M.getOrInsertFunction("sgxsan_malloc", IRB.getInt8PtrTy(),
-                                       IRB.getInt64Ty());
-  SGXSanFree =
-      M.getOrInsertFunction("sgxsan_free", IRB.getVoidTy(), IRB.getInt8PtrTy());
-  SGXSanCalloc = M.getOrInsertFunction("sgxsan_calloc", IRB.getInt8PtrTy(),
-                                       IRB.getInt64Ty(), IRB.getInt64Ty());
-  SGXSanRealloc = M.getOrInsertFunction("sgxsan_realloc", IRB.getInt8PtrTy(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty());
-#endif
-
-  is_pointer_readable =
-      M.getOrInsertFunction("is_pointer_readable", IRB.getInt1Ty(),
-                            IRB.getInt8PtrTy(), IntptrTy, IRB.getInt32Ty());
-}
-
-extern "C" ShadowMapping ASanGetShadowMapping(Triple &TargetTriple,
-                                              int LongSize, bool IsKasan) {
-  return getShadowMapping(TargetTriple, LongSize, IsKasan);
 }
