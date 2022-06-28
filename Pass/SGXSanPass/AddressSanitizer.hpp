@@ -129,8 +129,7 @@ private:
 
   // These arrays is indexed by AccessIsWrite and Experiment.
   FunctionCallee AsanErrorCallbackSized[2][2];
-  FunctionCallee AsanMemoryAccessCallbackSizedLoad[2],
-      AsanMemoryAccessCallbackSizedStore[2];
+  FunctionCallee AsanMemoryAccessCallbackSized[2][2];
 
   FunctionCallee AsanMemmove, AsanMemcpy, AsanMemset;
   Value *LocalDynamicShadow = nullptr;
@@ -152,6 +151,7 @@ private:
   std::unordered_set<Function *> TLSMgrInstrumentedEcall;
   Value *SGXSanEnclaveBase = nullptr, *SGXSanEnclaveEndPlus1 = nullptr;
   bool isFuncAtEnclaveTBridge = false;
+  Constant *curFuncGlobalNameStrPtr = nullptr;
   SmallVector<StoreInst *> GlobalVariableStoreInsts;
 };
 

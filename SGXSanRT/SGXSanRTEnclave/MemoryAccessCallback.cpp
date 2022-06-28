@@ -4,10 +4,12 @@
 #include "PoisonCheck.hpp"
 #include "WhitelistCheck.hpp"
 
-// Totally in ELRANGE, ensured by PASS. Only need to check shadow byte,
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                                   \
-    extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(uptr addr)             \
+    extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(uptr addr,             \
+                                                                     bool used_to_cmp,      \
+                                                                     char *parent_func)     \
     {                                                                                       \
+        SGXSAN_ELRANGE_CHECK_BEG(addr, size)                                                \
         uptr smp = MEM_TO_SHADOW(addr);                                                     \
         uptr s = size <= SHADOW_GRANULARITY ? ((*reinterpret_cast<u8 *>(smp)) & (0x8F))     \
                                             : ((*reinterpret_cast<u16 *>(smp)) & (0x8F8F)); \
@@ -20,6 +22,10 @@
                 ReportGenericError(pc, bp, sp, addr, is_write, size, true);                 \
             }                                                                               \
         }                                                                                   \
+        SGXSAN_ELRANGE_CHECK_MID                                                            \
+        WhitelistOfAddrOutEnclave_query_ex((void *)addr, size,                              \
+                                           is_write, used_to_cmp, parent_func);             \
+        SGXSAN_ELRANGE_CHECK_END;                                                           \
     }
 
 ASAN_MEMORY_ACCESS_CALLBACK(load, false, 1)
@@ -46,7 +52,7 @@ extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_loadN(uptr addr, uptr size, 
     SGXSAN_ELRANGE_CHECK_END;
 }
 
-extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_storeN(uptr addr, uptr size)
+extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_storeN(uptr addr, uptr size, bool used_to_cmp, char *parent_func)
 {
     SGXSAN_ELRANGE_CHECK_BEG(addr, size)
     if (sgxsan_region_is_poisoned(addr, size))
@@ -55,6 +61,6 @@ extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_storeN(uptr addr, uptr size)
         ReportGenericError(pc, bp, sp, addr, true, size, true);
     }
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query((void *)addr, size);
+    WhitelistOfAddrOutEnclave_query_ex((void *)addr, size, true, used_to_cmp, parent_func);
     SGXSAN_ELRANGE_CHECK_END;
 }

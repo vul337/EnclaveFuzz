@@ -741,8 +741,7 @@ private:
 
   // These arrays is indexed by AccessIsWrite and Experiment.
   FunctionCallee AsanErrorCallbackSized[2][2];
-  FunctionCallee AsanMemoryAccessCallbackSizedLoad[2],
-      AsanMemoryAccessCallbackSizedStore[2];
+  FunctionCallee AsanMemoryAccessCallbackSized[2][2];
 
   FunctionCallee AsanMemmove, AsanMemcpy, AsanMemset;
   Value *LocalDynamicShadow = nullptr;
@@ -764,6 +763,7 @@ private:
   std::unordered_set<Function *> TLSMgrInstrumentedEcall;
   Value *SGXSanEnclaveBase = nullptr, *SGXSanEnclaveEndPlus1 = nullptr;
   bool isFuncAtEnclaveTBridge = false;
+  Constant *curFuncGlobalNameStrPtr = nullptr;
   SmallVector<StoreInst *> GlobalVariableStoreInsts;
 };
 
@@ -1789,6 +1789,19 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   IRBuilder<> IRB(InsertBefore);
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   size_t AccessSizeIndex = TypeSizeToSizeIndex(TypeSize);
+
+  if (UseCalls) {
+    if (Exp == 0)
+      IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][0][AccessSizeIndex],
+                     {AddrLong, IRB.getInt1(hasCmpUser(OrigIns)),
+                      curFuncGlobalNameStrPtr});
+    else
+      IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][1][AccessSizeIndex],
+                     {AddrLong, IRB.getInt1(hasCmpUser(OrigIns)),
+                      curFuncGlobalNameStrPtr,
+                      ConstantInt::get(IRB.getInt32Ty(), Exp)});
+    return;
+  }
   // <Use elrange guard page to detect cross boundary, below is pseudo-code>
   // Cmp1_BB:
   // cmp (Start < EnclaveBase)
@@ -1831,7 +1844,8 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   //
   // Access_BB:
   BasicBlock *Cmp1_BB = nullptr, *Cmp2_BB = nullptr,
-             *ShadowByteCheck_BB = nullptr, *Cmp3_BB = nullptr,
+             *ShadowByteCheck_BB = nullptr, *SlowPath1_BB = nullptr,
+             *Crash_BB = nullptr, *Cmp3_BB = nullptr,
              *TotallyOutELRANGE_BB = nullptr, *Access_BB = nullptr;
   Cmp1_BB = InsertBefore->getParent();
   Access_BB = SplitBlock(Cmp1_BB, InsertBefore);
@@ -1841,8 +1855,11 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
         BasicBlock::Create(*C, "TotallyOutELRANGE_BB", curFunc, Access_BB);
     Cmp3_BB = BasicBlock::Create(*C, "Cmp3_BB", curFunc, TotallyOutELRANGE_BB);
   }
-  ShadowByteCheck_BB = BasicBlock::Create(*C, "ShadowByteCheck_BB", curFunc,
-                                          Cmp3_BB ? Cmp3_BB : Access_BB);
+  Crash_BB = BasicBlock::Create(*C, "Crash_BB", curFunc,
+                                Cmp3_BB ? Cmp3_BB : Access_BB);
+  SlowPath1_BB = BasicBlock::Create(*C, "SlowPath1_BB", curFunc, Crash_BB);
+  ShadowByteCheck_BB =
+      BasicBlock::Create(*C, "ShadowByteCheck_BB", curFunc, SlowPath1_BB);
   Cmp2_BB = BasicBlock::Create(*C, "Cmp2_BB", curFunc, ShadowByteCheck_BB);
 
   Instruction *Cmp1_BBTerm = Cmp1_BB->getTerminator();
@@ -1860,39 +1877,10 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                    ShadowByteCheck_BB,
                    MDBuilder(*C).createBranchWeights(1, 100000));
 
-  if (not isFuncAtEnclaveTBridge) {
-    assert(Cmp3_BB);
-    IRB.SetInsertPoint(Cmp3_BB);
-    Value *EndAddrULTEnclaveBase = IRB.CreateICmpULT(
-        IRB.CreateAdd(AddrLong,
-                      ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
-        SGXSanEnclaveBase);
-    IRB.CreateCondBr(EndAddrULTEnclaveBase, TotallyOutELRANGE_BB, Access_BB,
-                     MDBuilder(*C).createBranchWeights(100000, 1));
-
-    IRB.SetInsertPoint(TotallyOutELRANGE_BB);
-    IRB.CreateCall(
-        WhitelistOfAddrOutEnclave_query_ex,
-        {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
-         ConstantInt::get(IntptrTy, (TypeSize >> 3)), IRB.getInt1(IsWrite),
-         IRB.getInt1(hasCmpUser(OrigIns)),
-         IRB.CreateGlobalStringPtr(OrigIns->getFunction()->getName())});
-    IRB.CreateBr(Access_BB);
-  }
-
   IRB.SetInsertPoint(ShadowByteCheck_BB);
 #if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
   IRB.CreateCall(WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt);
 #endif
-  if (UseCalls) {
-    if (Exp == 0)
-      IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][0][AccessSizeIndex],
-                     AddrLong);
-    else
-      IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][1][AccessSizeIndex],
-                     {AddrLong, ConstantInt::get(IRB.getInt32Ty(), Exp)});
-    return;
-  }
 
   Type *ShadowTy =
       IntegerType::get(*C, std::max(8U, TypeSize >> Mapping.Scale));
@@ -1906,11 +1894,6 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   size_t Granularity = 1ULL << Mapping.Scale;
   Instruction *CrashTerm = nullptr;
 
-  BasicBlock *SlowPath1_BB =
-                 BasicBlock::Create(*C, "SlowPath1_BB", curFunc,
-                                    ShadowByteCheck_BB->getNextNode()),
-             *Crash_BB = BasicBlock::Create(*C, "Crash_BB", curFunc,
-                                            SlowPath1_BB->getNextNode());
   IRB.CreateCondBr(Cmp, SlowPath1_BB, Access_BB,
                    MDBuilder(*C).createBranchWeights(1, 100000));
 
@@ -1942,6 +1925,25 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   Instruction *Crash = generateCrashCode(CrashTerm, AddrLong, IsWrite,
                                          AccessSizeIndex, SizeArgument, Exp);
   Crash->setDebugLoc(OrigIns->getDebugLoc());
+
+  if (not isFuncAtEnclaveTBridge) {
+    assert(Cmp3_BB);
+    IRB.SetInsertPoint(Cmp3_BB);
+    Value *EndAddrULTEnclaveBase = IRB.CreateICmpULT(
+        IRB.CreateAdd(AddrLong,
+                      ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
+        SGXSanEnclaveBase);
+    IRB.CreateCondBr(EndAddrULTEnclaveBase, TotallyOutELRANGE_BB, Access_BB,
+                     MDBuilder(*C).createBranchWeights(100000, 1));
+
+    IRB.SetInsertPoint(TotallyOutELRANGE_BB);
+    IRB.CreateCall(WhitelistOfAddrOutEnclave_query_ex,
+                   {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
+                    ConstantInt::get(IntptrTy, (TypeSize >> 3)),
+                    IRB.getInt1(IsWrite), IRB.getInt1(hasCmpUser(OrigIns)),
+                    curFuncGlobalNameStrPtr});
+    IRB.CreateBr(Access_BB);
+  }
 }
 
 // Instrument unusual size or unusual alignment.
@@ -1955,23 +1957,15 @@ void AddressSanitizer::instrumentUnusualSizeOrAlignment(
   Value *Size = ConstantInt::get(IntptrTy, TypeSize / 8);
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   if (UseCalls) {
-    if (Exp == 0) {
-      if (IsWrite)
-        IRB.CreateCall(AsanMemoryAccessCallbackSizedStore[0], {AddrLong, Size});
-      else
-        IRB.CreateCall(
-            AsanMemoryAccessCallbackSizedLoad[0],
-            {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
-             IRB.CreateGlobalStringPtr(I->getFunction()->getName())});
-    } else {
-      if (IsWrite)
-        IRB.CreateCall(AsanMemoryAccessCallbackSizedStore[1], {AddrLong, Size});
-      else
-        IRB.CreateCall(
-            AsanMemoryAccessCallbackSizedLoad[1],
-            {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
-             IRB.CreateGlobalStringPtr(I->getFunction()->getName())});
-    }
+    if (Exp == 0)
+      IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][0],
+                     {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
+                      curFuncGlobalNameStrPtr});
+    else
+      IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][1],
+                     {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
+                      curFuncGlobalNameStrPtr,
+                      ConstantInt::get(IRB.getInt32Ty(), Exp)});
   } else {
     Value *LastByte = IRB.CreateIntToPtr(
         IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, TypeSize / 8 - 1)),
@@ -2816,28 +2810,26 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
       const std::string ExpStr = Exp ? "exp_" : "";
       const std::string EndingStr = Recover ? "_noabort" : "";
 
+      SmallVector<Type *, 5> Args4 = {IntptrTy, IntptrTy, Type::getInt1Ty(*C),
+                                      Type::getInt8PtrTy(*C)};
+      SmallVector<Type *, 4> Args3 = {IntptrTy, Type::getInt1Ty(*C),
+                                      Type::getInt8PtrTy(*C)};
       SmallVector<Type *, 3> Args2 = {IntptrTy, IntptrTy};
       SmallVector<Type *, 2> Args1{1, IntptrTy};
       if (Exp) {
         Type *ExpType = Type::getInt32Ty(*C);
+        Args4.push_back(ExpType);
+        Args3.push_back(ExpType);
         Args2.push_back(ExpType);
         Args1.push_back(ExpType);
       }
       AsanErrorCallbackSized[AccessIsWrite][Exp] = M.getOrInsertFunction(
           kAsanReportErrorTemplate + ExpStr + TypeStr + "_n" + EndingStr,
           FunctionType::get(IRB.getVoidTy(), Args2, false));
-      if (AccessIsWrite == 0) {
-        AsanMemoryAccessCallbackSizedLoad[Exp] = M.getOrInsertFunction(
-            ClMemoryAccessCallbackPrefix + ExpStr + "Load" + "N" + EndingStr,
-            FunctionType::get(
-                IRB.getVoidTy(),
-                {IntptrTy, IntptrTy, IRB.getInt1Ty(), IRB.getInt8PtrTy()},
-                false));
-      } else {
-        AsanMemoryAccessCallbackSizedStore[Exp] = M.getOrInsertFunction(
-            ClMemoryAccessCallbackPrefix + ExpStr + "Store" + "N" + EndingStr,
-            FunctionType::get(IRB.getVoidTy(), Args2, false));
-      }
+
+      AsanMemoryAccessCallbackSized[AccessIsWrite][Exp] = M.getOrInsertFunction(
+          ClMemoryAccessCallbackPrefix + ExpStr + TypeStr + "N" + EndingStr,
+          FunctionType::get(IRB.getVoidTy(), Args4, false));
 
       for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
            AccessSizeIndex++) {
@@ -2850,7 +2842,7 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
         AsanMemoryAccessCallback[AccessIsWrite][Exp][AccessSizeIndex] =
             M.getOrInsertFunction(
                 ClMemoryAccessCallbackPrefix + ExpStr + Suffix + EndingStr,
-                FunctionType::get(IRB.getVoidTy(), Args1, false));
+                FunctionType::get(IRB.getVoidTy(), Args3, false));
       }
     }
   }
@@ -3111,6 +3103,7 @@ bool AddressSanitizer::instrumentFunction(Function &F,
       SGXSanEnclaveBase,
       IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr, "enclave_size"),
       "enclave_end_plus1");
+  curFuncGlobalNameStrPtr = IRB.CreateGlobalStringPtr(F.getName());
 
   int NumInstrumented = 0;
   for (auto &Operand : OperandsToInstrument) {
