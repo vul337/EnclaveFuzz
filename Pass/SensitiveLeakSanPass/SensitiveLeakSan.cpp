@@ -1,9 +1,12 @@
 #include "SensitiveLeakSan.hpp"
 #include "AddressSanitizer.hpp"
 #include "SGXSanManifest.h"
+#include "config.h"
+#include "json.hpp"
 #include "llvm/Demangle/Demangle.h"
 
 using namespace llvm;
+using ordered_json = nlohmann::ordered_json;
 
 // #define DUMP_VALUE_FLOW
 // #define SHOW_WORK_OBJ_PTS
@@ -15,7 +18,7 @@ using namespace llvm;
 #define MALLOC_USABLE_SZIE_STR "malloc_usable_size"
 #endif
 
-static cl::opt<int> heapAllocatorsMaxCollectionTimes(
+static cl::opt<int> ClHeapAllocatorsMaxCollectionTimes(
     "heap-allocators-max-collection-times",
     cl::desc("max times of collection heap allocator wrappers"), cl::Hidden,
     cl::init(5));
@@ -129,7 +132,7 @@ void SensitiveLeakSan::ShallowPoisonAlignedObject(
 }
 
 void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(
-    SVF::ObjPN *objPN, std::pair<uint8_t *, size_t> *shadowBytesPair) {
+    SVF::ObjVar *objPN, std::pair<uint8_t *, size_t> *shadowBytesPair) {
   assert(objPN);
   auto memObj = objPN->getMemObj();
   assert((memObj->isHeap() or memObj->isStack()) and not memObj->isFunction());
@@ -157,16 +160,26 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(
 
   IRBuilder<> IRB(objI->getNextNode());
   Value *obj = nullptr, *objSize = nullptr;
-  if (SVF::GepObjPN *gepObjPN = dyn_cast<SVF::GepObjPN>(objPN)) {
-    auto inStructOffset = gepObjPN->getLocationSet().getOffset();
+  if (SVF::GepObjVar *gepObjPN = dyn_cast<SVF::GepObjVar>(objPN)) {
+    auto ls = gepObjPN->getLocationSet();
+    SmallVector<Value *> inStructOffset;
+    if (ls.getOffsetValueVec().size()) {
+      for (auto offset : ls.getOffsetValueVec())
+        inStructOffset.push_back(const_cast<SVF::Value *>(offset.first));
+    } else {
+      inStructOffset.push_back(ConstantInt::get(Type::getInt32Ty(*C), 0));
+      inStructOffset.push_back(ConstantInt::get(
+          Type::getInt32Ty(*C), ls.accumulateConstantFieldIdx()));
+    }
+
     obj =
         IRB.CreateGEP(objI->getType()->getScalarType()->getPointerElementType(),
-                      objI, {IRB.getInt32(0), IRB.getInt32(inStructOffset)});
+                      objI, inStructOffset);
     auto _objSize = M->getDataLayout().getTypeAllocSize(
         cast<PointerType>(obj->getType())->getElementType());
     assert(_objSize > 0);
     objSize = IRB.getInt64(_objSize);
-  } else if (isa<SVF::FIObjPN>(objPN)) {
+  } else if (isa<SVF::FIObjVar>(objPN)) {
     obj = objI;
     objSize = getStackOrHeapInstObjSize(objI, IRB);
     assert(objSize != nullptr);
@@ -271,13 +284,12 @@ bool SensitiveLeakSan::isTBridgeFunc(Function &F) {
 }
 
 void SensitiveLeakSan::addAndPoisonSensitiveObj(
-    SVF::ObjPN *objPN, std::pair<uint8_t *, size_t> *shadowBytesPair) {
+    SVF::ObjVar *objPN, std::pair<uint8_t *, size_t> *shadowBytesPair) {
   assert(objPN);
   auto memObj = objPN->getMemObj();
   if (memObj->isHeap() or memObj->isStack()) {
-    auto parentFunc =
-        cast<Instruction>(const_cast<Value *>(memObj->getRefVal()))
-            ->getFunction();
+    auto parentFunc = cast<Instruction>(const_cast<Value *>(memObj->getValue()))
+                          ->getFunction();
     if (isTBridgeFunc(*parentFunc))
       return;
   }
@@ -325,31 +337,31 @@ Value *SensitiveLeakSan::stripCast(Value *v) {
 }
 
 void SensitiveLeakSan::getNonPointerObjPNs(
-    Value *value, std::unordered_set<SVF::ObjPN *> &objPNs) {
+    Value *value, std::unordered_set<SVF::ObjVar *> &objPNs) {
   assert(value);
   if (isa<Function>(value))
     return;
 
   if (hasObjectNode(value)) {
     auto objPNID = pag->getObjectNode(value);
-    assert(pag->findPAGNode(objPNID));
-    SVF::ObjPN *objPN = cast<SVF::ObjPN>(pag->getPAGNode(objPNID));
+    assert(pag->hasGNode(objPNID));
+    SVF::ObjVar *objPN = cast<SVF::ObjVar>(pag->getGNode(objPNID));
     getNonPointerObjPNs(objPN, objPNs);
   } else {
     assert(pag->hasValueNode(value));
     for (SVF::NodeID objPNID : ander->getPts(pag->getValueNode(value))) {
-      assert(pag->findPAGNode(objPNID));
-      SVF::ObjPN *objPN = cast<SVF::ObjPN>(pag->getPAGNode(objPNID));
+      assert(pag->hasGNode(objPNID));
+      SVF::ObjVar *objPN = cast<SVF::ObjVar>(pag->getGNode(objPNID));
       getNonPointerObjPNs(objPN, objPNs);
     }
   }
 }
 
 void SensitiveLeakSan::getNonPointerObjPNs(
-    SVF::ObjPN *objPN, std::unordered_set<SVF::ObjPN *> &objPNs) {
+    SVF::ObjVar *objPN, std::unordered_set<SVF::ObjVar *> &objPNs) {
   assert(objPN);
   auto memObj = objPN->getMemObj();
-  if (isa<SVF::DummyObjPN>(objPN) || memObj->isFunction())
+  if (isa<SVF::DummyObjVar>(objPN) || memObj->isFunction())
     return;
   int pointerLevel = getPointerLevel(objPN->getValue());
   assert(pointerLevel >= 1);
@@ -361,9 +373,9 @@ void SensitiveLeakSan::getNonPointerObjPNs(
     // SVF models ConstantObj as special ObjPN#1, so there is no individual
     // ObjPN for string constant etc..
     for (SVF::NodeID deepObjNodeID : ander->getPts(objPN->getId())) {
-      assert(pag->findPAGNode(deepObjNodeID));
-      SVF::ObjPN *deepObjPN = cast<SVF::ObjPN>(pag->getPAGNode(deepObjNodeID));
-      if (isa<SVF::DummyObjPN>(deepObjPN) ||
+      assert(pag->hasGNode(deepObjNodeID));
+      SVF::ObjVar *deepObjPN = cast<SVF::ObjVar>(pag->getGNode(deepObjNodeID));
+      if (isa<SVF::DummyObjVar>(deepObjPN) ||
           deepObjPN->getMemObj()->isFunction())
         continue;
       assert(getPointerLevel(deepObjPN->getValue()) < pointerLevel);
@@ -373,7 +385,7 @@ void SensitiveLeakSan::getNonPointerObjPNs(
 }
 
 void SensitiveLeakSan::pushSensitiveObj(Value *annotatedPtr) {
-  std::unordered_set<SVF::ObjPN *> objSet;
+  std::unordered_set<SVF::ObjVar *> objSet;
   getNonPointerObjPNs(annotatedPtr, objSet);
   assert(objSet.size() <= 1);
   for (auto obj : objSet) {
@@ -491,7 +503,7 @@ DICompositeType *SensitiveLeakSan::getDICompositeType(StructType *structTy) {
   return nullptr;
 }
 
-StructType *SensitiveLeakSan::getStructTypeOfHeapObj(SVF::ObjPN *heapObjPN) {
+StructType *SensitiveLeakSan::getStructTypeOfHeapObj(SVF::ObjVar *heapObjPN) {
   assert(heapObjPN->getMemObj()->isHeap());
   CallInst *objCI = cast<CallInst>(const_cast<Value *>(heapObjPN->getValue()));
   assert(getPointerLevel(objCI) == 1);
@@ -601,7 +613,7 @@ bool SensitiveLeakSan::poisonStructSensitiveShadowOnTemp(
   return hasPoisonedSensitive;
 }
 
-void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN,
+void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjVar *objPN,
                                                 SensitiveLevel sensitiveLevel) {
   if (sensitiveLevel == IS_SENSITIVE) {
     addAndPoisonSensitiveObj(objPN);
@@ -628,7 +640,7 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(SVF::ObjPN *objPN,
   }
 }
 
-StringRef SensitiveLeakSan::getObjMeaningfulName(SVF::ObjPN *objPN) {
+StringRef SensitiveLeakSan::getObjMeaningfulName(SVF::ObjVar *objPN) {
   StringRef objName = SGXSanGetName(objPN);
   if (objPN->getMemObj()->isHeap()) {
     auto obj = const_cast<Value *>(objPN->getValue());
@@ -647,7 +659,7 @@ StringRef SensitiveLeakSan::getObjMeaningfulName(SVF::ObjPN *objPN) {
 }
 
 void SensitiveLeakSan::addAndPoisonSensitiveObj(Value *obj) {
-  std::unordered_set<SVF::ObjPN *> objSet;
+  std::unordered_set<SVF::ObjVar *> objSet;
   getNonPointerObjPNs(obj, objSet);
   for (auto objPN : objSet) {
     auto objName = getObjMeaningfulName(objPN);
@@ -726,14 +738,30 @@ void SensitiveLeakSan::includeElrange() {
   SGXSanEnclaveSizeAddr->setLinkage(GlobalValue::ExternalLinkage);
 }
 
+void dump(ordered_json js) { dbgs() << js.dump(4) << "\n"; }
+
 void SensitiveLeakSan::initSVF() {
   collectHeapAllocators();
-  SVF::ExtAPI::getExtAPI()->registerDefinedFunc(heapAllocatorWrapperNames,
-                                                SVF::ExtAPI::EFT_ALLOC);
+
+  auto ExtAPIJsonFile =
+      std::string(SVF_PROJECT_PATH) + "/" + std::string(EXTAPI_JSON_PATH);
+  std::ifstream ifs(ExtAPIJsonFile);
+  if (not ifs.is_open())
+    abort();
+  std::stringstream buffer;
+  buffer << ifs.rdbuf();
+  auto ExtAPIJson = ordered_json::parse(buffer.str());
+  for (auto name : heapAllocatorWrapperNames) {
+    ordered_json::json_pointer ptr("/" + name);
+    ExtAPIJson[ptr / "type"] = "EFT_ALLOC";
+    ExtAPIJson[ptr / "overwrite_app_function"] = 1;
+  }
+  std::ofstream ofs(ExtAPIJsonFile, ofs.trunc);
+  ofs << ExtAPIJson.dump(4);
 
   svfModule = SVF::LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(*M);
   svfModule->buildSymbolTableInfo();
-  SVF::PAGBuilder builder;
+  SVF::SVFIRBuilder builder;
 
   pag = builder.build(svfModule);
 
@@ -874,7 +902,7 @@ void SensitiveLeakSan::collectHeapAllocators() {
     }
   }
 
-  for (int num = 0; num < heapAllocatorsMaxCollectionTimes; num++) {
+  for (int num = 0; num < ClHeapAllocatorsMaxCollectionTimes; num++) {
     // Handle global function pointers
     collectHeapAllocatorGlobalPtrs();
     for (Function &F : *M) {
@@ -953,7 +981,7 @@ SensitiveLeakSan::SensitiveLeakSan(Module &ArgM, CFLSteensAAResult &AAResult) {
   analyseModuleMetadata();
 }
 
-StringRef SensitiveLeakSan::getParentFuncName(SVF::PAGNode *node) {
+StringRef SensitiveLeakSan::getParentFuncName(SVF::SVFVar *node) {
   if (node->hasValue()) {
     Value *value = const_cast<Value *>(node->getValue());
     return ::getParentFuncName(value);
@@ -962,13 +990,13 @@ StringRef SensitiveLeakSan::getParentFuncName(SVF::PAGNode *node) {
 }
 
 void SensitiveLeakSan::getPtrValPNs(
-    SVF::ObjPN *objPN, std::unordered_set<SVF::ValPN *> &ptrValPNs) {
+    SVF::ObjVar *objPN, std::unordered_set<SVF::ValVar *> &ptrValPNs) {
   for (SVF::NodeID ptrValPNID : ander->getRevPts(objPN->getId())) {
-    if (not pag->findPAGNode(ptrValPNID))
+    if (not pag->hasGNode(ptrValPNID))
       continue;
-    SVF::PAGNode *node = pag->getPAGNode(ptrValPNID);
-    if (SVF::ValPN *ptrValPN = SVF::SVFUtil::dyn_cast<SVF::ValPN>(node)) {
-      if (isa<SVF::DummyValPN>(ptrValPN))
+    SVF::SVFVar *node = pag->getGNode(ptrValPNID);
+    if (SVF::ValVar *ptrValPN = SVF::SVFUtil::dyn_cast<SVF::ValVar>(node)) {
+      if (isa<SVF::DummyValVar>(ptrValPN))
         continue;
       if (getPointerLevel(ptrValPN->getValue()) ==
           getPointerLevel(objPN->getValue())) {
@@ -1236,7 +1264,7 @@ void SensitiveLeakSan::addPtObj2WorkList(Value *ptr) {
   assert(ptr->getType()->isPointerTy());
   assert(getPointerLevel(ptr) == 1);
   assert(not isa<Function>(ptr));
-  std::unordered_set<SVF::ObjPN *> objPNs;
+  std::unordered_set<SVF::ObjVar *> objPNs;
   getNonPointerObjPNs(ptr, objPNs);
   for (auto objPN : objPNs) {
     if (ProcessedList.count(objPN) == 0)
@@ -1245,7 +1273,7 @@ void SensitiveLeakSan::addPtObj2WorkList(Value *ptr) {
 }
 
 // only process `AllocInst` stack object
-void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN) {
+void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjVar *objPN) {
   assert(objPN);
   if (objPN->hasValue()) {
     AllocaInst *AI =
@@ -1270,7 +1298,7 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN) {
 }
 
 bool SensitiveLeakSan::hasObjectNode(Value *val) {
-  return symInfo->objSyms().find(symInfo->getGlobalRep(val)) !=
+  return symInfo->objSyms().find(SVF::SVFUtil::getGlobalRep(val)) !=
          symInfo->objSyms().end();
 }
 
@@ -1279,14 +1307,14 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(Value *obj) {
   assert(obj && !isa<Function>(obj));
   if (hasObjectNode(obj)) {
     auto objPNID = pag->getObjectNode(obj);
-    assert(pag->findPAGNode(objPNID));
-    SVF::ObjPN *objPN = cast<SVF::ObjPN>(pag->getPAGNode(objPNID));
+    assert(pag->hasGNode(objPNID));
+    SVF::ObjVar *objPN = cast<SVF::ObjVar>(pag->getGNode(objPNID));
     cleanStackObjectSensitiveShadow(objPN);
   } else {
     // inter-procedure situation may have multi point-tos
     for (auto objPNID : ander->getPts(pag->getValueNode(obj))) {
-      assert(pag->findPAGNode(objPNID));
-      SVF::ObjPN *objPN = cast<SVF::ObjPN>(pag->getPAGNode(objPNID));
+      assert(pag->hasGNode(objPNID));
+      SVF::ObjVar *objPN = cast<SVF::ObjVar>(pag->getGNode(objPNID));
       // dump(objPN);
       cleanStackObjectSensitiveShadow(objPN);
     }
@@ -1498,11 +1526,11 @@ bool SensitiveLeakSan::runOnModule() {
   propagateCnt = 0;
   while (!WorkList.empty()) {
     // update work status
-    SVF::ObjPN *workObjPN = *WorkList.begin();
+    SVF::ObjVar *workObjPN = *WorkList.begin();
     WorkList.erase(WorkList.begin());
     ProcessedList.emplace(workObjPN);
 
-    std::unordered_set<SVF::ValPN *> ptrValPNs;
+    std::unordered_set<SVF::ValVar *> ptrValPNs;
     getPtrValPNs(workObjPN, ptrValPNs);
 #ifdef SHOW_WORK_OBJ_PTS
     dbgs() << "============== Show point-to set ==============\n";
@@ -1524,29 +1552,29 @@ bool SensitiveLeakSan::runOnModule() {
   return true;
 }
 
-void SensitiveLeakSan::dumpPts(SVF::PAGNode *PN) {
+void SensitiveLeakSan::dumpPts(SVF::SVFVar *PN) {
   for (SVF::NodeID nodeID : ander->getPts(PN->getId())) {
-    assert(pag->findPAGNode(nodeID));
-    dump(pag->getPAGNode(nodeID));
+    assert(pag->hasGNode(nodeID));
+    dump(pag->getGNode(nodeID));
   }
 }
 
-void SensitiveLeakSan::dumpRevPts(SVF::PAGNode *PN) {
+void SensitiveLeakSan::dumpRevPts(SVF::SVFVar *PN) {
   for (SVF::NodeID nodeID : ander->getRevPts(PN->getId())) {
-    if (pag->findPAGNode(nodeID)) {
-      dump(pag->getPAGNode(nodeID));
+    if (pag->hasGNode(nodeID)) {
+      dump(pag->getGNode(nodeID));
     }
   }
 }
 
-StringRef SensitiveLeakSan::SGXSanGetName(SVF::PAGNode *PN) {
+StringRef SensitiveLeakSan::SGXSanGetName(SVF::SVFVar *PN) {
   if (PN->hasValue()) {
     return ::SGXSanGetName(const_cast<Value *>(PN->getValue()));
   } else
     return "";
 }
 
-std::string SensitiveLeakSan::toString(SVF::PAGNode *PN) {
+std::string SensitiveLeakSan::toString(SVF::SVFVar *PN) {
   std::stringstream ss;
   ss << "[Func] " << getParentFuncName(PN).str() << " [Name] "
      << SGXSanGetName(PN).str() << " " << PN->toString();
@@ -1554,11 +1582,11 @@ std::string SensitiveLeakSan::toString(SVF::PAGNode *PN) {
 }
 
 void SensitiveLeakSan::dump(SVF::NodeID nodeID) {
-  assert(pag->findPAGNode(nodeID));
-  dump(pag->getPAGNode(nodeID));
+  assert(pag->hasGNode(nodeID));
+  dump(pag->getGNode(nodeID));
 }
 
-void SensitiveLeakSan::dump(SVF::PAGNode *PN) {
+void SensitiveLeakSan::dump(SVF::SVFVar *PN) {
   dbgs() << toString(PN) << "\n\n";
 }
 

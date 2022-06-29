@@ -1,0 +1,3 @@
+#pragma once
+
+#define SVF_PROJECT_PATH "@SVF_DIR@"

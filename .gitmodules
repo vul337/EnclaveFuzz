@@ -1,3 +1,3 @@
 [submodule "SVF"]
 	path = SVF
-	url = git@github.com:LeoneChen/SVF.git
+	url = git@github.com:SVF-tools/SVF.git

@@ -21,8 +21,9 @@
 #include "MemoryModel/ConditionalPT.h"
 #include "SABER/LeakChecker.h"
 #include "SVF-FE/LLVMUtil.h"
-#include "SVF-FE/PAGBuilder.h"
+#include "SVF-FE/SVFIRBuilder.h"
 #include "Util/DPItem.h"
+#include "Util/config.h"
 #include "WPA/Andersen.h"
 #include "WPA/FlowSensitiveTBHC.h"
 
@@ -48,7 +49,7 @@ public:
   void doVFA(Value *work);
   void pushSensitiveObj(Value *annotatedVar);
   void
-  poisonSensitiveStackOrHeapObj(SVF::ObjPN *objPN,
+  poisonSensitiveStackOrHeapObj(SVF::ObjVar *objPN,
                                 std::pair<uint8_t *, size_t> *shadowBytesPair);
   Value *memToShadow(Value *Shadow, IRBuilder<> &IRB);
   Value *memPtrToShadowPtr(Value *memPtr, IRBuilder<> &IRB);
@@ -58,27 +59,28 @@ public:
   void getDirectAndIndirectCalledFunction(CallInst *CI,
                                           SmallVector<Function *> &calleeVec);
   Instruction *findInstByName(Function *F, std::string InstName);
-  void getPtrValPNs(SVF::ObjPN *obj,
-                    std::unordered_set<SVF::ValPN *> &oneLevelPtrs);
+  void getPtrValPNs(SVF::ObjVar *obj,
+                    std::unordered_set<SVF::ValVar *> &oneLevelPtrs);
   void addAndPoisonSensitiveObj(
-      SVF::ObjPN *obj, std::pair<uint8_t *, size_t> *shadowBytesPair = nullptr);
-  void addAndPoisonSensitiveObj(SVF::ObjPN *objPN,
+      SVF::ObjVar *obj,
+      std::pair<uint8_t *, size_t> *shadowBytesPair = nullptr);
+  void addAndPoisonSensitiveObj(SVF::ObjVar *objPN,
                                 SensitiveLevel sensitiveLevel);
   void addAndPoisonSensitiveObj(Value *obj);
   Value *RoundUpUDiv(IRBuilder<> &IRB, Value *size, uint64_t dividend);
   uint64_t RoundUpUDiv(uint64_t dividend, uint64_t divisor);
   void addPtObj2WorkList(Value *ptr);
-  static StringRef getParentFuncName(SVF::PAGNode *node);
+  static StringRef getParentFuncName(SVF::SVFVar *node);
   void setNoSanitizeMetadata(Instruction *I);
   void propagateShadowInMemTransfer(CallInst *CI, Instruction *insertPoint,
                                     Value *destPtr, Value *srcPtr,
                                     Value *dstSize, Value *copyCnt);
   uint64_t getPointerElementSize(Value *ptr);
   Value *getHeapObjSize(CallInst *obj, IRBuilder<> &IRB);
-  void getNonPointerObjPNs(SVF::ObjPN *objPN,
-                           std::unordered_set<SVF::ObjPN *> &objPNs);
+  void getNonPointerObjPNs(SVF::ObjVar *objPN,
+                           std::unordered_set<SVF::ObjVar *> &objPNs);
   void getNonPointerObjPNs(Value *value,
-                           std::unordered_set<SVF::ObjPN *> &objPNs);
+                           std::unordered_set<SVF::ObjVar *> &objPNs);
   Value *instrumentPoisonCheck(Value *src);
   Value *isLIPoisoned(LoadInst *src);
   Value *isArgPoisoned(Argument *src);
@@ -103,17 +105,17 @@ public:
   void poisonSensitiveGlobalVariableAtRuntime();
   void initializeCallbacks();
   void cleanStackObjectSensitiveShadow(Value *stackObject);
-  void cleanStackObjectSensitiveShadow(SVF::ObjPN *objPN);
+  void cleanStackObjectSensitiveShadow(SVF::ObjVar *objPN);
   Value *getStackOrHeapInstObjSize(Instruction *objI, IRBuilder<> &IRB);
-  void dumpPts(SVF::PAGNode *PN);
-  void dumpRevPts(SVF::PAGNode *PN);
+  void dumpPts(SVF::SVFVar *PN);
+  void dumpRevPts(SVF::SVFVar *PN);
   void pushAndPopArgShadowFrameAroundCallInst(CallInst *CI);
-  static std::string toString(SVF::PAGNode *PN);
+  static std::string toString(SVF::SVFVar *PN);
   static std::string toString(Value *val);
-  static void dump(SVF::PAGNode *PN);
+  static void dump(SVF::SVFVar *PN);
   void dump(SVF::NodeID nodeID);
   static void dump(Value *val);
-  static StringRef SGXSanGetName(SVF::PAGNode *PN);
+  static StringRef SGXSanGetName(SVF::SVFVar *PN);
   void printStrAtRT(IRBuilder<> &IRB, std::string str);
   void printSrcAtRT(IRBuilder<> &IRB, Value *src);
   void collectHeapAllocators();
@@ -123,7 +125,7 @@ public:
   void analyseModuleMetadata();
   void analyseDIType(DIType *type);
   DICompositeType *getDICompositeType(StructType *structTy);
-  StructType *getStructTypeOfHeapObj(SVF::ObjPN *heapObj);
+  StructType *getStructTypeOfHeapObj(SVF::ObjVar *heapObj);
   bool isSensitive(StringRef str);
   bool mayBeSensitive(StringRef str);
   bool poisonStructSensitiveShadowOnTemp(
@@ -135,11 +137,11 @@ public:
   ShallowPoisonAlignedObject(Value *objPtr, Value *objSize, IRBuilder<> &IRB,
                              std::pair<uint8_t *, size_t> *shadowBytesPair);
   SensitiveLevel getSensitiveLevel(StringRef str);
-  StringRef getObjMeaningfulName(SVF::ObjPN *objPN);
+  StringRef getObjMeaningfulName(SVF::ObjVar *objPN);
   static bool isTBridgeFunc(Function &F);
 
 private:
-  std::unordered_set<SVF::ObjPN *> SensitiveObjs, WorkList, ProcessedList;
+  std::unordered_set<SVF::ObjVar *> SensitiveObjs, WorkList, ProcessedList;
   std::unordered_set<Value *> poisonedInst;
   std::unordered_set<AllocaInst *> cleanedStackObjs;
   std::unordered_set<CallInst *> processedMemTransferInst;
@@ -163,7 +165,7 @@ private:
   Type *IntptrTy = nullptr;
 
   SVF::SVFModule *svfModule = nullptr;
-  SVF::PAG *pag = nullptr;
+  SVF::SVFIR *pag = nullptr;
   SVF::Andersen *ander = nullptr;
   SVF::PTACallGraph *callgraph = nullptr;
   SVF::SymbolTableInfo *symInfo = nullptr;
