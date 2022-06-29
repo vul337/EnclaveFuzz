@@ -1,12 +1,12 @@
 #ifndef SGXSAN_COMMON_POISON_HPP
 #define SGXSAN_COMMON_POISON_HPP
-#include <cstring>
-#include "SGXSanInt.h"
-#include "SGXSanCheck.h"
 #include "SGXSanAlignment.h"
-#include "SGXSanManifest.h"
+#include "SGXSanCheck.h"
 #include "SGXSanCommonShadowMap.hpp"
 #include "SGXSanDefs.h"
+#include "SGXSanInt.h"
+#include "SGXSanManifest.h"
+#include <cstring>
 
 // These magic values are written to shadow for better error reporting.
 const int kAsanHeapLeftRedzoneMagic = 0xfa;
@@ -38,55 +38,48 @@ const int kSGXSanElrangeLeftGuard = 0xe0;
 #define SHADOW_GRANULARITY 8
 #endif
 
-static inline void FastPoisonShadowPartialRightRedzone(
-    uptr aligned_addr, uptr size, uptr redzone_size, u8 value)
-{
-    bool poison_partial = true;
-    u8 *shadow = (u8 *)MEM_TO_SHADOW(aligned_addr);
-    for (uptr i = 0; i < redzone_size; i += SHADOW_GRANULARITY, shadow++)
-    {
-        if (i + SHADOW_GRANULARITY <= size)
-        {
-            *shadow = 0; // fully addressable
-        }
-        else if (i >= size)
-        {
-            *shadow = (SHADOW_GRANULARITY == 128) ? 0xff : value; // unaddressable
-        }
-        else
-        {
-            // first size-i bytes are addressable
-            *shadow = poison_partial ? static_cast<u8>(size - i) : 0;
-        }
+static inline void FastPoisonShadowPartialRightRedzone(uptr aligned_addr,
+                                                       uptr size,
+                                                       uptr redzone_size,
+                                                       u8 value) {
+  bool poison_partial = true;
+  u8 *shadow = (u8 *)MEM_TO_SHADOW(aligned_addr);
+  for (uptr i = 0; i < redzone_size; i += SHADOW_GRANULARITY, shadow++) {
+    if (i + SHADOW_GRANULARITY <= size) {
+      *shadow = 0; // fully addressable
+    } else if (i >= size) {
+      *shadow = (SHADOW_GRANULARITY == 128) ? 0xff : value; // unaddressable
+    } else {
+      // first size-i bytes are addressable
+      *shadow = poison_partial ? static_cast<u8>(size - i) : 0;
     }
+  }
 }
 
 // assume all are aligned to SHADOW_GRANULARITY
-static inline void FastPoisonShadow(uptr addr, uptr size, u8 value)
-{
-    CHECK(IsAligned(addr, SHADOW_GRANULARITY));
-    CHECK(!(size % SHADOW_GRANULARITY));
-    size_t poison_size = size / SHADOW_GRANULARITY;
-    memset(reinterpret_cast<void *>(MEM_TO_SHADOW(addr)), value, poison_size);
+static inline void FastPoisonShadow(uptr addr, uptr size, u8 value) {
+  CHECK(IsAligned(addr, SHADOW_GRANULARITY));
+  CHECK(!(size % SHADOW_GRANULARITY));
+  size_t poison_size = size / SHADOW_GRANULARITY;
+  memset(reinterpret_cast<void *>(MEM_TO_SHADOW(addr)), value, poison_size);
 }
 
-static inline void PoisonShadow(uptr addr, uptr size, u8 value)
-{
-    // If addr do not aligned at granularity, start posioning from RoundUpTo(addr, granularity)
-    if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY)))
-    {
-        uptr aligned_addr = RoundUpTo(addr, SHADOW_GRANULARITY);
-        size -= aligned_addr - addr;
-        addr = aligned_addr;
-    }
+static inline void PoisonShadow(uptr addr, uptr size, u8 value) {
+  // If addr do not aligned at granularity, start posioning from RoundUpTo(addr,
+  // granularity)
+  if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY))) {
+    uptr aligned_addr = RoundUpTo(addr, SHADOW_GRANULARITY);
+    size -= aligned_addr - addr;
+    addr = aligned_addr;
+  }
 
-    uptr remained = size & (SHADOW_GRANULARITY - 1);
-    FastPoisonShadow(addr, size - remained, value);
+  uptr remained = size & (SHADOW_GRANULARITY - 1);
+  FastPoisonShadow(addr, size - remained, value);
 
-    if (remained)
-    {
-        *(reinterpret_cast<u8 *>(MEM_TO_SHADOW(addr + size - remained))) = value ? value : (u8)remained;
-    }
+  if (remained) {
+    *(reinterpret_cast<u8 *>(MEM_TO_SHADOW(addr + size - remained))) =
+        value ? value : (u8)remained;
+  }
 }
 
 #endif // SGXSAN_COMMON_POISON_HPP

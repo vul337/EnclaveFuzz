@@ -47,10 +47,9 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
    unw_cursor_t.  */
 #define dwarf_to_cursor(c) ((unw_cursor_t *)(c))
 
-typedef struct dwarf_loc
-{
-    unw_word_t val;
-    unw_word_t type; /* see X86_LOC_TYPE_* macros.  */
+typedef struct dwarf_loc {
+  unw_word_t val;
+  unw_word_t type; /* see X86_LOC_TYPE_* macros.  */
 } dwarf_loc_t;
 
 #endif /* dwarf_config_h */

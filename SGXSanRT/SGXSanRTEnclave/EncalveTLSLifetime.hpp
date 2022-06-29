@@ -1,11 +1,10 @@
 #pragma once
 
 #if defined(__cplusplus)
-extern "C"
-{
+extern "C" {
 #endif
-    void EnclaveTLSConstructorAtTBridgeBegin();
-    void EnclaveTLSDestructorAtTBridgeEnd();
+void EnclaveTLSConstructorAtTBridgeBegin();
+void EnclaveTLSDestructorAtTBridgeEnd();
 #if defined(__cplusplus)
 }
 #endif

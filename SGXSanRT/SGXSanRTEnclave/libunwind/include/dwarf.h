@@ -28,31 +28,31 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 
 #include <libunwind.h>
 
-struct dwarf_cursor;    /* forward-declaration */
+struct dwarf_cursor; /* forward-declaration */
 
 #include "dwarf-config.h"
 
-typedef struct dwarf_cursor
-{
-    void *as_arg;                     /* argument to address-space callbacks */
-    void * /* unw_addr_space_t */ as; /* reference to per-address-space info */
+typedef struct dwarf_cursor {
+  void *as_arg;                     /* argument to address-space callbacks */
+  void * /* unw_addr_space_t */ as; /* reference to per-address-space info */
 
-    unw_word_t cfa;       /* canonical frame address; aka frame-/stack-pointer */
-    unw_word_t ip;        /* instruction pointer */
-    unw_word_t args_size; /* size of arguments */
-    unw_word_t eh_args[UNW_TDEP_NUM_EH_REGS];
-    unsigned int eh_valid_mask;
+  unw_word_t cfa;       /* canonical frame address; aka frame-/stack-pointer */
+  unw_word_t ip;        /* instruction pointer */
+  unw_word_t args_size; /* size of arguments */
+  unw_word_t eh_args[UNW_TDEP_NUM_EH_REGS];
+  unsigned int eh_valid_mask;
 
-    dwarf_loc_t loc[DWARF_NUM_PRESERVED_REGS];
+  dwarf_loc_t loc[DWARF_NUM_PRESERVED_REGS];
 
-    unsigned int stash_frames : 1;   /* stash frames for fast lookup */
-    unsigned int use_prev_instr : 1; /* use previous (= call) or current (= signal) instruction? */
-    unsigned int pi_valid : 1;       /* is proc_info valid? */
-    unsigned int pi_is_dynamic : 1;  /* proc_info found via dynamic proc info? */
-    unw_proc_info_t pi;              /* info about current procedure */
+  unsigned int stash_frames : 1;   /* stash frames for fast lookup */
+  unsigned int use_prev_instr : 1; /* use previous (= call) or current (=
+                                      signal) instruction? */
+  unsigned int pi_valid : 1;       /* is proc_info valid? */
+  unsigned int pi_is_dynamic : 1;  /* proc_info found via dynamic proc info? */
+  unw_proc_info_t pi;              /* info about current procedure */
 
-    short hint; /* faster lookup of the rs cache */
-    short prev_rs;
+  short hint; /* faster lookup of the rs cache */
+  short prev_rs;
 } dwarf_cursor_t;
 
 #endif /* dwarf_h */

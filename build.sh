@@ -19,9 +19,10 @@ cmake ${PASS_CMAKE_FLAGS} -B ${PASS_BUILD_MOD}-build -DCMAKE_INSTALL_PREFIX=$(pw
 cmake --build ${PASS_BUILD_MOD}-build -j$(nproc)
 rm -rf ../output/libSGXSanPass.so
 cmake --install ${PASS_BUILD_MOD}-build
+cd ..
 
 # build runtime
-cd ../SGXSanRT
+cd SGXSanRT
 make -j$(nproc) -s ${RT_MAKE_FLAGS}
 ln -fs ../SGXSanRT/libSGXSanRT{App.a,App.so,Enclave.a} ../output/
 ln -fs ../SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl ../output/

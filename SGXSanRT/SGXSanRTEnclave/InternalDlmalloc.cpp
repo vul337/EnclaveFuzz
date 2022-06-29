@@ -1,11 +1,10 @@
 #include "InternalDlmalloc.hpp"
 
-struct malloc_chunk
-{
-    size_t prev_foot;        /* Size of previous chunk (if free).  */
-    size_t head;             /* Size and inuse bits. */
-    struct malloc_chunk *fd; /* double links -- used only if free. */
-    struct malloc_chunk *bk;
+struct malloc_chunk {
+  size_t prev_foot;        /* Size of previous chunk (if free).  */
+  size_t head;             /* Size and inuse bits. */
+  struct malloc_chunk *fd; /* double links -- used only if free. */
+  struct malloc_chunk *bk;
 };
 
 typedef struct malloc_chunk *mchunkptr;
@@ -41,16 +40,13 @@ typedef struct malloc_chunk *mchunkptr;
 #define chunksize(p) ((p)->head & ~(FLAG_BITS))
 
 /* Get the internal overhead associated with chunk p */
-#define overhead_for(p) \
-    (is_mmapped(p) ? MMAP_CHUNK_OVERHEAD : CHUNK_OVERHEAD)
+#define overhead_for(p) (is_mmapped(p) ? MMAP_CHUNK_OVERHEAD : CHUNK_OVERHEAD)
 
-size_t dlmalloc_usable_size(void *mem)
-{
-    if (mem != 0)
-    {
-        mchunkptr p = mem2chunk(mem);
-        if (is_inuse(p))
-            return chunksize(p) - overhead_for(p);
-    }
-    return 0;
+size_t dlmalloc_usable_size(void *mem) {
+  if (mem != 0) {
+    mchunkptr p = mem2chunk(mem);
+    if (is_inuse(p))
+      return chunksize(p) - overhead_for(p);
+  }
+  return 0;
 }

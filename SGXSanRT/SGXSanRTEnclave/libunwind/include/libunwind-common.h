@@ -43,19 +43,18 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 
 /* Error codes.  The unwind routines return the *negated* values of
    these error codes on error and a non-negative value on success.  */
-typedef enum
-{
-    UNW_ESUCCESS = 0, /* no error */
-    UNW_EUNSPEC,      /* unspecified (general) error */
-    UNW_ENOMEM,       /* out of memory */
-    UNW_EBADREG,      /* bad register number */
-    UNW_EREADONLYREG, /* attempt to write read-only register */
-    UNW_ESTOPUNWIND,  /* stop unwinding */
-    UNW_EINVALIDIP,   /* invalid IP */
-    UNW_EBADFRAME,    /* bad frame */
-    UNW_EINVAL,       /* unsupported operation or bad value */
-    UNW_EBADVERSION,  /* unwind info has unsupported version */
-    UNW_ENOINFO       /* no unwind info found */
+typedef enum {
+  UNW_ESUCCESS = 0, /* no error */
+  UNW_EUNSPEC,      /* unspecified (general) error */
+  UNW_ENOMEM,       /* out of memory */
+  UNW_EBADREG,      /* bad register number */
+  UNW_EREADONLYREG, /* attempt to write read-only register */
+  UNW_ESTOPUNWIND,  /* stop unwinding */
+  UNW_EINVALIDIP,   /* invalid IP */
+  UNW_EBADFRAME,    /* bad frame */
+  UNW_EINVAL,       /* unsupported operation or bad value */
+  UNW_EBADVERSION,  /* unwind info has unsupported version */
+  UNW_ENOINFO       /* no unwind info found */
 } unw_error_t;
 
 /* The following enum defines the indices for a couple of
@@ -65,27 +64,24 @@ typedef enum
    index 0.  The number of such registers is architecture-dependent.
    The remaining indices can be used as an architecture sees fit.  The
    last valid register index is given by UNW_REG_LAST.  */
-typedef enum
-{
-    UNW_REG_IP = UNW_TDEP_IP, /* (rw) instruction pointer (pc) */
-    UNW_REG_SP = UNW_TDEP_SP, /* (ro) stack pointer */
-    UNW_REG_EH = UNW_TDEP_EH, /* (rw) exception-handling reg base */
-    UNW_REG_LAST = UNW_TDEP_LAST_REG
+typedef enum {
+  UNW_REG_IP = UNW_TDEP_IP, /* (rw) instruction pointer (pc) */
+  UNW_REG_SP = UNW_TDEP_SP, /* (ro) stack pointer */
+  UNW_REG_EH = UNW_TDEP_EH, /* (rw) exception-handling reg base */
+  UNW_REG_LAST = UNW_TDEP_LAST_REG
 } unw_frame_regnum_t;
 
 /* Number of exception-handler argument registers: */
 #define UNW_NUM_EH_REGS UNW_TDEP_NUM_EH_REGS
 
-typedef enum
-{
-    UNW_CACHE_NONE,      /* no caching */
-    UNW_CACHE_GLOBAL,    /* shared global cache */
-    UNW_CACHE_PER_THREAD /* per-thread caching */
+typedef enum {
+  UNW_CACHE_NONE,      /* no caching */
+  UNW_CACHE_GLOBAL,    /* shared global cache */
+  UNW_CACHE_PER_THREAD /* per-thread caching */
 } unw_caching_policy_t;
 
-typedef enum
-{
-    UNW_INIT_SIGNAL_FRAME = 1, /* We know this is a signal frame */
+typedef enum {
+  UNW_INIT_SIGNAL_FRAME = 1, /* We know this is a signal frame */
 } unw_init_local2_flags_t;
 
 typedef int unw_regnum_t;
@@ -94,9 +90,8 @@ typedef int unw_regnum_t;
    and is used to track the frame state as the unwinder steps from
    frame to frame.  It is safe to make (shallow) copies of variables
    of this type.  */
-typedef struct unw_cursor
-{
-    unw_word_t opaque[UNW_TDEP_CURSOR_LEN];
+typedef struct unw_cursor {
+  unw_word_t opaque[UNW_TDEP_CURSOR_LEN];
 } unw_cursor_t;
 
 /* This type encapsulates the entire (preserved) machine-state.  */
@@ -113,22 +108,21 @@ typedef unw_tdep_context_t unw_context_t;
    This routine is signal-safe.  */
 #define unw_is_fpreg(r) unw_tdep_is_fpreg(r)
 
-typedef struct unw_proc_info
-{
-    unw_word_t start_ip; /* first IP covered by this procedure */
-    unw_word_t end_ip;   /* first IP NOT covered by this procedure */
+typedef struct unw_proc_info {
+  unw_word_t start_ip; /* first IP covered by this procedure */
+  unw_word_t end_ip;   /* first IP NOT covered by this procedure */
 #if defined(NEED_LAST_IP)
-    unw_word_t last_ip; /* first IP that could begin another procedure */
+  unw_word_t last_ip; /* first IP that could begin another procedure */
 #endif
-    unw_word_t lsda;    /* address of lang.-spec. data area (if any) */
-    unw_word_t handler; /* optional personality routine */
-    unw_word_t gp;      /* global-pointer value for this procedure */
-    unw_word_t flags;   /* misc. flags */
+  unw_word_t lsda;    /* address of lang.-spec. data area (if any) */
+  unw_word_t handler; /* optional personality routine */
+  unw_word_t gp;      /* global-pointer value for this procedure */
+  unw_word_t flags;   /* misc. flags */
 
-    int format;                 /* unwind-info format (arch-specific) */
-    int unwind_info_size;       /* size of the information (if applicable) */
-    void *unwind_info;          /* unwind-info (arch-specific) */
-    unw_tdep_proc_info_t extra; /* target-dependent auxiliary proc-info */
+  int format;                 /* unwind-info format (arch-specific) */
+  int unwind_info_size;       /* size of the information (if applicable) */
+  void *unwind_info;          /* unwind-info (arch-specific) */
+  unw_tdep_proc_info_t extra; /* target-dependent auxiliary proc-info */
 } unw_proc_info_t;
 
 /* These routines work both for local and remote unwinding.  */
