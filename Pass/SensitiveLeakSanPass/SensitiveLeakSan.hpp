@@ -40,6 +40,7 @@ enum SensitiveLevel { NOT_SENSITIVE = 0, MAY_BE_SENSITIVE, IS_SENSITIVE };
 class SensitiveLeakSan {
 public:
   SensitiveLeakSan(Module &M, CFLSteensAAResult &AAResult);
+  ~SensitiveLeakSan();
   void includeThreadFuncArgShadow();
   void includeElrange();
   void includeSGXSanCheck();
@@ -188,5 +189,6 @@ private:
   std::map<std::string, DICompositeType *> DICompositeTypeMap;
   std::unordered_set<DIType *> processedDITypes;
   size_t propagateCnt = 0;
+  std::string ExtAPIJsonFile;
 };
 } // namespace llvm

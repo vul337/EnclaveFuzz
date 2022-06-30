@@ -25,7 +25,7 @@ set(SVF_INCLUDE "${SVF_DIR}/include")
 message(STATUS "SVF_BUILD: ${SVF_BUILD}")
 
 # LLVM is normally built without RTTI. Be consistent with that.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-unused -Wno-comment -fno-rtti")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-unused -Wno-comment -fno-rtti -std=c++17")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_SOURCE_DIR}/SensitiveLeakSanPass/config.h @ONLY)
 

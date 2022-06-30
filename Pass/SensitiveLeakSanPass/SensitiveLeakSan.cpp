@@ -4,6 +4,7 @@
 #include "config.h"
 #include "json.hpp"
 #include "llvm/Demangle/Demangle.h"
+#include <filesystem>
 
 using namespace llvm;
 using ordered_json = nlohmann::ordered_json;
@@ -743,8 +744,9 @@ void dump(ordered_json js) { dbgs() << js.dump(4) << "\n"; }
 void SensitiveLeakSan::initSVF() {
   collectHeapAllocators();
 
-  auto ExtAPIJsonFile =
-      std::string(SVF_PROJECT_PATH) + "/" + std::string(EXTAPI_JSON_PATH);
+  // register heap allocator wrappers to SVF ExtAPI.json
+  ExtAPIJsonFile = std::string(SVF_PROJECT_PATH) + "/" + EXTAPI_JSON_PATH;
+  std::filesystem::copy(ExtAPIJsonFile, ExtAPIJsonFile + ".orig");
   std::ifstream ifs(ExtAPIJsonFile);
   if (not ifs.is_open())
     abort();
@@ -979,6 +981,10 @@ SensitiveLeakSan::SensitiveLeakSan(Module &ArgM, CFLSteensAAResult &AAResult) {
   initializeCallbacks();
   initSVF();
   analyseModuleMetadata();
+}
+
+SensitiveLeakSan::~SensitiveLeakSan() {
+  std::filesystem::rename(ExtAPIJsonFile + ".orig", ExtAPIJsonFile);
 }
 
 StringRef SensitiveLeakSan::getParentFuncName(SVF::SVFVar *node) {
