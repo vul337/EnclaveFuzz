@@ -1,0 +1,100 @@
+diff --git a/sdk/trts/linux/global_init.c b/sdk/trts/linux/global_init.c
+index a180adf3..e1c14bc6 100644
+--- a/sdk/trts/linux/global_init.c
++++ b/sdk/trts/linux/global_init.c
+@@ -68,7 +68,9 @@ typedef void (*fp_t)(void);
+ /* required by global constructor when -fuse-cxa-atexit is enabled */
+ void *__dso_handle __attribute__((weak)) = &(__dso_handle);
+ 
+-int __cxa_atexit(void (*fun)(void *), void *para, void *dso)
++int __cxa_atexit(void (*fun)(void *), void *para, void *dso);
++/// use \c __cxa_atexit of normal lib
++#if 0
+ {
+     if(unlikely(g_exit_function_cookie == 0))
+     {
+@@ -112,6 +114,7 @@ int __cxa_atexit(void (*fun)(void *), void *para, void *dso)
+ 
+     return 0;
+ }
++#endif
+ 
+ int atexit(void (*fun)(void))
+ {
+diff --git a/sdk/trts/linux/tls_support.c b/sdk/trts/linux/tls_support.c
+index c3c2eb06..d8a89f6d 100644
+--- a/sdk/trts/linux/tls_support.c
++++ b/sdk/trts/linux/tls_support.c
+@@ -44,6 +44,7 @@ typedef struct
+     unsigned long int ti_offset;
+ } tls_index;
+ 
++#if 0
+ #if defined SE_GNU32
+ void * __attribute__((__regparm__(1))) ___tls_get_addr(tls_index *ti)
+ #elif defined SE_GNU64
+@@ -53,3 +54,4 @@ void *__tls_get_addr(tls_index *ti)
+     thread_data_t *thread_data = get_thread_data();
+     return (unsigned char *)thread_data->tls_addr + ti->ti_offset;
+ }
++#endif
+diff --git a/sdk/trts/linux/trts_pic.S b/sdk/trts/linux/trts_pic.S
+index bb7395d2..42fb55f4 100644
+--- a/sdk/trts/linux/trts_pic.S
++++ b/sdk/trts/linux/trts_pic.S
+@@ -76,6 +76,7 @@ DECLARE_LOCAL_FUNC lock_enclave
+  * ---------------------------------------------------------------------
+  */
+ DECLARE_LOCAL_FUNC get_thread_data
++    .weak get_thread_data
+     READ_TD_DATA self_addr 
+     ret
+ 
+diff --git a/sdk/trts/trts.cpp b/sdk/trts/trts.cpp
+index 2646a0e6..a9cbb4dd 100644
+--- a/sdk/trts/trts.cpp
++++ b/sdk/trts/trts.cpp
+@@ -67,6 +67,7 @@ extern uint64_t g_enclave_size;
+ //      0 - the whole buffer or part of the buffer is not within the enclave,
+ //          or the buffer is wrap around
+ //
++__attribute__((weak))
+ int sgx_is_within_enclave(const void *addr, size_t size)
+ {
+     size_t start = reinterpret_cast<size_t>(addr);
+@@ -100,6 +101,7 @@ int sgx_is_within_enclave(const void *addr, size_t size)
+ //      0 - the whole buffer or part of the buffer is not outside the enclave,
+ //          or the buffer is wrap around
+ //
++__attribute__((weak))
+ int sgx_is_outside_enclave(const void *addr, size_t size)
+ {
+     size_t start = reinterpret_cast<size_t>(addr);
+@@ -139,6 +141,7 @@ int sgx_is_outside_enclave(const void *addr, size_t size)
+ // so the outside stack is automatically unwind.
+ // In addition, sgx_ocalloc needs perform outside stack probe to make sure it is not allocating beyond the end of the stack.
+ #define OC_ROUND 16
++__attribute__((weak))
+ void * sgx_ocalloc(size_t size)
+ {
+     // read the outside stack address from current SSA
+@@ -208,6 +211,7 @@ void * sgx_ocalloc(size_t size)
+ //      N/A
+ // sgx_ocfree restores the original outside stack pointer in the SSA.
+ // Do not call this function if you still need the buffer allocated by sgx_ocalloc within the ECALL.
++__attribute__((weak))
+ void sgx_ocfree()
+ {
+     // ECALL stack frame
+diff --git a/sdk/trts/trts_ocall.cpp b/sdk/trts/trts_ocall.cpp
+index 8f6daeb7..1bf7ebb1 100644
+--- a/sdk/trts/trts_ocall.cpp
++++ b/sdk/trts/trts_ocall.cpp
+@@ -50,6 +50,7 @@ extern "C" sgx_status_t __morestack(const unsigned int index, void *ms);
+ // Return Value:
+ //      OCALL status
+ //
++__attribute__((weak))
+ sgx_status_t sgx_ocall(const unsigned int index, void *ms)
+ {
+     // the OCALL index should be within the ocall table range
