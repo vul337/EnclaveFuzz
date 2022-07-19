@@ -247,7 +247,8 @@ public:
 
   // input ptr may be in Enclave or out of Enclave
   static void global_propagate(const void *ptr) {
-    sgxsan_assert(m_inited and m_active);
+    if (not m_inited or not m_active)
+      return;
     if (sgx_is_within_enclave(ptr, 1))
       return;
     const void *find_start = nullptr;

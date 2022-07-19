@@ -21,12 +21,10 @@
 #ifndef MBUSAFECRT_H
 #define MBUSAFECRT_H
 #include <string.h>
+#include "ext_string.h"
 #include <stdarg.h>
 #include <wchar.h>
-
 typedef wchar_t WCHAR;
-/// normal \c string.h instead of sgxsdk's don't contain \c errno_t
-typedef int errno_t;
 
 #ifdef __cplusplus
     extern "C" {
@@ -78,8 +76,6 @@ extern int _vsnwprintf_s( WCHAR* string, size_t sizeInWords, size_t count, const
 
 extern errno_t memcpy_s( void * dst, size_t sizeInBytes, const void * src, size_t count );
 extern errno_t memmove_s( void * dst, size_t sizeInBytes, const void * src, size_t count );
-/// normal string.h don't contain memset_s
-extern errno_t memset_s(void *s, size_t smax, int c, size_t n);
 
 #ifdef __cplusplus
     }

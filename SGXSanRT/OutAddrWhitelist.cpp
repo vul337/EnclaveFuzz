@@ -26,7 +26,8 @@ void WhitelistQuery(const void *ptr, size_t size, bool is_write,
   size_t find_size;
   std::tie(std::ignore, find_size, std::ignore) =
       OutAddrWhitelist::query(ptr, size);
-  sgxsan_warning(find_size == 0, "Illegal access outside-enclave: 0x%p\n", ptr);
+  // sgxsan_warning(find_size == 0, "Illegal access outside-enclave: 0x%p\n",
+  // ptr);
 }
 
 void WhitelistGlobalPropagate(const void *addr) {

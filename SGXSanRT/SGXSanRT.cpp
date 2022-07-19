@@ -1,6 +1,7 @@
 #include "SGXSanRT.h"
 #include "ArgShadow.h"
 #include "OutAddrWhitelist.h"
+#include "plthook.h"
 #include <execinfo.h>
 #include <fstream>
 #include <iostream>
@@ -184,6 +185,12 @@ class MmapInfo {
 public:
   MmapInfo() {
     sgxsan_assert(m_mmap_infos.size() == 0);
+    update();
+  }
+
+  void update() {
+    pthread_rwlock_wrlock(&m_rwlock);
+    m_mmap_infos.clear();
     std::fstream f("/proc/self/maps", std::ios::in);
     std::string line;
     std::regex map_pattern(
@@ -211,23 +218,28 @@ public:
         m_mmap_infos.push_back(info);
       }
     }
+    pthread_rwlock_unlock(&m_rwlock);
   }
 
   bool is_readable(void *ptr, size_t element_size, int count) {
-    if (ptr == nullptr)
+    if (ptr == nullptr) {
       return false;
-    if (element_size == 0)
-      return true;
-    size_t len = element_size * std::max(1, count);
-
-    int idx = search_idx((uptr)ptr, 0, m_mmap_infos.size() - 1);
-    if (idx != -1) {
-      sgxsan_error(m_mmap_infos[idx].end < ((uptr)ptr + len - 1),
-                   "Region cross multiple segment\n");
+    } else if (element_size == 0) {
       return true;
     } else {
-      sgxsan_warning(true, "Pass non-null unreadable pointer parameter\n");
-      return false;
+      bool ret = false;
+      size_t len = element_size * std::max(1, count);
+      pthread_rwlock_rdlock(&m_rwlock);
+      int idx = search_idx((uptr)ptr, 0, m_mmap_infos.size() - 1);
+      if (idx != -1) {
+        sgxsan_error(m_mmap_infos[idx].end < ((uptr)ptr + len - 1),
+                     "Region cross multiple segment\n");
+        ret = true;
+      } else {
+        ret = false;
+      }
+      pthread_rwlock_unlock(&m_rwlock);
+      return ret;
     }
   }
 
@@ -248,13 +260,26 @@ private:
       return search_idx(addr, mid_idx + 1, end_idx);
     }
   }
-
+  pthread_rwlock_t m_rwlock = PTHREAD_RWLOCK_INITIALIZER;
   std::vector<SGXSanMMapInfo> m_mmap_infos;
 };
 MmapInfo g_mmap_infos;
 
 extern "C" bool is_region_readable(void *ptr, size_t element_size, int count) {
-  return g_mmap_infos.is_readable(ptr, element_size, count);
+  if (ptr == nullptr)
+    return false;
+  bool result = g_mmap_infos.is_readable(ptr, element_size, count);
+  if (result == false) {
+    g_mmap_infos.update();
+    // twice check
+    result = g_mmap_infos.is_readable(ptr, element_size, count);
+    if (result == false) {
+      sgxsan_warning(true, "Pass non-null unreadable pointer parameter\n");
+    }
+    return result;
+  } else {
+    return true;
+  }
 }
 
 DEFINE_FUNC_PTR(malloc);
@@ -263,7 +288,27 @@ DEFINE_FUNC_PTR(calloc);
 DEFINE_FUNC_PTR(realloc);
 DEFINE_FUNC_PTR(malloc_usable_size);
 
-static void hook_heap_allocator() {
+int hook_libstdcxx_heap_mgr() {
+  plthook_t *plthook;
+
+  if (plthook_open(&plthook, "libstdc++.so.6") != 0) {
+    log_error("plthook_open error: %s\n", plthook_error());
+    return -1;
+  }
+  /// \c calloc and \c malloc_usable_size is not used by
+  /// \file /lib/x86_64-linux-gnu/libstdc++.so.6
+  if (plthook_replace(plthook, "malloc", (void *)malloc, NULL) != 0 ||
+      plthook_replace(plthook, "free", (void *)free, NULL) != 0 ||
+      plthook_replace(plthook, "realloc", (void *)realloc, NULL) != 0) {
+    log_error("plthook_replace error: %s\n", plthook_error());
+    plthook_close(plthook);
+    return -1;
+  }
+  plthook_close(plthook);
+  return 0;
+}
+
+static void get_real_heap_allocator() {
   GET_REAL_FUNC(malloc);
   GET_REAL_FUNC(free);
   GET_REAL_FUNC(calloc);
@@ -271,14 +316,22 @@ static void hook_heap_allocator() {
   GET_REAL_FUNC(malloc_usable_size);
 }
 
-extern "C" void __asan_init() {
-  sgxsan_assert(!asan_inited);
+static void AsanInitInternal() {
+  if (LIKELY(asan_inited))
+    return;
+  // make sure c++ stream is initialized
+  std::ios_base::Init _init;
   sgxsan_init_shadow_memory();
   PrintAddressSpaceLayout();
   register_sgxsan_sigaction();
-  hook_heap_allocator();
+  get_real_heap_allocator();
+  if (hook_libstdcxx_heap_mgr() != 0) {
+    abort();
+  }
   asan_inited = true;
 }
+
+extern "C" void __asan_init() { AsanInitInternal(); }
 
 /// SLSan Callbacks to show dynamic value flow
 extern "C" void PrintPtr(char *info, void *addr, size_t size) {
@@ -355,21 +408,21 @@ static void PrintShadowMap(log_level ll, uptr addr) {
       "Shadow byte legend (one shadow byte represents 8 application bytes):\n"
       "  Addressable:           00\n"
       "  Partially addressable: 01 02 03 04 05 06 07\n"
-      "  SGX sensitive layout:  10\n"
-      "  SGX sensitive data:    20\n"
-      "  Heap left redzone:     fa\n"
-      "  Heap righ redzone:     fb\n"
-      "  Freed Heap region:     fd\n"
-      "  Stack left redzone:    f1\n"
-      "  Stack mid redzone:     f2\n"
-      "  Stack right redzone:   f3\n"
-      "  Stack partial redzone: f4\n"
-      "  Stack after return:    f5\n"
-      "  Stack use after scope: f8\n"
-      "  Global redzone:        f9\n"
-      "  Global init order:     f6\n"
-      "  Poisoned by user:      f7\n"
-      "  ASan internal:         fe\n";
+      "  SGX sensitive layout:  1X\n"
+      "  SGX sensitive data:    2X\n"
+      "  Data in Enclave:       4X\n"
+      "  Stack left redzone:    81\n"
+      "  Stack mid redzone:     82\n"
+      "  Stack right redzone:   83\n"
+      "  Stack after return:    85\n"
+      "  Left alloca redzone:   86\n"
+      "  Right alloca redzone:  87\n"
+      "  Stack use after scope: 88\n"
+      "  Global redzone:        89\n"
+      "  Heap left redzone:     8a\n"
+      "  Heap righ redzone:     8b\n"
+      "  Freed Heap region:     8d\n"
+      "  ASan internal:         8e\n";
   sgxsan_log(ll, false, str.c_str());
 }
 
@@ -391,6 +444,21 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   return;
 }
 
+std::string addr2line(uptr addr, std::string fileName) {
+  std::stringstream cmd;
+  cmd << "addr2line -afCpe " << fileName.c_str() << " " << std::hex << addr;
+  std::string cmd_str = cmd.str();
+  return sgxsan_exec(cmd_str.c_str());
+}
+
+std::string addr2line_fname(uptr addr, std::string fileName) {
+  std::stringstream cmd;
+  cmd << "addr2line -fCe " << fileName.c_str() << " " << std::hex << addr
+      << " | head -n 1";
+  std::string cmd_str = cmd.str();
+  return sgxsan_exec(cmd_str.c_str());
+}
+
 void sgxsan_backtrace(log_level ll) {
 #if (DUMP_STACK_TRACE)
   if (ll > USED_LOG_LEVEL)
@@ -398,7 +466,16 @@ void sgxsan_backtrace(log_level ll) {
   void *array[20];
   size_t size = backtrace(array, 20);
   log_always_np("== SGXSan Backtrace BEG ==\n");
-  backtrace_symbols_fd(array, size, STDERR_FILENO);
+  Dl_info info;
+  for (size_t i = 0; i < size; i++) {
+    if (dladdr(array[i], &info) != 0) {
+      std::string str = addr2line(
+          (uptr)array[i] -
+              ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
+          info.dli_fname);
+      log_always_np(str.c_str());
+    }
+  }
   log_always_np("== SGXSan Backtrace END ==\n");
 #endif
 }
@@ -451,7 +528,18 @@ static EncryptStatus isCiphertext(uint64_t addr, uint64_t size) {
     }
   }
 
-  sgxsan_warning(!is_cipher, "Plaintext transfering...\n");
+  if (!is_cipher) {
+    Dl_info info;
+    void *addr = sgxsan_backtrace_i(4);
+    if (dladdr(addr, &info) != 0) {
+      auto fname = addr2line_fname(
+          (uptr)addr -
+              ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
+          info.dli_fname);
+      fname.erase(std::remove(fname.begin(), fname.end(), '\n'), fname.end());
+      log_warning("[%s] Plaintext transfering...\n", fname.c_str());
+    }
+  }
   return is_cipher ? Ciphertext : Plaintext;
 }
 
@@ -460,7 +548,7 @@ void check_output_hybrid(uint64_t addr, uint64_t size) {
 
   // get history of callsite
   std::vector<EncryptStatus> &history =
-      output_history[(void *)((uptr)sgxsan_backtrace_i(2) - 1)];
+      output_history[(void *)((uptr)sgxsan_backtrace_i(3) - 1)];
 
   EncryptStatus status = isCiphertext(addr, size);
   if (history.size() == 0) {

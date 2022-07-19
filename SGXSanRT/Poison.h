@@ -7,18 +7,18 @@ extern bool __thread RunInEnclave;
 
 /// These magic values are written to shadow for better error reporting.
 const int kAsanNotPoisonedMagic = 0x00;
-const int kAsanHeapLeftRedzoneMagic = 0x8a /* 0xfa */;
-const int kAsanHeapRightRedzoneMagic = 0x8b;
-const int kAsanHeapFreeMagic = 0x8d /* 0xfd */;
 const int kAsanStackLeftRedzoneMagic = 0x81 /* 0xf1 */;
 const int kAsanStackMidRedzoneMagic = 0x82 /* 0xf2 */;
 const int kAsanStackRightRedzoneMagic = 0x83 /* 0xf3 */;
 const int kAsanStackAfterReturnMagic = 0x85 /* 0xf5 */;
+const int kAsanAllocaLeftMagic = 0x86; /* 0xca */
+const int kAsanAllocaRightMagic = 0x87 /* 0xcb */;
 const int kAsanStackUseAfterScopeMagic = 0x88 /* 0xf8 */;
 const int kAsanGlobalRedzoneMagic = 0x89 /* 0xf9 */;
+const int kAsanHeapLeftRedzoneMagic = 0x8a /* 0xfa */;
+const int kAsanHeapRightRedzoneMagic = 0x8b;
+const int kAsanHeapFreeMagic = 0x8d /* 0xfd */;
 const int kAsanInternalHeapMagic = 0x8e /* 0xfe */;
-const int kAsanAllocaLeftMagic = 0x8c; /* 0xca */
-const int kAsanAllocaRightMagic = 0x8d /* 0xcb */;
 /// Mark sensitive area
 const int kSGXSanSensitiveLayout = 0x10;
 const int kSGXSanSensitiveObjData = 0x20;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Poison.h"
 #include "SGXSanRT.h"
 #include <stdint.h>
 #include <utility>
@@ -11,49 +12,58 @@ enum InOutEnclaveStatus {
 };
 enum PoisonStatus { UnknownPoisonStatus = -1, NotPoisoned = 0, IsPoisoned = 1 };
 
+/// \param[out] addrInOutEnclaveStatus
+/// Never returns \c Unknown.
+/// \param[out] addrPoisonStatus
+/// 1. If \p addrInOutEnclaveStatus returns \c InEnclave, never \c Unknown.
+/// 2. If \p addrInOutEnclaveStatus returns \c OutEnclave, returns \c Unknown.
+void AddressInOutEnclaveStatusAndPoisonStatus(
+    uptr addr, InOutEnclaveStatus &addrInOutEnclaveStatus,
+    PoisonStatus &addrPoisonStatus, uint8_t filter = kL1Filter);
+
+/// \brief Only check level 1 bits
+/// \param[out] regionInOutEnclaveStatus
+/// If \p size is too large(>64), may return \c UnknownInOutEnclaveStatus
+/// \param[out] regionPoisonStatus
+/// When \p regionInOutEnclaveStatus is \c InEnclave, return \c IsPoisoned if we
+/// can quickly decide that the region is unpoisoned, otherwise \c NotPoisoned.
+/// We assume that a redzone is at least 16 bytes.
+void FastRegionInOutEnclaveStatusAndPoisonStatus(
+    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    PoisonStatus &regionPoisonStatus);
+
+/// \brief Tell us whether region is poisoned, even if it's partial poisoned
+/// (what 'Strict' means)
+/// \param[out] regionInOutEnclaveStatus
+/// Never returns \c Unknown
+/// \param[out] regionPoisonStatus
+/// 1. If \p regionInOutEnclaveStatus returns \c InEnclave, never \c Unknown.
+/// 2. If \p regionInOutEnclaveStatus returns \c OutEnclave, return \c Unknown.
+void RegionInOutEnclaveStatusAndStrictPoisonStatus(
+    uint8_t *beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    PoisonStatus &regionPoisonStatus, uint8_t filter = kL1Filter);
+
+/// \brief Tell us whether region is poisoned, partial poisoned will be checked
+/// \param[in] size Can't be 0
+/// \param[out] regionInOutEnclaveStatus
+/// Never returns \c Unknown
+/// \param[out] regionPoisonStatus
+/// 1. If \p regionInOutEnclaveStatus returns \c InEnclave, returns
+/// \c NotPoisoned or poisoned address
+/// (when \p need_poisoned_addr is true)
+/// 2. If \p regionInOutEnclaveStatus returns \c OutEnclave, no meaning
+/// \param[in] need_poisoned_addr If we needn't get poisoned address, this
+/// function run faster
+void RegionInOutEnclaveStatusAndPoisonStatus(
+    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    PoisonStatus &regionPoisonStatus, uint8_t filter = kL1Filter);
+void RegionInOutEnclaveStatusAndPoisonedAddr(
+    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    uptr &regionPoisonedStatusOrAddr, uint8_t filter = kL1Filter);
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
-
-/// \retval 1) \c InOutEnclaveStatus will never be \c Unknown
-/// \retval 2) If \c InOutEnclaveStatus == \c InEnclave,
-/// \c PoisonStatus will never be \c Unknown.
-/// \retval 3) If \c InOutEnclaveStatus == \c OutEnclave,
-/// \c PoisonStatus is \c Unknown and has no meaning.
-std::pair<InOutEnclaveStatus, PoisonStatus>
-AddressInOutEnclaveStatusAndPoisonStatus(uptr addr, uint8_t filter = 0x8F);
-
-/// \retval 1) \c InOutEnclaveStatus: If \p size is too large, we may return \c
-/// UnknownInOutEnclaveStatus
-/// \retval 2) \c PoisonStatus: Return \c IsPoisoned
-/// if we can quickly decide that the region is unpoisoned. We assume that a
-/// redzone is at least 16 bytes.
-std::pair<InOutEnclaveStatus, PoisonStatus>
-FastRegionInOutEnclaveStatusAndPoisonStatus(uptr beg, uptr size);
-
-/// Tell us whether region is poisoned, even if it's partial poisoned (what
-/// 'Strct' means)
-/// \retval 1) \c InOutEnclaveStatus will never be \c Unknown
-/// \retval 2) If \c InOutEnclaveStatus == \c InEnclave,
-/// \c PoisonStatus will never be \c Unknown.
-/// \retval 3) If \c InOutEnclaveStatus == \c OutEnclave,
-/// \c PoisonStatus is \c Unknown and has no meaning.
-std::pair<InOutEnclaveStatus, PoisonStatus>
-RegionInOutEnclaveStatusAndStrictPoisonStatus(uint8_t *beg, uptr size,
-                                               uint8_t filter = 0x8F);
-
-/// Tell us whether region is poisoned, partial poisoned will be checked
-/// \param need_poisoned_addr if we needn't get poisoned address, it run faster
-/// \retval 1) \c InOutEnclaveStatus : Will never be \c Unknown
-/// \retval 2) If \c InOutEnclaveStatus == \c InEnclave, \c uptr == 0 means
-/// unpoisoned
-/// \retval 3) If \c InOutEnclaveStatus == \c OutEnclave, \c uptr has no
-/// meaning
-std::pair<InOutEnclaveStatus, uptr>
-RegionInOutEnclaveStatusAndPoisonStatus(uptr beg, uptr size,
-                                        uint8_t filter = 0x8F,
-                                        bool need_poisoned_addr = false);
-
 /// \retval true only when \p beg is InEnclave & Poisoned
 bool RegionIsInEnclaveAndPoisoned(uptr beg, uptr size, uint8_t filter);
 

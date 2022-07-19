@@ -21,8 +21,8 @@ struct ShadowMapping {
   bool InGlobal;
 };
 
-extern "C" ShadowMapping ASanGetShadowMapping(llvm::Triple &TargetTriple,
-                                              int LongSize, bool IsKasan);
+ShadowMapping ASanGetShadowMapping(llvm::Triple &TargetTriple, int LongSize,
+                                   bool IsKasan);
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 static const size_t kNumberOfAccessSizes = 5;

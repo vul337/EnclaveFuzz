@@ -1,36 +1,38 @@
+#include "Poison.h"
 #include "SGXSanRT.h"
+#include "arch.h"
+#include "cpuid.h"
 #include "sgx_edger8r.h"
+#include "sgx_key.h"
+#include "sgx_report.h"
+#include "sgx_thread.h"
+#include "sgx_urts.h"
+#include "trts_internal.h"
+#include <algorithm>
 #include <errno.h>
+#include <map>
 #include <pthread.h>
 #include <stack>
+#include <thread_data.h>
+#include <unistd.h>
 #include <vector>
 
-/// Thread Data
-typedef size_t sys_word_t;
+/// Global Data
 
-typedef struct _thread_data_t {
-  sys_word_t self_addr;
-  sys_word_t last_sp;          /* set by urts, relative to TCS */
-  sys_word_t stack_base_addr;  /* set by urts, relative to TCS */
-  sys_word_t stack_limit_addr; /* set by urts, relative to TCS */
-  sys_word_t first_ssa_gpr;    /* set by urts, relative to TCS */
-  sys_word_t
-      stack_guard; /* GCC expects start_guard at 0x14 on x86 and 0x28 on x64 */
+/*SECS data structure*/
+typedef struct _global_data_sim_t {
+  secs_t *secs_ptr;
+  sgx_cpu_svn_t cpusvn_sim;
+  uint64_t seed; /* to initialize the PRNG */
+} global_data_sim_t;
 
-  sys_word_t flags;
-  sys_word_t xsave_size; /* in bytes (se_ptrace.c needs to know its offset).*/
-  sys_word_t last_error; /* init to be 0. Used by trts. */
-  struct _thread_data_t *m_next;
-  sys_word_t tls_addr;  /* points to TLS pages */
-  sys_word_t tls_array; /* points to TD.tls_addr relative to TCS */
-  intptr_t exception_flag;
-  sys_word_t cxx_thread_info[6];
-  sys_word_t stack_commit_addr;
-} thread_data_t;
+extern global_data_sim_t g_global_data_sim;
+secs_t g_secs;
 
-__thread thread_data_t td;
+/// TCS Manager
 
-extern "C" thread_data_t *get_thread_data() { return &td; }
+TrustThreadPool _g_thread_pool;
+TrustThreadPool *g_thread_pool = &_g_thread_pool;
 
 /// Birdge Sticker
 typedef struct {
@@ -53,16 +55,38 @@ typedef sgx_status_t (*ecall_func_t)(void *ms);
 typedef sgx_status_t (*bridge_fn_t)(const void *);
 extern const ecall_table_t g_ecall_table;
 
-__thread sgx_ocall_table_t *g_enclave_ocall_table;
-__thread bool RunInEnclave;
+static void SGXInitInternal() {
+  g_global_data_sim.secs_ptr = &g_secs;
+  PoisonShadow((uptr)&g_secs, sizeof(g_secs), kAsanNotPoisonedMagic);
+}
+
+__thread sgx_ocall_table_t *g_enclave_ocall_table = nullptr;
+__thread bool RunInEnclave = false;
+__thread bool FirstECall = true;
+__thread TrustThread *sgxsan_thread = nullptr;
+
+/// Thread Data
+extern "C" thread_data_t *get_thread_data() { return &sgxsan_thread->m_td; }
+
 extern "C" sgx_status_t sgx_ecall(const sgx_enclave_id_t eid, const int index,
                                   const void *ocall_table, void *ms) {
   (void)eid;
+  RunInEnclave = true;
+  bool curIsFirstECall = false;
+  if (FirstECall) {
+    FirstECall = false;
+    curIsFirstECall = true;
+    sgxsan_thread = g_thread_pool->alloc(gettid());
+  }
   sgxsan_assert(index < (int)g_ecall_table.nr_ecall);
   g_enclave_ocall_table = (sgx_ocall_table_t *)ocall_table;
-  RunInEnclave = true;
-  td.last_error = errno;
+  get_thread_data()->last_error = errno;
   auto result = ((ecall_func_t)g_ecall_table.ecall_table[index].ecall_addr)(ms);
+  if (curIsFirstECall) {
+    g_thread_pool->free(sgxsan_thread);
+    sgxsan_thread = nullptr;
+    FirstECall = true;
+  }
   RunInEnclave = false;
   return result;
 }
@@ -78,6 +102,7 @@ extern "C" sgx_status_t sgx_ocall(const unsigned int index, void *ms) {
   RunInEnclave = true;
   return result;
 }
+
 extern "C" sgx_status_t sgx_ocall_switchless(const unsigned int index, void *ms)
     __attribute__((alias("sgx_ocall")));
 
@@ -132,5 +157,42 @@ int sgx_init_string_lib(uint64_t cpu_feature_indicator) {
 
 void *alloca(size_t __size) { return __builtin_alloca(__size); }
 
-sgx_status_t SGXAPI sgx_cpuid(int cpuinfo[4], int leaf) { return SGX_SUCCESS; }
+sgx_status_t sgx_cpuidex(int cpuinfo[4], int leaf, int subleaf) {
+  if (cpuinfo == NULL)
+    return SGX_ERROR_INVALID_PARAMETER;
+
+  __cpuidex(cpuinfo, leaf, subleaf);
+  return SGX_SUCCESS;
+}
+
+sgx_status_t sgx_cpuid(int cpuinfo[4], int leaf) {
+  return sgx_cpuidex(cpuinfo, leaf, 0);
+}
+}
+
+/// life time management
+sgx_status_t SGXAPI sgx_create_enclave(const char *file_name, const int debug,
+                                       sgx_launch_token_t *launch_token,
+                                       int *launch_token_updated,
+                                       sgx_enclave_id_t *enclave_id,
+                                       sgx_misc_attribute_t *misc_attr) {
+  RunInEnclave = true;
+  SGXInitInternal();
+  RunInEnclave = false;
+  return SGX_SUCCESS;
+}
+
+extern "C" sgx_status_t sgx_create_enclave_ex(
+    const char *file_name, const int debug, sgx_launch_token_t *launch_token,
+    int *launch_token_updated, sgx_enclave_id_t *enclave_id,
+    sgx_misc_attribute_t *misc_attr, const uint32_t ex_features,
+    const void *ex_features_p[32]) {
+  RunInEnclave = true;
+  SGXInitInternal();
+  RunInEnclave = false;
+  return SGX_SUCCESS;
+}
+
+sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
+  return SGX_SUCCESS;
 }

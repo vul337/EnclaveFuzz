@@ -107,7 +107,7 @@ static const uint64_t kDefaultShadowOffset32 = 1ULL << 29;
 static const uint64_t kDefaultShadowOffset64 = 1ULL << 44;
 static const uint64_t kDynamicShadowSentinel =
     std::numeric_limits<uint64_t>::max();
-static const uint64_t kSmallX86_64ShadowOffsetBase = 0x7FFFFFFF; // < 2G.
+static const uint64_t kSmallX86_64ShadowOffsetBase = 0x18000000000; // 1.5T.
 static const uint64_t kSmallX86_64ShadowOffsetAlignMask = ~0xFFFULL;
 static const uint64_t kLinuxKasan_ShadowOffset64 = 0xdffffc0000000000;
 static const uint64_t kPPC64_ShadowOffset64 = 1ULL << 44;
@@ -1533,6 +1533,8 @@ void AddressSanitizer::getInterestingMemoryOperands(
 
   if (LoadInst *LI = dyn_cast<LoadInst>(I)) {
     if (!ClInstrumentReads || ignoreAccess(LI->getPointerOperand()))
+      return;
+    if ((LI->getName() == "vtable") or usedAsFunction(LI))
       return;
     Interesting.emplace_back(I, LI->getPointerOperandIndex(), false,
                              LI->getType(), LI->getAlign());
@@ -3095,7 +3097,8 @@ bool AddressSanitizer::instrumentFunction(Function &F,
           // it's an ecall wrapper
           RealEcallInsts.push_back(CI);
           isFuncAtTBridge = true;
-        } else if (callee_name == "sgx_ocall") {
+        } else if (callee_name == "sgx_ocall" or
+                   callee_name == "sgx_ocall_switchless") {
           SGXOcallInsts.push_back(CI);
           isFuncAtTBridge = true;
         } else if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
@@ -3959,7 +3962,9 @@ Value *AddressSanitizer::getEDLPtCount(Instruction *insertPt, Value *obj,
     } else if (edlJson[jsonPtr / "count"].is_number()) {
       count = ConstantInt::get(IntptrTy, edlJson[jsonPtr / "count"]);
     } else {
-      count = getArg(obj, (size_t)edlJson[jsonPtr / "count" / "co_param_pos"]);
+      count = IRB.CreateIntCast(
+          getArg(obj, (size_t)edlJson[jsonPtr / "count" / "co_param_pos"]),
+          IntptrTy, false);
     }
     if (edlJson[jsonPtr / "size"].is_null()) {
       size = eleSize;
@@ -3972,7 +3977,9 @@ Value *AddressSanitizer::getEDLPtCount(Instruction *insertPt, Value *obj,
       }
       size = eleSize;
     } else {
-      size = getArg(obj, (size_t)edlJson[jsonPtr / "size" / "co_param_pos"]);
+      size = IRB.CreateIntCast(
+          getArg(obj, (size_t)edlJson[jsonPtr / "size" / "co_param_pos"]),
+          IntptrTy, false);
     }
     ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
   }
@@ -4166,7 +4173,8 @@ bool AddressSanitizer::instrumentRealECall(CallInst *RealECall) {
       /// EDL: \c [in/out/user_check] all are possible to contain OutAddr
       instrumentPtrBridgeCheck(
           arg, RealECall, 0, argPtCnt, nullptr,
-          argPtCnt == nullptr /*! \c [in/out] pointer needn't check */);
+          edlJson[jsonPtr / "user_check"] ==
+              true /*! \c [in/out] pointer needn't check */);
     } else if (isa<ArrayType>(arg->getType())) {
       /// IR: Array seems also passed as pointer
       abort();
@@ -4276,7 +4284,7 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   }
 }
 
-extern "C" ShadowMapping ASanGetShadowMapping(Triple &TargetTriple,
-                                              int LongSize, bool IsKasan) {
+ShadowMapping ASanGetShadowMapping(Triple &TargetTriple, int LongSize,
+                                   bool IsKasan) {
   return getShadowMapping(TargetTriple, LongSize, IsKasan);
 }

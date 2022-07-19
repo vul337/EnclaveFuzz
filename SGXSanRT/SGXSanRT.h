@@ -107,7 +107,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
 #define DECLARE_FUNC_PTR(func) extern decltype(&func) REAL(func)
 #define GET_REAL_FUNC(func)                                                    \
   sgxsan_error(not(REAL(func) = (decltype(&func))dlsym(RTLD_NEXT, #func)),     \
-               "Fail to get real " #func)
+               "Fail to get real " #func "\n")
 
 DECLARE_FUNC_PTR(malloc);
 DECLARE_FUNC_PTR(free);

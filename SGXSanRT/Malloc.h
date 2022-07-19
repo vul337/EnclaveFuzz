@@ -193,8 +193,7 @@ private:
     log_trace("[Free QuarantineElement] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n",
               qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size,
               qe.alloc_beg + qe.alloc_size);
-    FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, SHADOW_GRANULARITY),
-                     kAsanHeapLeftRedzoneMagic);
+    PoisonShadow(qe.alloc_beg, qe.alloc_size, kAsanHeapLeftRedzoneMagic, true);
     // update quarantine cache
     sgxsan_assert(m_used_size >= qe.alloc_size);
     m_used_size -= qe.alloc_size;

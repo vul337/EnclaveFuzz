@@ -60,7 +60,8 @@ void *MALLOC(size_t size) {
 
   uptr alignment = SHADOW_GRANULARITY;
 
-  uptr rz_size = std::max(ComputeRZSize(size), sizeof(chunk));
+  uptr rz_size =
+      std::max(ComputeRZSize(size), RoundUpTo(sizeof(chunk), alignment));
   uptr rounded_size = RoundUpTo(size, alignment);
   uptr needed_size = rounded_size + 2 * rz_size;
 
@@ -96,6 +97,7 @@ void *MALLOC(size_t size) {
             user_end, alloc_end);
 
   PoisonShadow(alloc_beg, user_beg - alloc_beg, kAsanHeapLeftRedzoneMagic);
+  sgxsan_assert(IsAligned(user_beg, alignment));
   PoisonShadow(user_beg, size, kAsanNotPoisonedMagic);
   uptr right_redzone_beg = RoundUpTo(user_end, alignment);
   PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg,
@@ -179,7 +181,7 @@ void *REALLOC(void *oldmem, size_t bytes) {
   return mem;
 }
 
-size_t MALLOC_USABLE_SZIE(void *mem) {
+size_t MALLOC_USABLE_SIZE(void *mem) {
   chunk *m = (chunk *)((uptr)mem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
   return m->user_size;

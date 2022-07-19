@@ -84,11 +84,11 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
   extern "C" __attribute__((noinline)) void __asan_##type##N(                  \
       uptr addr, uptr size, bool toCmp, char *funcName, bool atBridge) {       \
     InOutEnclaveStatus addrInOutEnclaveStatus;                                 \
-    uptr addrPoisonStatus;                                                     \
-    std::tie(addrInOutEnclaveStatus, addrPoisonStatus) =                       \
-        RegionInOutEnclaveStatusAndPoisonStatus(addr, size);                   \
+    PoisonStatus addrPoisonStatus;                                             \
+    RegionInOutEnclaveStatusAndPoisonStatus(                                   \
+        addr, size, addrInOutEnclaveStatus, addrPoisonStatus);                 \
     if (addrInOutEnclaveStatus == InEnclave) {                                 \
-      if (addrPoisonStatus) {                                                  \
+      if (addrPoisonStatus != NotPoisoned) {                                   \
         GET_CALLER_PC_BP_SP;                                                   \
         ReportGenericError(pc, bp, sp, addr, is_write, size, true);            \
       }                                                                        \
@@ -100,56 +100,61 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 ASAN_MEMORY_ACCESS_CALLBACK_N(load, false)
 ASAN_MEMORY_ACCESS_CALLBACK_N(store, true)
 
-std::pair<InOutEnclaveStatus, PoisonStatus>
-AddressInOutEnclaveStatusAndPoisonStatus(uptr addr, uint8_t filter) {
+void AddressInOutEnclaveStatusAndPoisonStatus(
+    uptr addr, InOutEnclaveStatus &addrInOutEnclaveStatus,
+    PoisonStatus &addrPoisonStatus, uint8_t filter) {
   int8_t shadow_value = *(int8_t *)MEM_TO_SHADOW(addr);
   if (LIKELY(shadow_value == kSGXSanInEnclaveMagic)) {
     // early found just in Enclave, filter is needn't to use
-    return std::pair<InOutEnclaveStatus, PoisonStatus>(InEnclave, NotPoisoned);
+    addrInOutEnclaveStatus = InEnclave;
+    addrPoisonStatus = NotPoisoned;
   } else if (UNLIKELY((shadow_value & kSGXSanInEnclaveMagic) == 0)) {
     // find it outside enclave
-    return std::pair<InOutEnclaveStatus, PoisonStatus>(OutEnclave,
-                                                       UnknownPoisonStatus);
+    addrInOutEnclaveStatus = OutEnclave;
+    addrPoisonStatus = UnknownPoisonStatus;
   } else {
     shadow_value &= filter;
+    // current know it must in Enclave
+    addrInOutEnclaveStatus = InEnclave;
     if (LIKELY(shadow_value == 0)) {
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(InEnclave,
-                                                         NotPoisoned);
+      addrPoisonStatus = NotPoisoned;
     } else {
-      // current know it must in Enclave
       int8_t L2Bits = L2F(shadow_value);
       if (L2Bits) {
-        return std::pair<InOutEnclaveStatus, PoisonStatus>(InEnclave,
-                                                           IsPoisoned);
+        addrPoisonStatus = IsPoisoned;
+      } else {
+        int8_t L1Bits = L1F(shadow_value);
+        // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
+        uint8_t last_accessed_byte = addr & (SHADOW_GRANULARITY - 1);
+        addrPoisonStatus =
+            last_accessed_byte >= L1Bits ? IsPoisoned : NotPoisoned;
       }
-      int8_t L1Bits = L1F(shadow_value);
-      // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
-      uint8_t last_accessed_byte = addr & (SHADOW_GRANULARITY - 1);
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(
-          InEnclave, last_accessed_byte >= L1Bits ? IsPoisoned : NotPoisoned);
     }
   }
 }
 
-std::pair<InOutEnclaveStatus, PoisonStatus>
-FastRegionInOutEnclaveStatusAndPoisonStatus(uptr beg, uptr size) {
+void FastRegionInOutEnclaveStatusAndPoisonStatus(
+    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    PoisonStatus &regionPoisonStatus) {
   if (beg == 0) {
-    return std::pair<InOutEnclaveStatus, PoisonStatus>(OutEnclave,
-                                                       UnknownPoisonStatus);
+    regionInOutEnclaveStatus = OutEnclave;
+    regionPoisonStatus = UnknownPoisonStatus;
+    return;
+  } else if (size == 0) {
+    regionInOutEnclaveStatus = UnknownInOutEnclaveStatus;
+    regionPoisonStatus = UnknownPoisonStatus;
+    return;
   }
-  if (size == 0)
-    return std::pair<InOutEnclaveStatus, PoisonStatus>(
-        UnknownInOutEnclaveStatus, UnknownPoisonStatus);
   InOutEnclaveStatus InOutEnclaveStatus_0_4, InOutEnclaveStatus_1_4,
       InOutEnclaveStatus_2_4, InOutEnclaveStatus_3_4, InOutEnclaveStatus_4_4;
   PoisonStatus PoisonStatus_0_4, PoisonStatus_1_4, PoisonStatus_2_4,
       PoisonStatus_3_4, PoisonStatus_4_4;
-  std::tie(InOutEnclaveStatus_0_4, PoisonStatus_0_4) =
-      AddressInOutEnclaveStatusAndPoisonStatus(beg, kL1Filter);
-  std::tie(InOutEnclaveStatus_2_4, PoisonStatus_2_4) =
-      AddressInOutEnclaveStatusAndPoisonStatus(beg + size / 2, kL1Filter);
-  std::tie(InOutEnclaveStatus_4_4, PoisonStatus_4_4) =
-      AddressInOutEnclaveStatusAndPoisonStatus(beg + size - 1, kL1Filter);
+  AddressInOutEnclaveStatusAndPoisonStatus(beg, InOutEnclaveStatus_0_4,
+                                           PoisonStatus_0_4);
+  AddressInOutEnclaveStatusAndPoisonStatus(
+      beg + size / 2, InOutEnclaveStatus_2_4, PoisonStatus_2_4);
+  AddressInOutEnclaveStatusAndPoisonStatus(
+      beg + size - 1, InOutEnclaveStatus_4_4, PoisonStatus_4_4);
   // make sure all is at same side
   sgxsan_error(InOutEnclaveStatus_0_4 != InOutEnclaveStatus_2_4 or
                    InOutEnclaveStatus_2_4 != InOutEnclaveStatus_4_4,
@@ -157,46 +162,51 @@ FastRegionInOutEnclaveStatusAndPoisonStatus(uptr beg, uptr size) {
   if (size <= 32) {
     if (InOutEnclaveStatus_0_4 == InEnclave) {
       // in enclave
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(
-          InEnclave, PoisonStatus_0_4 or PoisonStatus_2_4 or PoisonStatus_4_4
-                         ? IsPoisoned
-                         : NotPoisoned);
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonStatus =
+          PoisonStatus_0_4 or PoisonStatus_2_4 or PoisonStatus_4_4
+              ? IsPoisoned
+              : NotPoisoned;
     } else {
       // out enclave
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(OutEnclave,
-                                                         UnknownPoisonStatus);
+      regionInOutEnclaveStatus = OutEnclave;
+      regionPoisonStatus = UnknownPoisonStatus;
     }
   } else if (size <= 64) {
-    std::tie(InOutEnclaveStatus_1_4, PoisonStatus_1_4) =
-        AddressInOutEnclaveStatusAndPoisonStatus(beg + size / 4, kL1Filter);
-    std::tie(InOutEnclaveStatus_3_4, PoisonStatus_3_4) =
-        AddressInOutEnclaveStatusAndPoisonStatus(beg + 3 * size / 4, kL1Filter);
+    AddressInOutEnclaveStatusAndPoisonStatus(
+        beg + size / 4, InOutEnclaveStatus_1_4, PoisonStatus_1_4);
+    AddressInOutEnclaveStatusAndPoisonStatus(
+        beg + 3 * size / 4, InOutEnclaveStatus_3_4, PoisonStatus_3_4);
     sgxsan_error(InOutEnclaveStatus_0_4 != InOutEnclaveStatus_1_4 or
                      InOutEnclaveStatus_1_4 != InOutEnclaveStatus_3_4,
                  "Not at same side\n");
     if (InOutEnclaveStatus_0_4 == InEnclave) {
       // in enclave
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(
-          InEnclave, PoisonStatus_0_4 or PoisonStatus_1_4 or PoisonStatus_2_4 or
-                             PoisonStatus_3_4 or PoisonStatus_4_4
-                         ? IsPoisoned
-                         : NotPoisoned);
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonStatus = PoisonStatus_0_4 or PoisonStatus_1_4 or
+                                   PoisonStatus_2_4 or PoisonStatus_3_4 or
+                                   PoisonStatus_4_4
+                               ? IsPoisoned
+                               : NotPoisoned;
     } else {
       // out enclave
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(OutEnclave,
-                                                         UnknownPoisonStatus);
+      regionInOutEnclaveStatus = OutEnclave;
+      regionPoisonStatus = UnknownPoisonStatus;
     }
+  } else {
+    regionInOutEnclaveStatus = UnknownInOutEnclaveStatus;
+    regionPoisonStatus = UnknownPoisonStatus;
   }
-  return std::pair<InOutEnclaveStatus, PoisonStatus>(UnknownInOutEnclaveStatus,
-                                                     UnknownPoisonStatus);
 }
 
-std::pair<InOutEnclaveStatus, PoisonStatus>
-RegionInOutEnclaveStatusAndStrictPoisonStatus(uint8_t *beg, uptr size,
-                                               uint8_t filter) {
-  if (beg == nullptr)
-    return std::pair<InOutEnclaveStatus, PoisonStatus>(OutEnclave,
-                                                       UnknownPoisonStatus);
+void RegionInOutEnclaveStatusAndStrictPoisonStatus(
+    uint8_t *beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    PoisonStatus &regionPoisonStatus, uint8_t filter) {
+  if (beg == nullptr) {
+    regionInOutEnclaveStatus = OutEnclave;
+    regionPoisonStatus = UnknownPoisonStatus;
+    return;
+  }
   sgxsan_assert(0 < size and size <= (1ULL << 40)); // Sanity check
   uint8_t *end = beg + size;                        // offset by 1
   uptr *aligned_beg = (uptr *)RoundUpTo((uptr)beg, sizeof(uptr));
@@ -234,16 +244,17 @@ RegionInOutEnclaveStatusAndStrictPoisonStatus(uint8_t *beg, uptr size,
                  "Partial is poisoned while others are unpoisoned\n");
     if (allBitOr == extendedInEnclaveFlag) {
       // found just in Enclave, don't need filter
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(InEnclave,
-                                                         NotPoisoned);
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonStatus = NotPoisoned;
     } else if (allBitOrFilterInEnclaveFlag == 0) {
       // just outside Enclave
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(OutEnclave,
-                                                         UnknownPoisonStatus);
+      regionInOutEnclaveStatus = OutEnclave;
+      regionPoisonStatus = UnknownPoisonStatus;
     } else {
       sgxsan_assert(allBitOrFilterInEnclaveFlag == extendedInEnclaveFlag);
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(
-          InEnclave, allBitOr & ExtendInt8(filter) ? IsPoisoned : NotPoisoned);
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonStatus =
+          allBitOr & ExtendInt8(filter) ? IsPoisoned : NotPoisoned;
     }
   } else {
     // focus on 8 bits
@@ -253,25 +264,193 @@ RegionInOutEnclaveStatusAndStrictPoisonStatus(uint8_t *beg, uptr size,
                      (*allBitAndI8 & kSGXSanInEnclaveMagic),
                  "Partial is poisoned while others are unpoisoned\n");
     if (allBitOr == kSGXSanInEnclaveMagic) {
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(InEnclave,
-                                                         NotPoisoned);
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonStatus = NotPoisoned;
     } else if (allBitOrFilterInEnclaveFlag == 0) {
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(OutEnclave,
-                                                         UnknownPoisonStatus);
+      regionInOutEnclaveStatus = OutEnclave;
+      regionPoisonStatus = UnknownPoisonStatus;
     } else {
       sgxsan_assert(allBitOrFilterInEnclaveFlag == kSGXSanInEnclaveMagic);
-      return std::pair<InOutEnclaveStatus, PoisonStatus>(
-          InEnclave, allBitOr & filter ? IsPoisoned : NotPoisoned);
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonStatus = allBitOr & filter ? IsPoisoned : NotPoisoned;
     }
   }
 }
 
-std::pair<InOutEnclaveStatus, uptr>
-RegionInOutEnclaveStatusAndPoisonStatus(uptr beg, uptr size, uint8_t filter,
-                                        bool need_poisoned_addr) {
-  if (!beg)
-    return std::pair<InOutEnclaveStatus, uptr>(OutEnclave, beg);
-  sgxsan_assert(size);
+void RegionInOutEnclaveStatusAndPoisonStatus(
+    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    PoisonStatus &regionPoisonStatus, uint8_t filter) {
+  // Early error
+  if (!beg) {
+    regionInOutEnclaveStatus = OutEnclave;
+    regionPoisonStatus = UnknownPoisonStatus;
+    return;
+  }
+  uptr end = beg + size; // offset by one
+  // A offset-by-one bug in original ASan?
+  sgxsan_assert(beg < end and AddrIsInMem(beg) and AddrIsInMem(end - 1));
+
+  InOutEnclaveStatus begInOutEnclaveStatus, endInOutEnclaveStatus,
+      alignedRegionInOutEnclaveStatus;
+  PoisonStatus begPoisonStatus, endPoisonStatus, alignedRegionPoisonStatus;
+
+  if (filter == kL1Filter and size <= 64) {
+    /// Quick check
+    FastRegionInOutEnclaveStatusAndPoisonStatus(
+        beg, size, regionInOutEnclaveStatus, regionPoisonStatus);
+  } else {
+    /// Full check
+    uptr aligned_b = RoundUpTo(beg, SHADOW_GRANULARITY);
+    uptr aligned_e = RoundDownTo(end - 1, SHADOW_GRANULARITY);
+    uptr shadow_beg = MemToShadow(aligned_b);
+    uptr shadow_end = MemToShadow(aligned_e);
+
+    // First check the first and the last application bytes,
+    // then check the SHADOW_GRANULARITY-aligned region
+    AddressInOutEnclaveStatusAndPoisonStatus(beg, begInOutEnclaveStatus,
+                                             begPoisonStatus, filter);
+    AddressInOutEnclaveStatusAndPoisonStatus(end - 1, endInOutEnclaveStatus,
+                                             endPoisonStatus, filter);
+    // make sure all bytes at same side
+    sgxsan_assert(begInOutEnclaveStatus == endInOutEnclaveStatus);
+    if (begInOutEnclaveStatus == OutEnclave) {
+      // 1) out enclave
+      regionInOutEnclaveStatus = OutEnclave;
+      regionPoisonStatus = UnknownPoisonStatus;
+      if (shadow_end <= shadow_beg) {
+        // already check each ShadowByte
+        // do nothing
+      } else {
+        // need to check granuality-aligned shadow value
+        RegionInOutEnclaveStatusAndStrictPoisonStatus(
+            (uint8_t *)shadow_beg, shadow_end - shadow_beg,
+            alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus, filter);
+        // make sure all bytes at same side
+        sgxsan_assert(OutEnclave == alignedRegionInOutEnclaveStatus);
+      }
+    } else if (begPoisonStatus == NotPoisoned and
+               endPoisonStatus == NotPoisoned) {
+      // 2) in enclave, and beg & end is not poisoned
+      regionInOutEnclaveStatus = InEnclave;
+      if (shadow_end <= shadow_beg) {
+        // already check each ShadowByte
+        regionPoisonStatus = NotPoisoned;
+      } else {
+        // need to check granuality-aligned shadow value
+        RegionInOutEnclaveStatusAndStrictPoisonStatus(
+            (uint8_t *)shadow_beg, shadow_end - shadow_beg,
+            alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus, filter);
+        // make sure all bytes at same side
+        sgxsan_assert(InEnclave == alignedRegionInOutEnclaveStatus and
+                      InEnclave == begInOutEnclaveStatus);
+        regionPoisonStatus = alignedRegionPoisonStatus;
+      }
+    } else {
+      /// 3) InEnclave & Poisoned
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonStatus = IsPoisoned;
+    }
+  }
+}
+
+void RegionInOutEnclaveStatusAndPoisonedAddr(
+    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
+    uptr &regionPoisonedStatusOrAddr, uint8_t filter) {
+  if (!beg) {
+    regionInOutEnclaveStatus = OutEnclave;
+    regionPoisonedStatusOrAddr = UnknownPoisonStatus;
+    return;
+  }
+  uptr end = beg + size; // offset by one
+  // A offset-by-one bug in original ASan?
+  sgxsan_assert(beg < end and AddrIsInMem(beg) and AddrIsInMem(end - 1));
+
+  InOutEnclaveStatus begInOutEnclaveStatus, endInOutEnclaveStatus,
+      alignedRegionInOutEnclaveStatus;
+  PoisonStatus begPoisonStatus, endPoisonStatus, alignedRegionPoisonStatus;
+
+  if (filter == kL1Filter and size <= 64) {
+    /// Quick check
+    PoisonStatus regionPoisonStatus;
+    FastRegionInOutEnclaveStatusAndPoisonStatus(
+        beg, size, regionInOutEnclaveStatus, regionPoisonStatus);
+    regionPoisonedStatusOrAddr = regionPoisonStatus;
+  } else {
+    /// Full check
+    uptr aligned_b = RoundUpTo(beg, SHADOW_GRANULARITY);
+    uptr aligned_e = RoundDownTo(end - 1, SHADOW_GRANULARITY);
+    uptr shadow_beg = MemToShadow(aligned_b);
+    uptr shadow_end = MemToShadow(aligned_e);
+
+    // First check the first and the last application bytes,
+    // then check the SHADOW_GRANULARITY-aligned region
+    AddressInOutEnclaveStatusAndPoisonStatus(beg, begInOutEnclaveStatus,
+                                             begPoisonStatus, filter);
+    AddressInOutEnclaveStatusAndPoisonStatus(end - 1, endInOutEnclaveStatus,
+                                             endPoisonStatus, filter);
+    // make sure all bytes at same side
+    sgxsan_assert(begInOutEnclaveStatus == endInOutEnclaveStatus);
+    if (begInOutEnclaveStatus == OutEnclave) {
+      // 1) out enclave
+      regionInOutEnclaveStatus = OutEnclave;
+      regionPoisonedStatusOrAddr = UnknownPoisonStatus;
+      if (shadow_end <= shadow_beg) {
+        // already check each ShadowByte
+        // do nothing
+      } else {
+        // need to check granuality-aligned shadow value
+        RegionInOutEnclaveStatusAndStrictPoisonStatus(
+            (uint8_t *)shadow_beg, shadow_end - shadow_beg,
+            alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus, filter);
+        // make sure all bytes at same side
+        sgxsan_assert(OutEnclave == alignedRegionInOutEnclaveStatus);
+      }
+    } else if (begPoisonStatus == NotPoisoned and
+               endPoisonStatus == NotPoisoned) {
+      // 2) in enclave, and beg & end is not poisoned
+      regionInOutEnclaveStatus = InEnclave;
+      if (shadow_end <= shadow_beg) {
+        // already check each ShadowByte
+        regionPoisonedStatusOrAddr = NotPoisoned;
+      } else {
+        // need to check granuality-aligned shadow value
+        RegionInOutEnclaveStatusAndStrictPoisonStatus(
+            (uint8_t *)shadow_beg, shadow_end - shadow_beg,
+            alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus, filter);
+        // make sure all bytes at same side
+        sgxsan_assert(InEnclave == alignedRegionInOutEnclaveStatus and
+                      InEnclave == begInOutEnclaveStatus);
+        regionPoisonedStatusOrAddr = alignedRegionPoisonStatus;
+      }
+    } else {
+      /// 3) InEnclave & Poisoned
+      regionInOutEnclaveStatus = InEnclave;
+      regionPoisonedStatusOrAddr = IsPoisoned;
+    }
+  }
+  if (regionInOutEnclaveStatus == InEnclave and
+      regionPoisonedStatusOrAddr == IsPoisoned) {
+    // must be poisoned
+    // The fast check failed, so we have a poisoned byte somewhere.
+    // Find it slowly.
+    for (; beg < end; beg++) {
+      AddressInOutEnclaveStatusAndPoisonStatus(beg, begInOutEnclaveStatus,
+                                               begPoisonStatus, filter);
+      sgxsan_assert(begInOutEnclaveStatus == InEnclave);
+      if (begPoisonStatus) {
+        regionPoisonedStatusOrAddr = beg;
+        return;
+      }
+    }
+    sgxsan_error(true, "there must be a poisoned byte\n");
+  }
+}
+
+bool RegionIsInEnclaveAndPoisoned(uptr beg, uptr size, uint8_t filter) {
+  // Early error
+  if (!beg) {
+    return false;
+  }
   uptr end = beg + size; // offset by one
   // A offset-by-one bug in original ASan?
   sgxsan_assert(beg < end and AddrIsInMem(beg) and AddrIsInMem(end - 1));
@@ -280,20 +459,17 @@ RegionInOutEnclaveStatusAndPoisonStatus(uptr beg, uptr size, uint8_t filter,
       endInOutEnclaveStatus, alignedRegionInOutEnclaveStatus;
   PoisonStatus regionPoisonStatus, begPoisonStatus, endPoisonStatus,
       alignedRegionPoisonStatus;
-  if (filter == kL1Filter) {
-    std::tie(regionInOutEnclaveStatus, regionPoisonStatus) =
-        FastRegionInOutEnclaveStatusAndPoisonStatus(beg, size);
+
+  if (filter == kL1Filter and size <= 64) {
+    /// Quick check
+    FastRegionInOutEnclaveStatusAndPoisonStatus(
+        beg, size, regionInOutEnclaveStatus, regionPoisonStatus);
+    return (regionInOutEnclaveStatus == InEnclave and
+            regionPoisonStatus == IsPoisoned)
+               ? true
+               : false;
   } else {
-    regionInOutEnclaveStatus = UnknownInOutEnclaveStatus;
-  }
-  if (regionInOutEnclaveStatus == InEnclave) {
-    if (not regionPoisonStatus) {
-      return std::pair<InOutEnclaveStatus, uptr>(InEnclave, 0);
-    }
-  } else if (regionInOutEnclaveStatus == OutEnclave) {
-    return std::pair<InOutEnclaveStatus, uptr>(OutEnclave, 0);
-  } else {
-    // UnknownInOutEnclaveStatus returned by Fast method
+    /// Full check
     uptr aligned_b = RoundUpTo(beg, SHADOW_GRANULARITY);
     uptr aligned_e = RoundDownTo(end - 1, SHADOW_GRANULARITY);
     uptr shadow_beg = MemToShadow(aligned_b);
@@ -301,94 +477,82 @@ RegionInOutEnclaveStatusAndPoisonStatus(uptr beg, uptr size, uint8_t filter,
 
     // First check the first and the last application bytes,
     // then check the SHADOW_GRANULARITY-aligned region
-    std::tie(begInOutEnclaveStatus, begPoisonStatus) =
-        AddressInOutEnclaveStatusAndPoisonStatus(beg, filter);
-    std::tie(endInOutEnclaveStatus, endPoisonStatus) =
-        AddressInOutEnclaveStatusAndPoisonStatus(end - 1, filter);
+    AddressInOutEnclaveStatusAndPoisonStatus(beg, begInOutEnclaveStatus,
+                                             begPoisonStatus, filter);
+    AddressInOutEnclaveStatusAndPoisonStatus(end - 1, endInOutEnclaveStatus,
+                                             endPoisonStatus, filter);
     // make sure all bytes at same side
-    sgxsan_error(begInOutEnclaveStatus != endInOutEnclaveStatus,
-                 "Partial is poisoned while others are unpoisoned\n");
-    if (not begInOutEnclaveStatus or not(begPoisonStatus or endPoisonStatus)) {
+    sgxsan_assert(begInOutEnclaveStatus == endInOutEnclaveStatus);
+    if (begInOutEnclaveStatus == OutEnclave) {
       // 1) out enclave
-      // 2) in enclave, but beg & end is not poisoned
       if (shadow_end <= shadow_beg) {
         // already check each ShadowByte
-        return std::pair<InOutEnclaveStatus, uptr>(begInOutEnclaveStatus, 0);
+        // do nothing
       } else {
         // need to check granuality-aligned shadow value
-        std::tie(alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus) =
-            RegionInOutEnclaveStatusAndStrictPoisonStatus(
-                (uint8_t *)shadow_beg, shadow_end - shadow_beg, filter);
+        RegionInOutEnclaveStatusAndStrictPoisonStatus(
+            (uint8_t *)shadow_beg, shadow_end - shadow_beg,
+            alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus, filter);
         // make sure all bytes at same side
-        sgxsan_error(begInOutEnclaveStatus != alignedRegionInOutEnclaveStatus,
-                     "Partial is poisoned while others are unpoisoned\n");
-        if (begInOutEnclaveStatus == OutEnclave) {
-          // out enclave
-          return std::pair<InOutEnclaveStatus, uptr>(OutEnclave, 0);
-        } else if (not alignedRegionPoisonStatus) {
-          // in enclave, each byte is not poisoned
-          return std::pair<InOutEnclaveStatus, uptr>(InEnclave, 0);
-        }
+        sgxsan_assert(OutEnclave == alignedRegionInOutEnclaveStatus);
       }
+      return false;
+    } else if (begPoisonStatus == NotPoisoned and
+               endPoisonStatus == NotPoisoned) {
+      // 2) in enclave, and beg & end is not poisoned
+      if (shadow_end <= shadow_beg) {
+        // already check each ShadowByte
+        return false;
+      } else {
+        // need to check granuality-aligned shadow value
+        RegionInOutEnclaveStatusAndStrictPoisonStatus(
+            (uint8_t *)shadow_beg, shadow_end - shadow_beg,
+            alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus, filter);
+        // make sure all bytes at same side
+        sgxsan_assert(InEnclave == alignedRegionInOutEnclaveStatus and
+                      InEnclave == begInOutEnclaveStatus);
+        return alignedRegionPoisonStatus == IsPoisoned;
+      }
+    } else {
+      /// 3) InEnclave & Poisoned
+      return true;
     }
   }
-  // must be poisoned
-  if (need_poisoned_addr) {
-    // The fast check failed, so we have a poisoned byte somewhere.
-    // Find it slowly.
-    for (; beg < end; beg++) {
-      std::tie(begInOutEnclaveStatus, begPoisonStatus) =
-          AddressInOutEnclaveStatusAndPoisonStatus(beg, filter);
-      sgxsan_assert(begInOutEnclaveStatus == InEnclave);
-      if (begPoisonStatus) {
-        return std::pair<InOutEnclaveStatus, uptr>(InEnclave, beg);
-      }
-    }
-    sgxsan_error(true, "there must be a poisoned byte\n");
-  } else {
-    return std::pair<InOutEnclaveStatus, uptr>(InEnclave, 1);
-  }
-}
-
-bool RegionIsInEnclaveAndPoisoned(uptr beg, uptr size, uint8_t filter) {
-  sgxsan_assert(beg && size);
-  InOutEnclaveStatus begInOutEnclaveStatus;
-  uptr begPoisonStatus;
-  std::tie(begInOutEnclaveStatus, begPoisonStatus) =
-      RegionInOutEnclaveStatusAndPoisonStatus(beg, size, filter);
-  return begInOutEnclaveStatus == InEnclave && begPoisonStatus;
 }
 
 int sgx_is_within_enclave(const void *addr, size_t size) {
-  InOutEnclaveStatus status;
-  std::tie(status, std::ignore) =
-      RegionInOutEnclaveStatusAndPoisonStatus((uptr)addr, size);
-  if (status == InEnclave)
+  InOutEnclaveStatus addrInOutEnclaveStatus;
+  PoisonStatus addrPoisonStatus;
+  RegionInOutEnclaveStatusAndPoisonStatus(
+      (uptr)addr, size, addrInOutEnclaveStatus, addrPoisonStatus);
+  if (addrInOutEnclaveStatus == InEnclave)
     return 1;
-  else if (status == OutEnclave)
+  else if (addrInOutEnclaveStatus == OutEnclave)
     return 0;
   else
     abort();
 }
 
 int sgx_is_outside_enclave(const void *addr, size_t size) {
-  InOutEnclaveStatus status;
-  std::tie(status, std::ignore) =
-      RegionInOutEnclaveStatusAndPoisonStatus((uptr)addr, size);
-  if (status == InEnclave)
+  InOutEnclaveStatus addrInOutEnclaveStatus;
+  PoisonStatus addrPoisonStatus;
+  RegionInOutEnclaveStatusAndPoisonStatus(
+      (uptr)addr, size, addrInOutEnclaveStatus, addrPoisonStatus);
+  if (addrInOutEnclaveStatus == InEnclave)
     return 0;
-  else if (status == OutEnclave)
+  else if (addrInOutEnclaveStatus == OutEnclave)
     return 1;
   else
     abort();
 }
 
-#define RANGE_CHECK(beg, size, InOutEnclaveStatus, PoisonedAddr, IsWrite)      \
+/// \param size should not be 0
+#define RANGE_CHECK(beg, size, regionInOutEnclaveStatus, PoisonedAddr,         \
+                    IsWrite)                                                   \
   do {                                                                         \
-    std::tie(InOutEnclaveStatus, PoisonedAddr) =                               \
-        RegionInOutEnclaveStatusAndPoisonStatus((uptr)beg, size, kL1Filter,    \
-                                                true);                         \
-    if (InOutEnclaveStatus == InEnclave) {                                     \
+    RegionInOutEnclaveStatusAndPoisonedAddr(                                   \
+        (uptr)beg, size, regionInOutEnclaveStatus, PoisonedAddr, kL1Filter);   \
+    if (regionInOutEnclaveStatus == InEnclave) {                               \
       if (PoisonedAddr) {                                                      \
         GET_CALLER_PC_BP_SP;                                                   \
         ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
@@ -398,12 +562,17 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
     }                                                                          \
   } while (0);
 
+/// \param srcSize can't be 0
 #define LEAK_CHECK_MT(srcInOutEnclave, dstInOutEnclave, srcAddr, srcSize)      \
   do {                                                                         \
     if (srcInOutEnclave == InEnclave && dstInOutEnclave == OutEnclave) {       \
-      if (RegionInOutEnclaveStatusAndPoisonStatus((uptr)srcAddr, srcSize,      \
-                                                  kL2Filter)                   \
-              .second) {                                                       \
+      InOutEnclaveStatus _srcInOutEnclave;                                     \
+      PoisonStatus _srcPoisonedStatus;                                         \
+      RegionInOutEnclaveStatusAndPoisonStatus((uptr)srcAddr, srcSize,          \
+                                              _srcInOutEnclave,                \
+                                              _srcPoisonedStatus, kL2Filter);  \
+      sgxsan_assert(_srcInOutEnclave == InEnclave);                            \
+      if (_srcPoisonedStatus != NotPoisoned) {                                 \
         GET_CALLER_PC_BP_SP;                                                   \
         ReportGenericError(pc, bp, sp, (uptr)srcAddr, 0, srcSize, false,       \
                            "Plaintext Transfer");                              \
@@ -415,6 +584,8 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
 extern "C" {
 /// Memory Intrinsics Callback
 void *__asan_memcpy(void *dst, const void *src, uptr size) {
+  if (size == 0)
+    return dst;
   if (LIKELY(asan_inited)) {
     if (dst != src) {
       sgxsan_error(
@@ -431,6 +602,8 @@ void *__asan_memcpy(void *dst, const void *src, uptr size) {
 }
 
 void *__asan_memset(void *dst, int c, uptr size) {
+  if (size == 0)
+    return dst;
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus dstInOutEnclaveStatus;
     uptr dstPoisonedAddr;
@@ -440,6 +613,8 @@ void *__asan_memset(void *dst, int c, uptr size) {
 }
 
 void *__asan_memmove(void *dst, const void *src, uptr size) {
+  if (size == 0)
+    return dst;
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
@@ -459,6 +634,8 @@ extern errno_t memset_s(void *s, size_t smax, int c, size_t n);
 
 errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
                           size_t count) {
+  if (dstSize == 0 or count == 0)
+    return 0;
   if (LIKELY(asan_inited)) {
     if (dst != src) {
       sgxsan_error(
@@ -476,6 +653,8 @@ errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
 }
 
 errno_t __sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t n) {
+  if (dstSize == 0 or n == 0)
+    return 0;
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus dstInOutEnclaveStatus;
     uptr dstPoisonedAddr;
@@ -487,6 +666,8 @@ errno_t __sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t n) {
 
 errno_t __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
                            size_t count) {
+  if (dstSize == 0 or count == 0)
+    return 0;
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
@@ -503,12 +684,12 @@ void SGXSanBridgeCheck(void *ptr, uint64_t size, int cnt) {
   uint64_t min_size = size * std::max(1, cnt);
   sgxsan_assert(min_size >= size);
   InOutEnclaveStatus ptrInOutEnclaveStatus;
-  uptr ptrPoisonStatus;
-  std::tie(ptrInOutEnclaveStatus, ptrPoisonStatus) =
-      RegionInOutEnclaveStatusAndPoisonStatus((uptr)ptr, min_size,
-                                              kSGXSanSensitiveLayout);
+  PoisonStatus ptrPoisonStatus;
+  RegionInOutEnclaveStatusAndPoisonStatus(
+      (uptr)ptr, min_size, ptrInOutEnclaveStatus, ptrPoisonStatus,
+      kSGXSanSensitiveLayout);
   if (ptrInOutEnclaveStatus == InEnclave) {
-    if (ptrPoisonStatus) {
+    if (ptrPoisonStatus != NotPoisoned) {
       GET_CALLER_PC_BP_SP;
       ReportGenericError(pc, bp, sp, (uptr)ptr, 0, min_size, false);
     }

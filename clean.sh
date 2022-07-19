@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
 
-rm -rf *-build *-install
+rm -rf *-build install

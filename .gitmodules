@@ -1,3 +1,6 @@
 [submodule "SVF"]
 	path = SVF
 	url = git@github.com:SVF-tools/SVF.git
+[submodule "plthook"]
+	path = plthook
+	url = git@github.com:kubo/plthook.git

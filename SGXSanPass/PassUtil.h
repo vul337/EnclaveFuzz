@@ -111,6 +111,19 @@ static inline bool hasCmpUser(Value *val) {
   return false;
 }
 
+static inline bool usedAsFunction(Value *val) {
+  if (val->getType()->isFunctionTy())
+    return true;
+  for (auto user : getNonCastUsers(val)) {
+    if (CallInst *CI = dyn_cast<CallInst>(user)) {
+      if (stripCast(CI->getCalledOperand()) == val) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 struct VisitInfo {
   SmallVector<ReturnInst *> ReturnInstVec;
   SmallVector<Instruction *> BroadReturnInstVec;

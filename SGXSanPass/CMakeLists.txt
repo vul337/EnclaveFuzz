@@ -19,12 +19,13 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 else()
     set(SVF_MODE "Release")
 endif()
+message(STATUS "SVF_MODE: ${SVF_MODE}")
 
 # LLVM is normally built without RTTI. Be consistent with that.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fno-rtti -std=c++17 -Wno-comment")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fno-rtti -std=c++17 -Wno-comment -Wno-unused-but-set-variable -Wno-unused-variable -Wno-maybe-uninitialized")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SGXSanPassConfig.h.in ${CMAKE_CURRENT_SOURCE_DIR}/SGXSanPassConfig.h @ONLY)
 
 include_directories(${LLVM_INCLUDE_DIRS} ${SVF_DIR}/include .)
 add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp PassUtil.cpp SensitiveLeakSanitizer.cpp)
-target_link_libraries(SGXSanPass ${SVF_DIR}/${SVF_MODE}-build/lib/libSvf.a ${SVF_DIR}/${SVF_MODE}-build/lib/CUDD/libCudd.a LLVMDemangle)
+target_link_libraries(SGXSanPass ${SVF_DIR}/${SVF_MODE}-build/lib/libSvf.a)

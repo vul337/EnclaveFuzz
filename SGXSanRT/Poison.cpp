@@ -4,9 +4,10 @@
 
 /// Callback for SGXSan Pass
 /// Used by static allocas
+/// Already applied InEnclave flag in PASS before call these
 #define ASAN_SET_SHADOW(shadowValue)                                           \
   extern "C" void __asan_set_shadow_##shadowValue(uptr addr, uptr size) {      \
-    memset((void *)addr, L0P(L1F(0x##shadowValue)), size);                     \
+    memset((void *)addr, L1F(0x##shadowValue), size);                          \
   }
 
 ASAN_SET_SHADOW(00)
@@ -186,30 +187,31 @@ extern "C" void __asan_unregister_globals(SGXSanGlobal *globals, uptr n) {
 /// Used to shallow poison sensitive data
 void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value, bool doPoison) {
   if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY))) {
-    uptr aligned_addr = RoundUpTo(addr, SHADOW_GRANULARITY);
-    size -= aligned_addr - addr;
+    uptr aligned_addr = RoundDownTo(addr, SHADOW_GRANULARITY);
+    size += addr - aligned_addr;
     addr = aligned_addr;
   }
-  uptr *p = (uptr *)MEM_TO_SHADOW(addr);
+  uptr *p_shadow = (uptr *)MEM_TO_SHADOW(addr);
+  uptr shadow_size = RoundUpDiv(size, SHADOW_GRANULARITY);
   uptr extendedValue = ExtendInt8(value);
-  size_t step_size = sizeof(uptr), step_times = size / step_size,
-         remained = size % step_size;
+  size_t step_size = sizeof(uptr), step_times = shadow_size / step_size,
+         remained = shadow_size % step_size;
+  uint8_t *p_shadow_remained =
+      (uint8_t *)((uptr)p_shadow + shadow_size - remained);
   if (doPoison) {
     for (size_t step = 0; step < step_times; step++) {
-      p[step] |= extendedValue;
+      p_shadow[step] |= extendedValue;
     }
-    addr += size - remained;
     for (size_t i = 0; i < remained; i++) {
-      ((uint8_t *)addr)[i] |= value;
+      p_shadow_remained[i] |= value;
     }
   } else {
     uptr unpoisonValue = ~extendedValue;
     for (size_t step = 0; step < step_times; step++) {
-      p[step] &= unpoisonValue;
+      p_shadow[step] &= unpoisonValue;
     }
-    addr += size - remained;
     for (size_t i = 0; i < remained; i++) {
-      ((uint8_t *)addr)[i] &= ~value;
+      p_shadow_remained[i] &= ~value;
     }
   }
 }

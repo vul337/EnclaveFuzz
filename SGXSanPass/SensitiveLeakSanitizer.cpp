@@ -7,6 +7,7 @@
 
 using namespace llvm;
 using ordered_json = nlohmann::ordered_json;
+namespace fs = std::filesystem;
 
 static cl::opt<int> ClHeapAllocatorsMaxCollectionTimes(
     "heap-allocators-max-collection-times",
@@ -672,7 +673,14 @@ void dump(ordered_json js) { dbgs() << js.dump(4) << "\n"; }
 void SensitiveLeakSanitizer::updateSVFExtAPI() {
   // register heap allocator wrappers to SVF ExtAPI.json
   ExtAPIJsonFile = std::string(SVF_PROJECT_PATH) + "/" + EXTAPI_JSON_PATH;
-  std::filesystem::copy(ExtAPIJsonFile, ExtAPIJsonFile + ".orig");
+  auto targetPath = fs::path(ExtAPIJsonFile),
+       origPath = fs::path(ExtAPIJsonFile + ".orig");
+  if (fs::exists(origPath)) {
+    fs::remove(targetPath);
+    fs::copy(ExtAPIJsonFile + ".orig", ExtAPIJsonFile);
+  } else {
+    fs::copy(ExtAPIJsonFile, ExtAPIJsonFile + ".orig");
+  }
   std::ifstream ifs(ExtAPIJsonFile);
   if (not ifs.is_open())
     abort();
@@ -893,7 +901,7 @@ SensitiveLeakSanitizer::SensitiveLeakSanitizer(Module &M) {
 
 SensitiveLeakSanitizer::~SensitiveLeakSanitizer() {
   // Restore ExtAPI.json
-  std::filesystem::rename(ExtAPIJsonFile + ".orig", ExtAPIJsonFile);
+  fs::rename(ExtAPIJsonFile + ".orig", ExtAPIJsonFile);
 }
 
 std::unordered_set<SVF::ValVar *>
