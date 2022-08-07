@@ -19,9 +19,25 @@ void WhitelistQuery(const void *ptr, size_t size, bool is_write,
   if (ptr == nullptr)
     return; // leave it to guard page check
   if (not is_write) {
-    sgxsan_warning(OutAddrWhitelist::double_fetch_detect(ptr, size, used_to_cmp,
-                                                         parent_func),
-                   "Detect Double-Fetch Situation\n");
+    auto res = OutAddrWhitelist::double_fetch_detect(ptr, size, used_to_cmp,
+                                                     parent_func);
+    if (res) {
+      sgxsan_warning(
+          true,
+          "Detect Double-Fetch Situation, and modify it with random data\n");
+      size_t step_times = size / sizeof(int), remained = size % sizeof(int);
+      int *ptr_i32 = (int *)ptr;
+      for (size_t step = 0; step < step_times; step++) {
+        ptr_i32[step] = rand();
+      }
+      uint8_t *ptr_remained = (uint8_t *)((uptr)ptr + size * sizeof(int));
+      if (remained > 0) {
+        int rand_res = rand();
+        for (size_t i = 0; i < remained; i++) {
+          ptr_remained[i] = rand_res >> (i * 8);
+        }
+      }
+    }
   }
   size_t find_size;
   std::tie(std::ignore, find_size, std::ignore) =
