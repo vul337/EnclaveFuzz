@@ -9,6 +9,11 @@ else
     CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release"
 fi
 
+# build sgx_edger8r
+cd edger8r/linux
+ocamlbuild -cflag -g -lflag -g -libs str,unix Edger8r.byte
+cd ../..
+cp -f edger8r/linux/_build/Edger8r.byte Tool
 # build
 cmake ${CMAKE_FLAGS} -B ${BUILD_MOD}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/install
 cmake --build ${BUILD_MOD}-build -j$(nproc)

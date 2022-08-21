@@ -4,3 +4,6 @@
 [submodule "plthook"]
 	path = plthook
 	url = git@github.com:kubo/plthook.git
+[submodule "edger8r"]
+	path = edger8r
+	url = git@github.com:LeoneChen/edger8r.git
