@@ -1091,6 +1091,16 @@ uint64_t SensitiveLeakSanitizer::RoundUpUDiv(uint64_t dividend,
   return (dividend + divisor - 1) / divisor;
 }
 
+Value *SensitiveLeakSanitizer::CheckIsPtrInEnclave(Value *ptr, Value *size,
+                                                   Instruction *insertPt,
+                                                   const DebugLoc *dbgLoc) {
+  IRBuilder<> IRB(insertPt);
+  CallInst *IsWithinEnclaveCall = IRB.CreateCall(
+      IsWithinEnclave, {IRB.CreatePointerCast(ptr, IRB.getInt8PtrTy()), size});
+  IsWithinEnclaveCall->setDebugLoc(*dbgLoc);
+  return IRB.CreateICmpEQ(IsWithinEnclaveCall, IRB.getInt32(1));
+}
+
 void SensitiveLeakSanitizer::PoisonSI(Value *src, Value *isPoisoned,
                                       StoreInst *SI) {
   if (poisonedInst.count(SI) != 0)
@@ -1106,11 +1116,9 @@ void SensitiveLeakSanitizer::PoisonSI(Value *src, Value *isPoisoned,
       dstPtr->getType()->getPointerElementType());
   assert(_dstPtrEleSize > 0);
   Value *dstPtrEleSize = ConstantInt::get(IntptrTy, _dstPtrEleSize);
-  auto isDstInEnclave = IRB.CreateICmpEQ(
-      IRB.CreateCall(
-          IsWithinEnclave,
-          {IRB.CreatePointerCast(dstPtr, IRB.getInt8PtrTy()), dstPtrEleSize}),
-      IRB.getInt32(1));
+
+  auto isDstInEnclave = CheckIsPtrInEnclave(
+      dstPtr, dstPtrEleSize, srcIsPoisonedTerm, &SI->getDebugLoc());
 
   Instruction *dstIsInEnclaveTerm =
       SplitBlockAndInsertIfThen(isDstInEnclave, srcIsPoisonedTerm, false);
@@ -1215,11 +1223,8 @@ void SensitiveLeakSanitizer::propagateShadowInMemTransfer(
   Instruction *srcIsPoisonedTerm =
       SplitBlockAndInsertIfThen(isSrcPoisoned, sizeNot0Term, false);
   IRB.SetInsertPoint(srcIsPoisonedTerm);
-  auto isDstInEnclave = IRB.CreateICmpEQ(
-      IRB.CreateCall(
-          IsWithinEnclave,
-          {IRB.CreatePointerCast(dstPtr, IRB.getInt8PtrTy()), dstSize}),
-      IRB.getInt32(1));
+  auto isDstInEnclave = CheckIsPtrInEnclave(dstPtr, dstSize, srcIsPoisonedTerm,
+                                            &CI->getDebugLoc());
 
   Instruction *dstIsInEnclaveTerm =
       SplitBlockAndInsertIfThen(isDstInEnclave, srcIsPoisonedTerm, false);
@@ -1283,11 +1288,8 @@ void SensitiveLeakSanitizer::PoisonMemsetDst(Value *src, Value *isSrcPoisoned,
       SplitBlockAndInsertIfThen(isSrcPoisoned, MSI, false);
   IRBuilder<> IRB(srcIsPoisonedTerm);
   assert(not isa<Function>(dstPtr));
-  auto isDstInElrange = IRB.CreateICmpEQ(
-      IRB.CreateCall(
-          IsWithinEnclave,
-          {IRB.CreatePointerCast(dstPtr, IRB.getInt8PtrTy()), setSize}),
-      IRB.getInt32(1));
+  auto isDstInElrange = CheckIsPtrInEnclave(dstPtr, setSize, srcIsPoisonedTerm,
+                                            &MSI->getDebugLoc());
   Instruction *dstIsInElrangeTerm =
       SplitBlockAndInsertIfThen(isDstInElrange, srcIsPoisonedTerm, false);
 

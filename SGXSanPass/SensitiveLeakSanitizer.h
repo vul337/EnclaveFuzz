@@ -131,6 +131,9 @@ public:
   /// return \retval 2) Otherwise, objects this \p value point to will return
   std::unordered_set<SVF::ObjVar *> getTargetObj(Value *value);
 
+  Value *CheckIsPtrInEnclave(Value *ptr, Value *size, Instruction *insertPt,
+                             const DebugLoc *dbgLoc);
+
 private:
   std::unordered_set<SVF::ObjVar *> SensitiveObjs, WorkList, ProcessedList;
   std::unordered_set<Value *> poisonedInst;
