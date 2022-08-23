@@ -78,9 +78,3 @@ cd ${LINUX_SGX_SRC_DIR}/sdk/tlibcrypto
 ${MAKE} clean -s
 ${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} libsgx_tcrypto.a ${PREFIX}/lib64
-
-#get sgx_edger8r
-cd ${LINUX_SGX_SRC_DIR}/sdk/edger8r/linux
-${MAKE} clean -s
-${MAKE} -j${Jobs}
-${CP} _build/Edger8r.native ${PREFIX}/bin/x64/sgx_edger8r

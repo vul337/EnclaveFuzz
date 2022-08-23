@@ -20,5 +20,9 @@ install(FILES Tool/EdlParser.py
         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
         DESTINATION tool)
 
+install(FILES Tool/sgx_edger8r
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+        DESTINATION bin/x64)
+
 install(FILES ${LINUX_SGX_MINI}/common/buildenv.mk
         DESTINATION .)
