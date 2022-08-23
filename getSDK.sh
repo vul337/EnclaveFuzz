@@ -41,7 +41,7 @@ echo "-- ADD_MAKE_FLAGS: ${ADD_MAKE_FLAGS}"
 # prepare directory
 ${MKDIR} -p ${PREFIX}/lib64 ${PREFIX}/bin/x64
 # remove old
-${RM} -f ${PREFIX}/lib64/libsgx_* ${PREFIX}/bin/x64/sgx_edger8r
+${RM} -f ${PREFIX}/lib64/libsgx_*
 
 # patch trts tcxx
 echo "== Patch SDK =="
