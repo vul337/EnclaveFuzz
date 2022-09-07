@@ -81,7 +81,7 @@ class EdlParser:
                             param_edl_infos[key] = {
                                 "co_param": value, "co_param_pos": co_param_pos}
                         else:
-                            param_edl_infos[key] = value
+                            param_edl_infos[key] = int(value)
                     else:
                         # not a "key=value" attribute keyword
                         param_edl_infos[keyword] = True
@@ -127,8 +127,10 @@ class EdlParser:
             # process func declaration
             func_info = {}
             # 1. process func type
+            # char *func([out, size=size] char *s, int size, [user_check] void *stream)
+            # public SSL_METHOD *ecall_SSLv23_method(void);
             match = re.match(
-                r"^(.+?)\s+(\b\w+\b)\s*\((.*?)\)(.*)$", func_declar)
+                r"^(.+?\s?\*?)\s?(\b\w+\b)\s*\((.*?)\)(.*)$", func_declar)
             assert match
             ret_and_func_begin_attr = match.group(1).strip()
             func_name = match.group(2)
