@@ -5,10 +5,14 @@ set(LINUX_SGX_MINI "${CMAKE_CURRENT_SOURCE_DIR}/SGXSanRT/linux-sgx-mini/")
 
 add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
+add_subdirectory(SGXFuzzerPass)
+add_subdirectory(SGXFuzzerRT)
 
 install(TARGETS
         SGXSanPass
         SGXSanRT
+        SGXFuzzerPass
+        SGXFuzzerRT
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
 
