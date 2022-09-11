@@ -1,7 +1,7 @@
 #include "SensitiveLeakSanitizer.h"
 
 #include "SGXSanPassConfig.h"
-#include "json.hpp"
+#include "nlohmann/json.hpp"
 #include "llvm/Demangle/Demangle.h"
 #include <filesystem>
 

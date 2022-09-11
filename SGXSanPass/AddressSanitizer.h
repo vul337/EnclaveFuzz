@@ -6,7 +6,7 @@
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
 
-#include "json.hpp"
+#include "nlohmann/json.hpp"
 #include <unordered_set>
 
 /// This struct defines the shadow mapping using the rule:

@@ -16,6 +16,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
+#include "AddressSanitizer.h"
+#include "PassUtil.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -91,10 +93,6 @@
 #include <string>
 #include <tuple>
 #include <unordered_set>
-
-#include "AddressSanitizer.h"
-#include "PassUtil.h"
-#include "json.hpp"
 
 using namespace llvm;
 using ordered_json = nlohmann::ordered_json;

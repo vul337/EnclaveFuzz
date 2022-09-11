@@ -7,3 +7,6 @@
 [submodule "edger8r"]
 	path = edger8r
 	url = git@github.com:LeoneChen/edger8r.git
+[submodule "json"]
+	path = json
+	url = git@github.com:nlohmann/json.git
