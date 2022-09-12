@@ -557,14 +557,15 @@ extern uint8_t __start___sancov_cntrs[];
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   static int test_round = 0;
   if (test_round == 0) {
-    // Round 0 of lbFuzzer will feed with empty, this isn't what we want, just
+    // Round 0 of libFuzzer will feed with empty, this isn't what we want, just
     // early return
     sgxfuzz_assert(Size == 0);
     test_round++;
     return 0;
-  } else if (test_round == 1) {
-    // Round 1 should trigger some new feature, otherwise libFuzzer will exit.
-    // And at this round we collect info to guide mutation
+  }
+  if (test_round == 1 and Size == 1 and Data[0] == '\n') {
+    // Default round 1 '\n' should trigger some new feature, otherwise libFuzzer
+    // will exit. And at this round we collect info to guide mutation
     __start___sancov_cntrs[0]++;
   }
 
