@@ -290,13 +290,15 @@ Value *DriverGenerator::createParamContent(
         if (edlJson[jsonPtr / "size"].is_null()) {
           size = eleSize;
         } else if (edlJson[jsonPtr / "size"].is_number()) {
+          // means "size" bytes
           size_t _size = edlJson[jsonPtr / "size"];
-          if (eleTy->isIntegerTy()) {
+          size = IRB.getInt64(_size);
+          if (eleTy->isIntegerTy() && _size <= 8) {
+            // we can regard it as (size*8)bits integer
             _eleSize = _size;
-            eleTy = IRB.getIntNTy(_size);
+            eleTy = IRB.getIntNTy(_size * 8);
             eleSize = IRB.getInt64(_size);
           }
-          size = eleSize;
         } else {
           size_t co_param_pos = edlJson[jsonPtr / "size" / "co_param_pos"];
           edlJson[jsonPtr.parent_pointer() / co_param_pos / "isEdlSizeAttr"] =
