@@ -167,7 +167,7 @@ public:
     case FUZZ_COUNT:
     case FUZZ_SIZE: {
       size_t maxValue = req.dataType == FUZZ_SIZE ? MAX_SIZE : MAX_COUNT;
-      sgxfuzz_assert(req.size < sizeof(size_t));
+      sgxfuzz_assert(req.size <= sizeof(size_t));
       size_t newData;
       fillRand(&newData, sizeof(size_t));
       newData %= (maxValue + 1);
@@ -435,7 +435,7 @@ public:
       }
       case FUZZ_SIZE:
       case FUZZ_COUNT: {
-        sgxfuzz_assert((byteArrLen < sizeof(size_t)));
+        sgxfuzz_assert((byteArrLen <= sizeof(size_t)));
         size_t data = consumerJson[consumerJsonPtr / "Data"];
         if (dst == nullptr) {
           dst = (uint8_t *)malloc(byteArrLen);
@@ -585,7 +585,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
   // Test body
-  for (int i = 0; i < 1 /* sgx_fuzzer_ecall_num */; i++) {
+  for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
     log_debug("[TEST] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
     ret = sgx_fuzzer_ecall_array[i]();
     sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
