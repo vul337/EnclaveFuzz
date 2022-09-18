@@ -22,6 +22,9 @@ using ordered_json = nlohmann::ordered_json;
 
 sgx_enclave_id_t global_eid = 0;
 
+// From ELF
+extern uint8_t __start___sancov_cntrs[];
+
 // Passed from DriverGen IR pass
 extern sgx_status_t (*sgx_fuzzer_ecall_array[])();
 extern int sgx_fuzzer_ecall_num;
@@ -358,6 +361,10 @@ public:
       sgxfuzz_assert(reqQueue[DataID].count(req.StrAsID) == 0);
     }
     reqQueue[DataID][req.StrAsID] = req;
+    // Tell libFuzzer we should keep current round input as seed, otherwise we
+    // may lose current round input, and in mutation this request has no matched
+    // seed
+    __start___sancov_cntrs[0]++;
   }
 
   /// @brief get byte array from \c ConsumerJSon, and save it to \p dst. If no
@@ -575,7 +582,7 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                           size_t MaxSize, unsigned int Seed) {
   return data_factory.mutate(Data, Size, MaxSize);
 }
-extern uint8_t __start___sancov_cntrs[];
+
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   static int test_round = 0;
   if (test_round == 0) {
