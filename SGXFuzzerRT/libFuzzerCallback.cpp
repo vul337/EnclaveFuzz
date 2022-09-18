@@ -211,15 +211,16 @@ public:
   }
 
   void AdjustNBytes(std::vector<uint8_t> &byteArr, size_t N, DataOp op) {
-    auto adjustPt = byteArr.begin() + rand() % (byteArr.size());
     switch (op) {
     case DATA_EXPAND: {
       uint8_t newData[N];
       fillRand(newData, N);
+      auto adjustPt = byteArr.begin() + rand() % (byteArr.size());
       byteArr.insert(adjustPt, newData, newData + N);
       break;
     }
     case DATA_SHRINK: {
+      auto adjustPt = byteArr.begin() + rand() % (byteArr.size() - N + 1);
       byteArr.erase(adjustPt, adjustPt + N);
       break;
     }
@@ -306,16 +307,19 @@ public:
     }
     log_debug("[Before Mutate FuzzDataFactory::mutatorJson]");
     dumpJson(mutatorJson);
-    if (reqQueue.empty()) {
+    auto mutatorBjdataBase64 = EncodeBase64(bjdata);
+    log_debug("[mutatorBjdataBase64] %s", mutatorBjdataBase64.c_str());
+    if (reqQueue.count(mutatorBjdataBase64) == 0) {
       /// Arbitrarily mutate on \c mutatorJson
       mutateOnMutatorJSon();
     } else {
       // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
       mutateOnMutatorJSon(false);
       /// process \c reqQueue
-      while (not reqQueue.empty()) {
-        RequestInfo req = reqQueue.back();
-        reqQueue.pop_back();
+      auto paramReqs = reqQueue[mutatorBjdataBase64];
+      reqQueue.erase(mutatorBjdataBase64);
+      for (auto paramReq : paramReqs) {
+        auto req = paramReq.second;
         nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsID);
         switch (req.op) {
         case DATA_CREATE: {
@@ -341,11 +345,20 @@ public:
     memcpy(Data, newBjData.data(), newBjData.size());
     log_debug("[After Mutate FuzzDataFactory::mutatorJson]");
     dumpJson(mutatorJson);
+    log_debug("[mutatorBjdataBase64] %s", EncodeBase64(newBjData).c_str());
     mutatorJson.clear();
     return newBjData.size();
   }
 
-  void SendRequest(RequestInfo req) { reqQueue.push_back(req); }
+  /// @brief mutatorJson with DataID should process req
+  /// @param DataID
+  /// @param req
+  void SendRequest(std::string DataID, RequestInfo req) {
+    if (reqQueue.count(DataID)) {
+      sgxfuzz_assert(reqQueue[DataID].count(req.StrAsID) == 0);
+    }
+    reqQueue[DataID][req.StrAsID] = req;
+  }
 
   /// @brief get byte array from \c ConsumerJSon, and save it to \p dst. If no
   /// byte array prepared for current \p cStrAsID, \c SendRequest to mutator
@@ -364,14 +377,13 @@ public:
 
     std::string strAsID(cStrAsID);
     strAsID = std::regex_replace(strAsID, std::regex("/"), "_");
-    log_debug("ID: %s, Size: %ld, FuzzDataType: %d", strAsID.c_str(),
-              byteArrLen, dataTy);
 
     auto consumerJsonPtr = nlohmann::ordered_json::json_pointer("/" + strAsID);
     if (consumerJson[consumerJsonPtr].is_null()) {
       // Send request to mutator that we need data for current ID
       log_error("Need mutator create data for current [%s]", strAsID.c_str());
-      SendRequest({strAsID, DATA_CREATE, byteArrLen, dataTy});
+      SendRequest(consumerBjdataBase64 /* Used as Data ID */,
+                  {strAsID, DATA_CREATE, byteArrLen, dataTy});
       /// early leave \c leaveLLVMFuzzerTestOneInput
       leaveLLVMFuzzerTestOneInput();
     } else {
@@ -391,7 +403,8 @@ public:
           // Send request to mutator that prepared data is not enough
           log_error("Need mutator provide more data [%ld] for current [%s]",
                     extraSizeNeeded, strAsID.c_str());
-          SendRequest({strAsID, DATA_EXPAND, extraSizeNeeded, dataTy});
+          SendRequest(consumerBjdataBase64 /* Used as Data ID */,
+                      {strAsID, DATA_EXPAND, extraSizeNeeded, dataTy});
           leaveLLVMFuzzerTestOneInput();
         }
         if (dst == nullptr) {
@@ -403,8 +416,9 @@ public:
           size_t sizeNeedReduced = preparedDataSize - byteArrLen;
           // Send request to mutator that prepared data is too much
           log_error("Need mutator provide less data [%d] for current [%s]",
-                    strAsID.c_str());
-          SendRequest({strAsID, DATA_SHRINK, sizeNeedReduced, dataTy});
+                    sizeNeedReduced, strAsID.c_str());
+          SendRequest(consumerBjdataBase64 /* Used as Data ID */,
+                      {strAsID, DATA_SHRINK, sizeNeedReduced, dataTy});
         }
         break;
       }
@@ -507,10 +521,15 @@ public:
       // leave consumerJson empty, and it should be empty
       sgxfuzz_assert(consumerJson.empty());
     }
+    log_debug("[Test FuzzDataFactory::consumerJson]");
+    dumpJson(consumerJson);
+    consumerBjdataBase64 = EncodeBase64(bjdata);
+    log_debug("[consumerBjdataBase64] %s", consumerBjdataBase64.c_str());
   }
 
   void clearAtConsumerEnd() {
     consumerJson.clear();
+    consumerBjdataBase64 = "";
     for (auto memArea : allocatedMemAreas) {
       free(memArea);
     }
@@ -519,7 +538,10 @@ public:
 
 private:
   nlohmann::ordered_json consumerJson, mutatorJson;
-  std::deque<RequestInfo> reqQueue;
+  std::string consumerBjdataBase64;
+  std::map<std::string /* DataID */,
+           std::map<std::string /* ParamID */, RequestInfo>>
+      reqQueue;
   std::vector<uint8_t *> allocatedMemAreas;
 };
 FuzzDataFactory data_factory;
