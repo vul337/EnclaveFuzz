@@ -585,10 +585,11 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   static int test_round = 0;
-  if (test_round == 0) {
-    // Round 0 of libFuzzer will feed with empty, this isn't what we want, just
+  if (test_round == 0 && Size == 0) {
+    // 1. Fuzz from empty: Round 0 of libFuzzer will feed with empty (Size ==
+    // 0, e.g. ./app), this isn't what we want, just early return
+    // 2. Fuzz with specified input (e.g. ./app crash-xxx), then we shouldn't
     // early return
-    sgxfuzz_assert(Size == 0);
     test_round++;
     return 0;
   }
