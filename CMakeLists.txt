@@ -20,10 +20,6 @@ install(DIRECTORY
         ${LINUX_SGX_MINI}/common/inc/ DESTINATION include
         PATTERN common/inc/internal EXCLUDE)
 
-install(FILES Tool/EdlParser.py
-        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-        DESTINATION tool)
-
 install(FILES Tool/sgx_edger8r
         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
         DESTINATION bin/x64)
