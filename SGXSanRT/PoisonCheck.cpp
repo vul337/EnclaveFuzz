@@ -571,8 +571,10 @@ bool RegionIsInEnclaveAndPoisoned(uptr beg, uptr size, uint8_t filter) {
 }
 
 int sgx_is_within_enclave(const void *addr, size_t size) {
-  if (size == 0)
-    return 0;
+  if (size == 0) {
+    // Note: If size is zero, check one byte
+    size = 1;
+  }
   InOutEnclaveStatus addrInOutEnclaveStatus;
   PoisonStatus addrPoisonStatus;
   RegionInOutEnclaveStatusAndPoisonStatus(
@@ -584,8 +586,10 @@ int sgx_is_within_enclave(const void *addr, size_t size) {
 }
 
 int sgx_is_outside_enclave(const void *addr, size_t size) {
-  if (size == 0)
-    return 0;
+  if (size == 0) {
+    // Note: If size is zero, check one byte
+    size = 1;
+  }
   InOutEnclaveStatus addrInOutEnclaveStatus;
   PoisonStatus addrPoisonStatus;
   RegionInOutEnclaveStatusAndPoisonStatus(

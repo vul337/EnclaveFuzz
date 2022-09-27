@@ -73,4 +73,3 @@ void sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt, ...);
       log_warning(__VA_ARGS__);                                                \
     }                                                                          \
   } while (0);
-

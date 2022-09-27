@@ -388,7 +388,7 @@ public:
     auto consumerJsonPtr = nlohmann::ordered_json::json_pointer("/" + strAsID);
     if (consumerJson[consumerJsonPtr].is_null()) {
       // Send request to mutator that we need data for current ID
-      log_error("Need mutator create data for current [%s]", strAsID.c_str());
+      log_debug("Need mutator create data for current [%s]", strAsID.c_str());
       SendRequest(consumerBjdataBase64 /* Used as Data ID */,
                   {strAsID, DATA_CREATE, byteArrLen, dataTy});
       /// early leave \c leaveLLVMFuzzerTestOneInput
@@ -408,7 +408,7 @@ public:
         if (preparedDataSize < byteArrLen) {
           size_t extraSizeNeeded = byteArrLen - preparedDataSize;
           // Send request to mutator that prepared data is not enough
-          log_error("Need mutator provide more data [%ld] for current [%s]",
+          log_debug("Need mutator provide more data [%ld] for current [%s]",
                     extraSizeNeeded, strAsID.c_str());
           SendRequest(consumerBjdataBase64 /* Used as Data ID */,
                       {strAsID, DATA_EXPAND, extraSizeNeeded, dataTy});
@@ -422,7 +422,7 @@ public:
         if (preparedDataSize > byteArrLen) {
           size_t sizeNeedReduced = preparedDataSize - byteArrLen;
           // Send request to mutator that prepared data is too much
-          log_error("Need mutator provide less data [%d] for current [%s]",
+          log_debug("Need mutator provide less data [%d] for current [%s]",
                     sizeNeedReduced, strAsID.c_str());
           SendRequest(consumerBjdataBase64 /* Used as Data ID */,
                       {strAsID, DATA_SHRINK, sizeNeedReduced, dataTy});
