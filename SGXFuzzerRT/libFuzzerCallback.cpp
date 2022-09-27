@@ -109,7 +109,7 @@ enum DataOp {
 };
 
 struct RequestInfo {
-  std::string StrAsID;
+  std::string StrAsParamID;
   DataOp op;
   size_t size;
   FuzzDataTy dataType;
@@ -147,7 +147,7 @@ public:
   }
 
   void insertItemInMutatorJSon(RequestInfo req) {
-    nlohmann::ordered_json::json_pointer JSonPtr("/" + req.StrAsID);
+    nlohmann::ordered_json::json_pointer JSonPtr("/" + req.StrAsParamID);
     mutatorJson[JSonPtr / "DataType"] = req.dataType;
     switch (req.dataType) {
     case FUZZ_STRING: {
@@ -197,7 +197,7 @@ public:
   void dumpJsonPtr(ordered_json::json_pointer ptr);
 
   void AdjustItemInMutatorJSon(RequestInfo req) {
-    ordered_json::json_pointer JSonPtr("/" + req.StrAsID);
+    ordered_json::json_pointer JSonPtr("/" + req.StrAsParamID);
     switch (req.dataType) {
     // should only expand byte array
     case FUZZ_ARRAY:
@@ -329,7 +329,7 @@ public:
       reqQueue.erase(dataID);
       for (auto paramReq : paramReqs) {
         auto req = paramReq.second;
-        nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsID);
+        nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsParamID);
         switch (req.op) {
         case DATA_CREATE: {
           sgxfuzz_assert(mutatorJson[jsonPtr].is_null());
@@ -366,9 +366,9 @@ public:
   /// @param req
   void SendRequest(std::string DataID, RequestInfo req) {
     if (reqQueue.count(DataID)) {
-      sgxfuzz_assert(reqQueue[DataID].count(req.StrAsID) == 0);
+      sgxfuzz_assert(reqQueue[DataID].count(req.StrAsParamID) == 0);
     }
-    reqQueue[DataID][req.StrAsID] = req;
+    reqQueue[DataID][req.StrAsParamID] = req;
     // Tell libFuzzer we should keep current round input as seed, otherwise we
     // may lose current round input, and in mutation this request has no matched
     // seed
@@ -376,37 +376,39 @@ public:
   }
 
   /// @brief get byte array from \c ConsumerJSon, and save it to \p dst. If no
-  /// byte array prepared for current \p cStrAsID, \c SendRequest to mutator
-  /// phase
-  /// @param cStrAsID Using JSon pointer string as ID
+  /// byte array prepared for current \p cStrAsParamID, \c SendRequest to
+  /// mutator phase
+  /// @param cStrAsParamID Using JSon pointer string as ID
   /// @param dst A pre-allocated memory area
   /// @param byteArrLen
   /// @param dataTy
   /// @return
-  uint8_t *getBytes(const char *cStrAsID, uint8_t *dst, size_t byteArrLen,
+  uint8_t *getBytes(const char *cStrAsParamID, uint8_t *dst, size_t byteArrLen,
                     FuzzDataTy dataTy) {
     if (byteArrLen == 0 and (dataTy != FUZZ_STRING or dataTy != FUZZ_WSTRING)) {
       // Do nothing
       return dst;
     }
 
-    std::string strAsID(cStrAsID);
-    strAsID = std::regex_replace(strAsID, std::regex("/"), "_");
+    std::string strAsParamID(cStrAsParamID);
+    strAsParamID = std::regex_replace(strAsParamID, std::regex("/"), "_");
 
-    auto consumerJsonPtr = nlohmann::ordered_json::json_pointer("/" + strAsID),
+    auto consumerJsonPtr =
+             nlohmann::ordered_json::json_pointer("/" + strAsParamID),
          dataIDPtr = nlohmann::ordered_json::json_pointer("/DataID");
     std::string dataID =
         consumerJson[dataIDPtr].is_null() ? "" : consumerJson[dataIDPtr];
     if (consumerJson[consumerJsonPtr].is_null()) {
       // Send request to mutator that we need data for current ID
-      log_debug("Need mutator create data for current [%s]", strAsID.c_str());
-      SendRequest(dataID, {strAsID, DATA_CREATE, byteArrLen, dataTy});
+      log_debug("Need mutator create data for current [%s]",
+                strAsParamID.c_str());
+      SendRequest(dataID, {strAsParamID, DATA_CREATE, byteArrLen, dataTy});
       /// early leave \c leaveLLVMFuzzerTestOneInput
       leaveLLVMFuzzerTestOneInput();
     } else {
       // Already prepared data for current ID
       FuzzDataTy dataTy = consumerJson[consumerJsonPtr / "DataType"];
-      log_debug("Get JSON item [%s]", strAsID.c_str());
+      log_debug("Get JSON item [%s]", strAsParamID.c_str());
       dumpJson(consumerJson[consumerJsonPtr]);
       switch (dataTy) {
       case FUZZ_ARRAY:
@@ -419,8 +421,9 @@ public:
           size_t extraSizeNeeded = byteArrLen - preparedDataSize;
           // Send request to mutator that prepared data is not enough
           log_debug("Need mutator provide more data [%ld] for current [%s]",
-                    extraSizeNeeded, strAsID.c_str());
-          SendRequest(dataID, {strAsID, DATA_EXPAND, extraSizeNeeded, dataTy});
+                    extraSizeNeeded, strAsParamID.c_str());
+          SendRequest(dataID,
+                      {strAsParamID, DATA_EXPAND, extraSizeNeeded, dataTy});
           leaveLLVMFuzzerTestOneInput();
         }
         if (dst == nullptr) {
@@ -432,8 +435,9 @@ public:
           size_t sizeNeedReduced = preparedDataSize - byteArrLen;
           // Send request to mutator that prepared data is too much
           log_debug("Need mutator provide less data [%d] for current [%s]",
-                    sizeNeedReduced, strAsID.c_str());
-          SendRequest(dataID, {strAsID, DATA_SHRINK, sizeNeedReduced, dataTy});
+                    sizeNeedReduced, strAsParamID.c_str());
+          SendRequest(dataID,
+                      {strAsParamID, DATA_SHRINK, sizeNeedReduced, dataTy});
         }
         break;
       }
@@ -514,17 +518,19 @@ public:
     return std::vector<uint8_t>(byteArr, byteArr + decodeResult.first);
   }
 
-  size_t getUserCheckCount(char *cStrAsID) {
-    std::string strAsID = std::string(cStrAsID) + "_getUserCheckCount";
+  size_t getUserCheckCount(char *cStrAsParamID) {
+    std::string strAsParamID =
+        std::string(cStrAsParamID) + "_getUserCheckCount";
     size_t result;
-    getBytes(strAsID.c_str(), (uint8_t *)&result, sizeof(size_t), FUZZ_COUNT);
+    getBytes(strAsParamID.c_str(), (uint8_t *)&result, sizeof(size_t),
+             FUZZ_COUNT);
     return result;
   }
 
-  bool hintSetNull(char *cStrAsID) {
-    std::string strAsID = std::string(cStrAsID) + "_hintSetNull";
+  bool hintSetNull(char *cStrAsParamID) {
+    std::string strAsParamID = std::string(cStrAsParamID) + "_hintSetNull";
     bool result;
-    getBytes(strAsID.c_str(), (uint8_t *)&result, sizeof(bool), FUZZ_BOOL);
+    getBytes(strAsParamID.c_str(), (uint8_t *)&result, sizeof(bool), FUZZ_BOOL);
     return result;
   }
 
@@ -643,15 +649,15 @@ exit:
 }
 
 // DriverGen Callbacks
-extern "C" size_t get_count(size_t eleSize, char *cStrAsID) {
-  return data_factory.getUserCheckCount(cStrAsID);
+extern "C" size_t get_count(size_t eleSize, char *cStrAsParamID) {
+  return data_factory.getUserCheckCount(cStrAsParamID);
 }
 
-extern "C" uint8_t *get_bytes(size_t byteArrLen, char *cStrAsID,
+extern "C" uint8_t *get_bytes(size_t byteArrLen, char *cStrAsParamID,
                               FuzzDataTy dataType) {
-  return data_factory.getBytes(cStrAsID, nullptr, byteArrLen, dataType);
+  return data_factory.getBytes(cStrAsParamID, nullptr, byteArrLen, dataType);
 }
 
-extern "C" bool is_null_pointer(char *cStrAsID) {
-  return data_factory.hintSetNull(cStrAsID);
+extern "C" bool is_null_pointer(char *cStrAsParamID) {
+  return data_factory.hintSetNull(cStrAsParamID);
 }
