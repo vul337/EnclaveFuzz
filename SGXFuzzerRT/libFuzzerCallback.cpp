@@ -117,6 +117,7 @@ struct RequestInfo {
 
 class FuzzDataFactory {
 public:
+  FuzzDataFactory() { UUIDGen = boost::uuids::random_generator(); }
   /// @brief fill random data in memory pointed by \p dst
   /// @param dst must be a valid memory area
   /// @param size memory area size
@@ -236,6 +237,8 @@ public:
 
   void mutateOnMutatorJSon(bool canChangeSize = true) {
     for (auto pair : mutatorJson.items()) {
+      if (pair.key() == "DataID")
+        continue;
       ordered_json::json_pointer ptr("/" + pair.key());
       FuzzDataTy dataTy = mutatorJson[ptr / "DataType"];
       switch (dataTy) {
@@ -308,19 +311,22 @@ public:
       // leave mutatorJson empty, and it should be empty
       sgxfuzz_assert(mutatorJson.empty());
     }
-    log_debug("[Before Mutate FuzzDataFactory::mutatorJson]");
+    ordered_json::json_pointer dataIDPtr("/DataID");
+    // First round input data may be "\n"
+    std::string dataID =
+        mutatorJson[dataIDPtr].is_null() ? "" : mutatorJson[dataIDPtr];
+    log_debug("[Before Mutate, ID: %s]", dataID.c_str());
     dumpJson(mutatorJson);
-    auto mutatorBjdataBase64 = EncodeBase64(bjdata);
-    log_debug("[mutatorBjdataBase64] %s", mutatorBjdataBase64.c_str());
-    if (reqQueue.count(mutatorBjdataBase64) == 0) {
+
+    if (reqQueue.count(dataID) == 0) {
       /// Arbitrarily mutate on \c mutatorJson
       mutateOnMutatorJSon();
     } else {
       // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
       mutateOnMutatorJSon(false);
       /// process \c reqQueue
-      auto paramReqs = reqQueue[mutatorBjdataBase64];
-      reqQueue.erase(mutatorBjdataBase64);
+      auto paramReqs = reqQueue[dataID];
+      reqQueue.erase(dataID);
       for (auto paramReq : paramReqs) {
         auto req = paramReq.second;
         nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsID);
@@ -343,12 +349,14 @@ public:
         }
       }
     }
+    // Update DataID
+    mutatorJson[dataIDPtr] = boost::uuids::to_string(UUIDGen());
     auto newBjData = nlohmann::ordered_json::to_bjdata(mutatorJson);
     sgxfuzz_assert(newBjData.size() <= MaxSize);
     memcpy(Data, newBjData.data(), newBjData.size());
-    log_debug("[After Mutate FuzzDataFactory::mutatorJson]");
+    log_debug("[After Mutate, ID: %s]",
+              std::string(mutatorJson[dataIDPtr]).c_str());
     dumpJson(mutatorJson);
-    log_debug("[mutatorBjdataBase64] %s", EncodeBase64(newBjData).c_str());
     mutatorJson.clear();
     return newBjData.size();
   }
@@ -385,12 +393,14 @@ public:
     std::string strAsID(cStrAsID);
     strAsID = std::regex_replace(strAsID, std::regex("/"), "_");
 
-    auto consumerJsonPtr = nlohmann::ordered_json::json_pointer("/" + strAsID);
+    auto consumerJsonPtr = nlohmann::ordered_json::json_pointer("/" + strAsID),
+         dataIDPtr = nlohmann::ordered_json::json_pointer("/DataID");
+    std::string dataID =
+        consumerJson[dataIDPtr].is_null() ? "" : consumerJson[dataIDPtr];
     if (consumerJson[consumerJsonPtr].is_null()) {
       // Send request to mutator that we need data for current ID
       log_debug("Need mutator create data for current [%s]", strAsID.c_str());
-      SendRequest(consumerBjdataBase64 /* Used as Data ID */,
-                  {strAsID, DATA_CREATE, byteArrLen, dataTy});
+      SendRequest(dataID, {strAsID, DATA_CREATE, byteArrLen, dataTy});
       /// early leave \c leaveLLVMFuzzerTestOneInput
       leaveLLVMFuzzerTestOneInput();
     } else {
@@ -410,8 +420,7 @@ public:
           // Send request to mutator that prepared data is not enough
           log_debug("Need mutator provide more data [%ld] for current [%s]",
                     extraSizeNeeded, strAsID.c_str());
-          SendRequest(consumerBjdataBase64 /* Used as Data ID */,
-                      {strAsID, DATA_EXPAND, extraSizeNeeded, dataTy});
+          SendRequest(dataID, {strAsID, DATA_EXPAND, extraSizeNeeded, dataTy});
           leaveLLVMFuzzerTestOneInput();
         }
         if (dst == nullptr) {
@@ -424,8 +433,7 @@ public:
           // Send request to mutator that prepared data is too much
           log_debug("Need mutator provide less data [%d] for current [%s]",
                     sizeNeedReduced, strAsID.c_str());
-          SendRequest(consumerBjdataBase64 /* Used as Data ID */,
-                      {strAsID, DATA_SHRINK, sizeNeedReduced, dataTy});
+          SendRequest(dataID, {strAsID, DATA_SHRINK, sizeNeedReduced, dataTy});
         }
         break;
       }
@@ -528,15 +536,15 @@ public:
       // leave consumerJson empty, and it should be empty
       sgxfuzz_assert(consumerJson.empty());
     }
-    log_debug("[Test FuzzDataFactory::consumerJson]");
+    ordered_json::json_pointer dataIDPtr("/DataID");
+    std::string dataID =
+        consumerJson[dataIDPtr].is_null() ? "" : consumerJson[dataIDPtr];
+    log_debug("[Before Test, ID: %s]", dataID.c_str());
     dumpJson(consumerJson);
-    consumerBjdataBase64 = EncodeBase64(bjdata);
-    log_debug("[consumerBjdataBase64] %s", consumerBjdataBase64.c_str());
   }
 
   void clearAtConsumerEnd() {
     consumerJson.clear();
-    consumerBjdataBase64 = "";
     for (auto memArea : allocatedMemAreas) {
       free(memArea);
     }
@@ -545,7 +553,7 @@ public:
 
 private:
   nlohmann::ordered_json consumerJson, mutatorJson;
-  std::string consumerBjdataBase64;
+  boost::uuids::random_generator UUIDGen;
   std::map<std::string /* DataID */,
            std::map<std::string /* ParamID */, RequestInfo>>
       reqQueue;
