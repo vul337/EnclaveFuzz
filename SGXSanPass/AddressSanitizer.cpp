@@ -3968,12 +3968,7 @@ Value *AddressSanitizer::getEDLPtCount(Instruction *insertPt, Value *obj,
       size = eleSize;
     } else if (edlJson[jsonPtr / "size"].is_number()) {
       size_t _size = edlJson[jsonPtr / "size"];
-      if (eleTy->isIntegerTy()) {
-        _eleSize = _size;
-        eleTy = IRB.getIntNTy(_size);
-        eleSize = ConstantInt::get(IntptrTy, _size);
-      }
-      size = eleSize;
+      size = ConstantInt::get(IntptrTy, _size);
     } else {
       size = IRB.CreateIntCast(
           getArg(obj, (size_t)edlJson[jsonPtr / "size" / "co_param_pos"]),
