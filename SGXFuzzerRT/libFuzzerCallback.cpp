@@ -622,6 +622,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     goto exit;
   }
 
+  static size_t emitTimes = 0, succeedTimes = 0;
+  emitTimes++;
   // Initialize Enclave
   ret = sgx_create_enclave(ENCLAVE_FILENAME,
                            SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
@@ -639,12 +641,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   // Destroy Enclave
   ret = sgx_destroy_enclave(global_eid);
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave destroy");
+  succeedTimes++;
 
 exit:
   /// Clear \c FuzzDataFactory::ConsumerJSon and free temp buffer before leave
   /// current round
   data_factory.clearAtConsumerEnd();
-
+  log_debug("succeedTimes/emitTimes=%ld/%ld", succeedTimes, emitTimes);
   return 0;
 }
 
