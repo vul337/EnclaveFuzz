@@ -373,9 +373,12 @@ public:
   /// @param DataID
   /// @param req
   void SendRequest(std::string DataID, RequestInfo req) {
-    if (reqQueue.count(DataID)) {
-      sgxfuzz_assert(reqQueue[DataID].count(req.StrAsParamID) == 0);
-    }
+    // There may already be same request for current same input data in old
+    // round A, but when pick input to mutate, we never pick A, so request for
+    // A is not processed to generate new input, and now, we have get same A
+    // mutated from B, and meet the same request again. Here we replace old
+    // request with new request
+
     reqQueue[DataID][req.StrAsParamID] = req;
     // Tell libFuzzer we should keep current round input as seed, otherwise we
     // may lose current round input, and in mutation this request has no matched
