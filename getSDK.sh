@@ -78,3 +78,15 @@ cd ${LINUX_SGX_SRC_DIR}/sdk/tlibcrypto
 ${MAKE} clean -s
 ${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} libsgx_tcrypto.a ${PREFIX}/lib64
+
+#get libsgx_urts_sim.so
+cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/urtssim/
+${MAKE} clean -s
+${MAKE} ${ADD_MAKE_FLAGS}
+${CP} linux/libsgx_urts_sim.so ${PREFIX}/lib64
+
+#get libsgx_uae_service_sim.so
+cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/uae_service_sim/linux
+${MAKE} clean -s
+${MAKE} -j${Jobs} ${ADD_MAKE_FLAGS}
+${CP} libsgx_uae_service_sim.so ${PREFIX}/lib64
