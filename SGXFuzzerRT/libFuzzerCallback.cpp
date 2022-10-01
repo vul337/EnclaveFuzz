@@ -622,6 +622,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   }
 
   sgx_status_t ret;
+  static size_t emitTimes = 0, fullSucceedTimes = 0, succeedTimes = 0;
+  bool hasTest = false;
   /// Deserialize data to \c FuzzDataFactory::ConsumerJSon
   data_factory.deserializeToConsumerJson(Data, Size);
 
@@ -630,7 +632,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     goto exit;
   }
 
-  static size_t emitTimes = 0, succeedTimes = 0;
   emitTimes++;
   // Initialize Enclave
   ret = sgx_create_enclave(ENCLAVE_FILENAME,
@@ -644,18 +645,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     ret = sgx_fuzzer_ecall_array[i]();
     sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
                   sgx_fuzzer_ecall_wrapper_name_array[i]);
+    hasTest = true;
   }
 
   // Destroy Enclave
   ret = sgx_destroy_enclave(global_eid);
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave destroy");
-  succeedTimes++;
+  fullSucceedTimes++;
 
 exit:
   /// Clear \c FuzzDataFactory::ConsumerJSon and free temp buffer before leave
   /// current round
   data_factory.clearAtConsumerEnd();
-  log_debug("succeedTimes/emitTimes=%ld/%ld", succeedTimes, emitTimes);
+  if (hasTest)
+    succeedTimes++;
+  log_debug("fullSucceedTimes/succeedTimes/emitTimes=%ld/%ld/%ld",
+            fullSucceedTimes, succeedTimes, emitTimes);
   return 0;
 }
 
