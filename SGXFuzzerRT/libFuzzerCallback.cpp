@@ -374,7 +374,7 @@ public:
         /// process \c reqQueue
         auto paramReqs = pair.second;
         reqQueue.erase(mutatorData.bjdataBase64);
-        log_debug("reqQueue remove %s", mutatorData.bjdataBase64.c_str());
+        // log_debug("reqQueue remove %s", mutatorData.bjdataBase64.c_str());
         sgxfuzz_assert(reqQueue.empty());
         for (auto paramReq : paramReqs) {
           auto req = paramReq.second;
@@ -430,7 +430,7 @@ public:
     } else if (reqQueue.size() > 1) {
       abort();
     }
-    log_debug("reqQueue add %s %s", DataID.c_str(), req.StrAsParamID.c_str());
+    // log_debug("reqQueue add %s %s", DataID.c_str(), req.StrAsParamID.c_str());
     reqQueue[DataID][req.StrAsParamID] = req;
   }
 
