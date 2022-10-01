@@ -116,6 +116,20 @@ struct RequestInfo {
   FuzzDataTy dataType;
 };
 
+struct InputJsonDataInfo {
+  nlohmann::ordered_json json;
+  std::vector<uint8_t> bjdata;
+  std::string dataID; /* Current use SHA-1 of json content */
+  std::string bjdataBase64;
+
+  void clear() {
+    json.clear();
+    bjdata.clear();
+    dataID = "";
+    bjdataBase64 = "";
+  }
+};
+
 class FuzzDataFactory {
 public:
   /// @brief fill random data in memory pointed by \p dst
@@ -147,6 +161,7 @@ public:
   }
 
   void insertItemInMutatorJSon(RequestInfo req) {
+    auto &mutatorJson = mutatorData.json;
     nlohmann::ordered_json::json_pointer JSonPtr("/" + req.StrAsParamID);
     mutatorJson[JSonPtr / "DataType"] = req.dataType;
     switch (req.dataType) {
@@ -197,6 +212,7 @@ public:
   void dumpJsonPtr(ordered_json::json_pointer ptr);
 
   void AdjustItemInMutatorJSon(RequestInfo req) {
+    auto &mutatorJson = mutatorData.json;
     ordered_json::json_pointer JSonPtr("/" + req.StrAsParamID);
     switch (req.dataType) {
     // should only expand byte array
@@ -236,6 +252,7 @@ public:
   }
 
   void mutateOnMutatorJSon(bool canChangeSize = true) {
+    auto &mutatorJson = mutatorData.json;
     for (auto pair : mutatorJson.items()) {
       if (pair.key() == "DataID")
         continue;
@@ -318,72 +335,103 @@ public:
   }
 
   size_t mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
-    std::vector<uint8_t> bjdata(Data, Data + Size);
-    try {
-      mutatorJson = nlohmann::ordered_json::from_bjdata(bjdata);
-    } catch (ordered_json::parse_error &e) {
-      // leave mutatorJson empty, and it should be empty
-      sgxfuzz_assert(mutatorJson.empty());
-    }
-    std::string mutatorDataID = getSha1Str(bjdata);
-    log_debug("[Before Mutate, ID: %s]", mutatorDataID.c_str());
-    dumpJson(mutatorJson);
+    if (reqQueue.empty()) {
+      mutatorData.bjdata = std::vector<uint8_t>(Data, Data + Size);
+      mutatorData.bjdataBase64 = EncodeBase64(mutatorData.bjdata);
+      try {
+        mutatorData.json =
+            nlohmann::ordered_json::from_bjdata(mutatorData.bjdata);
+      } catch (ordered_json::parse_error &e) {
+        // leave mutatorJson empty, and it should be empty
+        sgxfuzz_assert(mutatorData.json.empty());
+      }
+      mutatorData.dataID = getSha1Str(mutatorData.bjdata);
+      log_debug("[Before Mutate, ID: %s]", mutatorData.dataID.c_str());
+      dumpJson(mutatorData.json);
 
-    if (reqQueue.count(mutatorDataID) == 0) {
       /// Arbitrarily mutate on \c mutatorJson
       mutateOnMutatorJSon();
     } else {
-      // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
-      mutateOnMutatorJSon(false);
-      /// process \c reqQueue
-      auto paramReqs = reqQueue[mutatorDataID];
-      reqQueue.erase(mutatorDataID);
-      for (auto paramReq : paramReqs) {
-        auto req = paramReq.second;
-        nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsParamID);
-        switch (req.op) {
-        case DATA_CREATE: {
-          sgxfuzz_assert(mutatorJson[jsonPtr].is_null());
-          insertItemInMutatorJSon(req);
-          break;
+      // assume reqQueue is one-element queue, reason that I use queue is to
+      // avoid future adjustment
+      sgxfuzz_assert(reqQueue.size() == 1);
+      for (auto pair : reqQueue) {
+        mutatorData.bjdataBase64 = pair.first;
+        mutatorData.bjdata = DecodeBase64(mutatorData.bjdataBase64);
+        try {
+          mutatorData.json =
+              nlohmann::ordered_json::from_bjdata(mutatorData.bjdata);
+        } catch (ordered_json::parse_error &e) {
+          // leave mutatorJson empty, and it should be empty
+          sgxfuzz_assert(mutatorData.json.empty());
         }
-        case DATA_EXPAND:
-        case DATA_SHRINK: {
-          sgxfuzz_assert(not mutatorJson[jsonPtr].is_null());
-          AdjustItemInMutatorJSon(req);
-          break;
-        }
-        default: {
-          sgxfuzz_error(true, "[mutate] Unsupported DATA_{Operation}");
-          break;
-        }
+        mutatorData.dataID = getSha1Str(mutatorData.bjdata);
+        log_debug("[Before Mutate, ID: %s]", mutatorData.dataID.c_str());
+        dumpJson(mutatorData.json);
+
+        // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
+        mutateOnMutatorJSon(false);
+        /// process \c reqQueue
+        auto paramReqs = pair.second;
+        reqQueue.erase(mutatorData.bjdataBase64);
+        log_debug("reqQueue remove %s", mutatorData.bjdataBase64.c_str());
+        sgxfuzz_assert(reqQueue.empty());
+        for (auto paramReq : paramReqs) {
+          auto req = paramReq.second;
+          nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsParamID);
+          switch (req.op) {
+          case DATA_CREATE: {
+            sgxfuzz_assert(mutatorData.json[jsonPtr].is_null());
+            insertItemInMutatorJSon(req);
+            break;
+          }
+          case DATA_EXPAND:
+          case DATA_SHRINK: {
+            sgxfuzz_assert(not mutatorData.json[jsonPtr].is_null());
+            AdjustItemInMutatorJSon(req);
+            break;
+          }
+          default: {
+            sgxfuzz_error(true, "[mutate] Unsupported DATA_{Operation}");
+            break;
+          }
+          }
         }
       }
     }
-    auto newBjData = nlohmann::ordered_json::to_bjdata(mutatorJson);
-    sgxfuzz_assert(newBjData.size() <= MaxSize);
-    memcpy(Data, newBjData.data(), newBjData.size());
-    log_debug("[After Mutate, ID: %s]", getSha1Str(newBjData).c_str());
-    dumpJson(mutatorJson);
-    mutatorJson.clear();
-    return newBjData.size();
+    // update mutator data with new one
+    mutatorData.bjdata = nlohmann::ordered_json::to_bjdata(mutatorData.json);
+    mutatorData.bjdataBase64 = EncodeBase64(mutatorData.bjdata);
+    mutatorData.dataID = getSha1Str(mutatorData.bjdata);
+    sgxfuzz_assert(mutatorData.bjdata.size() <= MaxSize);
+
+    memcpy(Data, mutatorData.bjdata.data(), mutatorData.bjdata.size());
+    log_debug("[After Mutate, ID: %s]", mutatorData.dataID.c_str());
+    dumpJson(mutatorData.json);
+    size_t newSize = mutatorData.bjdata.size();
+    mutatorData.clear();
+    return newSize;
   }
 
   /// @brief mutatorJson with DataID should process req
   /// @param DataID
   /// @param req
   void SendRequest(std::string DataID, RequestInfo req) {
-    // There may already be same request for current same input data in old
-    // round A, but when pick input to mutate, we never pick A, so request for
-    // A is not processed to generate new input, and now, we have get same A
-    // mutated from B, and meet the same request again. Here we replace old
-    // request with new request
-
+    // 1. When ReadCorpus, we may send one or more requests per seed, but have
+    // no opportunity to mutate in order to process request. We only keep
+    // request of latest input data with DataID.
+    // 2. When test one, we may send several requests with same DataID but with
+    // different paramID, record all of them
+    if (reqQueue.size() == 1) {
+      if (reqQueue.begin()->first != DataID) {
+        // There already is data with different DataID
+        reqQueue.clear();
+      }
+    } else if (reqQueue.size() > 1) {
+      abort();
+    }
+    log_debug("reqQueue add %s %s", DataID.c_str(), req.StrAsParamID.c_str());
     reqQueue[DataID][req.StrAsParamID] = req;
-    // Tell libFuzzer we should keep current round input as seed, otherwise we
-    // may lose current round input, and in mutation this request has no matched
-    // seed
-    __start___sancov_cntrs[0]++;
   }
 
   /// @brief get byte array from \c ConsumerJSon, and save it to \p dst. If no
@@ -406,11 +454,12 @@ public:
 
     auto consumerJsonPtr =
         nlohmann::ordered_json::json_pointer("/" + strAsParamID);
+    auto &consumerJson = consumerData.json;
     if (consumerJson[consumerJsonPtr].is_null()) {
       // Send request to mutator that we need data for current ID
       log_debug("Need mutator create data for current [%s]",
                 strAsParamID.c_str());
-      SendRequest(consumerDataID,
+      SendRequest(consumerData.bjdataBase64,
                   {strAsParamID, DATA_CREATE, byteArrLen, dataTy});
       /// early leave \c leaveLLVMFuzzerTestOneInput
       leaveLLVMFuzzerTestOneInput();
@@ -431,7 +480,7 @@ public:
           // Send request to mutator that prepared data is not enough
           log_debug("Need mutator provide more data [%ld] for current [%s]",
                     extraSizeNeeded, strAsParamID.c_str());
-          SendRequest(consumerDataID,
+          SendRequest(consumerData.bjdataBase64,
                       {strAsParamID, DATA_EXPAND, extraSizeNeeded, dataTy});
           leaveLLVMFuzzerTestOneInput();
         }
@@ -445,8 +494,11 @@ public:
           // Send request to mutator that prepared data is too much
           log_debug("Need mutator provide less data [%d] for current [%s]",
                     sizeNeedReduced, strAsParamID.c_str());
-          SendRequest(consumerDataID,
+          SendRequest(consumerData.bjdataBase64,
                       {strAsParamID, DATA_SHRINK, sizeNeedReduced, dataTy});
+          // we needn't early return in this situation, since we can only use
+          // partial prepared data, then there may be several requests with same
+          // DataID but different paramID in reqQueue
         }
         break;
       }
@@ -544,21 +596,22 @@ public:
   }
 
   void deserializeToConsumerJson(const uint8_t *Data, size_t Size) {
-    std::vector<uint8_t> bjdata(Data, Data + Size);
+    consumerData.bjdata = std::vector<uint8_t>(Data, Data + Size);
+    consumerData.bjdataBase64 = EncodeBase64(consumerData.bjdata);
     try {
-      consumerJson = nlohmann::ordered_json::from_bjdata(bjdata);
+      consumerData.json =
+          nlohmann::ordered_json::from_bjdata(consumerData.bjdata);
     } catch (ordered_json::parse_error &e) {
       // leave consumerJson empty, and it should be empty
-      sgxfuzz_assert(consumerJson.empty());
+      sgxfuzz_assert(consumerData.json.empty());
     }
-    consumerDataID = getSha1Str(bjdata);
-    log_debug("[Before Test, ID: %s]", consumerDataID.c_str());
-    dumpJson(consumerJson);
+    consumerData.dataID = getSha1Str(consumerData.bjdata);
+    log_debug("[Before Test, ID: %s]", consumerData.dataID.c_str());
+    dumpJson(consumerData.json);
   }
 
   void clearAtConsumerEnd() {
-    consumerJson.clear();
-    consumerDataID = "";
+    consumerData.clear();
     for (auto memArea : allocatedMemAreas) {
       free(memArea);
     }
@@ -566,8 +619,7 @@ public:
   }
 
 private:
-  nlohmann::ordered_json consumerJson, mutatorJson;
-  std::string consumerDataID;
+  InputJsonDataInfo consumerData, mutatorData;
   std::map<std::string /* DataID */,
            std::map<std::string /* ParamID */, RequestInfo>>
       reqQueue;
