@@ -196,7 +196,9 @@ GlobalVariable *DriverGenerator::CreateZeroInitizerGlobal(StringRef Name,
 
 Value *DriverGenerator::createParamContent(
     SmallVector<Type *> types, json::json_pointer jsonPtr,
-    std::map<uint64_t, Value *> *paramPtrs, Instruction *insertPt) {
+    std::map<uint64_t, Value *> *paramPtrs, Instruction *insertPt,
+    size_t recursion_depth) {
+  recursion_depth++;
   // get index from json pointer
   size_t idx =
       jsonPtr.back() == "return" ? 0 : std::stoull(jsonPtr.back(), nullptr, 0);
@@ -222,160 +224,175 @@ Value *DriverGenerator::createParamContent(
     inheritDirectionAttr(jsonPtr, 0);
     // get element size and type
     auto eleTy = pointerTy->getElementType();
-    size_t _eleSize = M->getDataLayout().getTypeAllocSize(eleTy);
-    assert(_eleSize > 0);
-    auto eleSize = IRB.getInt64(_eleSize);
-    Value *contentPtr = nullptr;
-    // if it's a string, directly fill it
-    if (edlJson[jsonPtr / "string"] == true or
-        edlJson[jsonPtr / "wstring"] == true) {
-      // [string/wstring] must exist with [in]
-      assert(eleTy->isIntegerTy() and edlJson[jsonPtr / "in"] == true);
-      fuzzBufferJson[jsonPtr / "Max"] = true;
-      fuzzBufferJson[jsonPtr / "TotalSize"] = (size_t)ClMaxLengthOfString;
-      fuzzBufferJson[jsonPtr / "ID"] = jsonPtr.to_string();
-      Value *fuzzDataPtr = IRB.CreatePointerCast(
-          IRB.CreateCall(getFuzzDataPtr,
-                         {IRB.getInt64(0), jsonPtrAsID,
-                          IRB.getInt32(edlJson[jsonPtr / "string"] == true
-                                           ? FUZZ_STRING
-                                           : FUZZ_WSTRING)}),
-          pointerTy);
-      Value *charCnt = IRB.CreateCall(
-          edlJson[jsonPtr / "string"] == true ? _strlen : _wcslen, fuzzDataPtr);
-      auto _strPtr = CreateZeroInitizerGlobal(
-          jsonPtr.to_string(), ArrayType::get(eleTy, ClMaxLengthOfString));
-      Value *maxStrLen = IRB.getInt64(ClMaxLengthOfString - 1);
-      Value *copyLen = IRB.CreateSelect(IRB.CreateICmpULT(charCnt, maxStrLen),
-                                        charCnt, maxStrLen);
-      contentPtr = IRB.CreateGEP(
-          _strPtr->getValueType(), _strPtr,
-          {cast<Value>(IRB.getInt64(0)), cast<Value>(IRB.getInt64(0))});
-      IRB.CreateMemCpy(contentPtr, MaybeAlign(), fuzzDataPtr, MaybeAlign(),
-                       IRB.CreateMul(eleSize, copyLen));
-      IRB.CreateStore(Constant::getNullValue(eleTy),
-                      IRB.CreateGEP(eleTy, contentPtr, copyLen));
-    } else {
-      // calculate count of elements the pointer point to
-      Value *ptCnt = nullptr;
-      // EDL: c array can't be decorated with [count]/[size], and must have it's
-      // count
-      if (edlJson[jsonPtr / "c_array_count"].is_number()) {
-        size_t _c_array_count = edlJson[jsonPtr / "c_array_count"];
-        if (_c_array_count <= 0) {
-          errs() << "c_array_count must > 0\n";
-          abort();
-        }
-        ptCnt = IRB.getInt64(_c_array_count);
-      } else if (edlJson[jsonPtr / "user_check"] == true) {
-        ptCnt = IRB.CreateCall(getUserCheckCount, {eleSize, jsonPtrAsID});
-      } else {
-        Value *count = nullptr, *size = nullptr;
-        if (edlJson[jsonPtr / "count"].is_null()) {
-          count = IRB.getInt64(1);
-        } else if (edlJson[jsonPtr / "count"].is_number()) {
-          count = IRB.getInt64(edlJson[jsonPtr / "count"]);
-        } else {
-          size_t co_param_pos = edlJson[jsonPtr / "count" / "co_param_pos"];
-          edlJson[jsonPtr.parent_pointer() / co_param_pos / "isEdlCountAttr"] =
-              true;
-          auto co_param_ptr =
-              createParamContent(types, jsonPtr.parent_pointer() / co_param_pos,
-                                 paramPtrs, insertPt);
-          IRB.SetInsertPoint(insertPt);
-          count = IRB.CreateLoad(
-              co_param_ptr->getType()->getScalarType()->getPointerElementType(),
-              co_param_ptr);
-        }
-        if (edlJson[jsonPtr / "size"].is_null()) {
-          size = eleSize;
-        } else if (edlJson[jsonPtr / "size"].is_number()) {
-          // means "size" bytes
-          size_t _size = edlJson[jsonPtr / "size"];
-          size = IRB.getInt64(_size);
-          if (eleTy->isIntegerTy() && _size <= 8) {
-            // we can regard it as (size*8)bits integer
-            _eleSize = _size;
-            eleTy = IRB.getIntNTy(_size * 8);
-            eleSize = IRB.getInt64(_size);
-          }
-        } else {
-          size_t co_param_pos = edlJson[jsonPtr / "size" / "co_param_pos"];
-          edlJson[jsonPtr.parent_pointer() / co_param_pos / "isEdlSizeAttr"] =
-              true;
-          auto co_param_ptr =
-              createParamContent(types, jsonPtr.parent_pointer() / co_param_pos,
-                                 paramPtrs, insertPt);
-          IRB.SetInsertPoint(insertPt);
-          size = IRB.CreateLoad(
-              co_param_ptr->getType()->getScalarType()->getPointerElementType(),
-              co_param_ptr);
-        }
-        ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
-      }
-
-      if (ptCnt == IRB.getInt64(1)) {
-        contentPtr = createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
-                                        insertPt);
-      } else {
-        size_t _gArrayCnt = 0;
-        if (auto constCnt = dyn_cast<ConstantInt>(ptCnt)) {
-          // ptCnt is known
-          _gArrayCnt = constCnt->getZExtValue();
-        } else {
-          // ptCnt is unknown, give it a max count
-          _gArrayCnt = std::max(
-              (size_t)1, std::min((size_t)ClMaxSize / eleSize->getZExtValue(),
-                                  (size_t)ClMaxCount));
-          auto gArrayCnt = IRB.getInt64(_gArrayCnt);
-          // set ptCnt must <= gArrayCnt
-          ptCnt = IRB.CreateSelect(IRB.CreateICmpULT(ptCnt, gArrayCnt), ptCnt,
-                                   gArrayCnt);
-        }
-
-        GlobalVariable *_contentPtr = CreateZeroInitizerGlobal(
-            jsonPtr.to_string(), ArrayType::get(eleTy, _gArrayCnt));
-        contentPtr = IRB.CreateGEP(_contentPtr->getValueType(), _contentPtr,
-                                   {IRB.getInt64(0), IRB.getInt64(0)});
-
-        if (!ClEnableFillAtOnce or hasPointerElement(pointerTy)) {
-          // fall back
-          FOR_LOOP_BEG(insertPt, ptCnt)
-          auto innerInsertPt = &*IRB.GetInsertPoint();
-          fuzzBufferJson[jsonPtr / "Repeat"] = _gArrayCnt;
-          if (not isa<ConstantInt>(ptCnt)) {
-            fuzzBufferJson[jsonPtr / "Max"] = true;
-          }
-          auto elePtr = createParamContent({eleTy}, jsonPtr / "field" / 0,
-                                           nullptr, innerInsertPt);
-          IRB.SetInsertPoint(innerInsertPt);
-          dataCopy(IRB.CreateGEP(eleTy, contentPtr, {phi}), elePtr, eleTy,
-                   innerInsertPt);
-          FOR_LOOP_END(ptCnt)
-        } else if (feedRandom) {
-          fillAtOnce(contentPtr, jsonPtr, insertPt, eleTy, ptCnt);
-        }
-      }
+    StructType *eleSt = dyn_cast<StructType>(eleTy);
+    if (eleSt and eleSt->isOpaque()) {
+      // replace opaque struct type with uint8
+      eleTy = Type::getInt8Ty(*C);
     }
-    IRB.SetInsertPoint(insertPt);
-    IRB.CreateStore(IRB.CreatePointerCast(contentPtr, pointerTy), typePtr);
-    if (feedRandom) {
-      // we call function to query whether fill pointer with meaningful address
-      // or not
-      Instruction *term = SplitBlockAndInsertIfThen(
-          IRB.CreateCall(whetherSetNullPointer, jsonPtrAsID), insertPt, false);
-      IRB.SetInsertPoint(term);
+    if (eleTy->isFunctionTy() or recursion_depth >= 10) {
+      // feed callback with nullptr
       IRB.CreateStore(Constant::getNullValue(pointerTy), typePtr);
+    } else {
+      size_t _eleSize = M->getDataLayout().getTypeAllocSize(eleTy);
+      assert(_eleSize > 0);
+      auto eleSize = IRB.getInt64(_eleSize);
+      Value *contentPtr = nullptr;
+      // if it's a string, directly fill it
+      if (edlJson[jsonPtr / "string"] == true or
+          edlJson[jsonPtr / "wstring"] == true) {
+        // [string/wstring] must exist with [in]
+        assert(eleTy->isIntegerTy() and edlJson[jsonPtr / "in"] == true);
+        fuzzBufferJson[jsonPtr / "Max"] = true;
+        fuzzBufferJson[jsonPtr / "TotalSize"] = (size_t)ClMaxLengthOfString;
+        fuzzBufferJson[jsonPtr / "ID"] = jsonPtr.to_string();
+        Value *fuzzDataPtr = IRB.CreatePointerCast(
+            IRB.CreateCall(getFuzzDataPtr,
+                           {IRB.getInt64(0), jsonPtrAsID,
+                            IRB.getInt32(edlJson[jsonPtr / "string"] == true
+                                             ? FUZZ_STRING
+                                             : FUZZ_WSTRING)}),
+            pointerTy);
+        Value *charCnt = IRB.CreateCall(
+            edlJson[jsonPtr / "string"] == true ? _strlen : _wcslen,
+            fuzzDataPtr);
+        auto _strPtr = CreateZeroInitizerGlobal(
+            jsonPtr.to_string(), ArrayType::get(eleTy, ClMaxLengthOfString));
+        Value *maxStrLen = IRB.getInt64(ClMaxLengthOfString - 1);
+        Value *copyLen = IRB.CreateSelect(IRB.CreateICmpULT(charCnt, maxStrLen),
+                                          charCnt, maxStrLen);
+        contentPtr = IRB.CreateGEP(
+            _strPtr->getValueType(), _strPtr,
+            {cast<Value>(IRB.getInt64(0)), cast<Value>(IRB.getInt64(0))});
+        IRB.CreateMemCpy(contentPtr, MaybeAlign(), fuzzDataPtr, MaybeAlign(),
+                         IRB.CreateMul(eleSize, copyLen));
+        IRB.CreateStore(Constant::getNullValue(eleTy),
+                        IRB.CreateGEP(eleTy, contentPtr, copyLen));
+      } else {
+        // calculate count of elements the pointer point to
+        Value *ptCnt = nullptr;
+        // EDL: c array can't be decorated with [count]/[size], and must have
+        // it's count
+        if (edlJson[jsonPtr / "c_array_count"].is_number()) {
+          size_t _c_array_count = edlJson[jsonPtr / "c_array_count"];
+          if (_c_array_count <= 0) {
+            errs() << "c_array_count must > 0\n";
+            abort();
+          }
+          ptCnt = IRB.getInt64(_c_array_count);
+        } else if (edlJson[jsonPtr / "user_check"] == true) {
+          ptCnt = IRB.CreateCall(getUserCheckCount, {eleSize, jsonPtrAsID});
+        } else {
+          Value *count = nullptr, *size = nullptr;
+          if (edlJson[jsonPtr / "count"].is_null()) {
+            count = IRB.getInt64(1);
+          } else if (edlJson[jsonPtr / "count"].is_number()) {
+            count = IRB.getInt64(edlJson[jsonPtr / "count"]);
+          } else {
+            size_t co_param_pos = edlJson[jsonPtr / "count" / "co_param_pos"];
+            edlJson[jsonPtr.parent_pointer() / co_param_pos /
+                    "isEdlCountAttr"] = true;
+            auto co_param_ptr = createParamContent(
+                types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
+                insertPt, recursion_depth - 1);
+            IRB.SetInsertPoint(insertPt);
+            count = IRB.CreateLoad(co_param_ptr->getType()
+                                       ->getScalarType()
+                                       ->getPointerElementType(),
+                                   co_param_ptr);
+          }
+          if (edlJson[jsonPtr / "size"].is_null()) {
+            size = eleSize;
+          } else if (edlJson[jsonPtr / "size"].is_number()) {
+            // means "size" bytes
+            size_t _size = edlJson[jsonPtr / "size"];
+            size = IRB.getInt64(_size);
+            if (eleTy->isIntegerTy() && _size <= 8) {
+              // we can regard it as (size*8)bits integer
+              _eleSize = _size;
+              eleTy = IRB.getIntNTy(_size * 8);
+              eleSize = IRB.getInt64(_size);
+            }
+          } else {
+            size_t co_param_pos = edlJson[jsonPtr / "size" / "co_param_pos"];
+            edlJson[jsonPtr.parent_pointer() / co_param_pos / "isEdlSizeAttr"] =
+                true;
+            auto co_param_ptr = createParamContent(
+                types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
+                insertPt, recursion_depth - 1);
+            IRB.SetInsertPoint(insertPt);
+            size = IRB.CreateLoad(co_param_ptr->getType()
+                                      ->getScalarType()
+                                      ->getPointerElementType(),
+                                  co_param_ptr);
+          }
+          ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
+        }
+
+        if (ptCnt == IRB.getInt64(1)) {
+          contentPtr = createParamContent({eleTy}, jsonPtr / "field" / 0,
+                                          nullptr, insertPt, recursion_depth);
+        } else {
+          size_t _gArrayCnt = 0;
+          if (auto constCnt = dyn_cast<ConstantInt>(ptCnt)) {
+            // ptCnt is known
+            _gArrayCnt = constCnt->getZExtValue();
+          } else {
+            // ptCnt is unknown, give it a max count
+            _gArrayCnt = std::max(
+                (size_t)1, std::min((size_t)ClMaxSize / eleSize->getZExtValue(),
+                                    (size_t)ClMaxCount));
+            auto gArrayCnt = IRB.getInt64(_gArrayCnt);
+            // set ptCnt must <= gArrayCnt
+            ptCnt = IRB.CreateSelect(IRB.CreateICmpULT(ptCnt, gArrayCnt), ptCnt,
+                                     gArrayCnt);
+          }
+
+          GlobalVariable *_contentPtr = CreateZeroInitizerGlobal(
+              jsonPtr.to_string(), ArrayType::get(eleTy, _gArrayCnt));
+          contentPtr = IRB.CreateGEP(_contentPtr->getValueType(), _contentPtr,
+                                     {IRB.getInt64(0), IRB.getInt64(0)});
+
+          if (!ClEnableFillAtOnce or hasPointerElement(pointerTy)) {
+            // fall back
+            FOR_LOOP_BEG(insertPt, ptCnt)
+            auto innerInsertPt = &*IRB.GetInsertPoint();
+            fuzzBufferJson[jsonPtr / "Repeat"] = _gArrayCnt;
+            if (not isa<ConstantInt>(ptCnt)) {
+              fuzzBufferJson[jsonPtr / "Max"] = true;
+            }
+            auto elePtr =
+                createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
+                                   innerInsertPt, recursion_depth);
+            IRB.SetInsertPoint(innerInsertPt);
+            dataCopy(IRB.CreateGEP(eleTy, contentPtr, {phi}), elePtr, eleTy,
+                     innerInsertPt);
+            FOR_LOOP_END(ptCnt)
+          } else if (feedRandom) {
+            fillAtOnce(contentPtr, jsonPtr, insertPt, eleTy, ptCnt);
+          }
+        }
+      }
+      IRB.SetInsertPoint(insertPt);
+      IRB.CreateStore(IRB.CreatePointerCast(contentPtr, pointerTy), typePtr);
+      if (feedRandom) {
+        // we call function to query whether fill pointer with meaningful
+        // address or not
+        Instruction *term = SplitBlockAndInsertIfThen(
+            IRB.CreateCall(whetherSetNullPointer, jsonPtrAsID), insertPt,
+            false);
+        IRB.SetInsertPoint(term);
+        IRB.CreateStore(Constant::getNullValue(pointerTy), typePtr);
+      }
     }
   } else if (auto structTy = dyn_cast<StructType>(type)) {
     if (!ClEnableFillAtOnce or hasPointerElement(structTy)) {
       // fall back
       for (size_t index = 0; index < structTy->getNumElements(); index++) {
         inheritDirectionAttr(jsonPtr, index);
-        auto elePtr =
-            createParamContent(SmallVector<Type *>{structTy->elements().begin(),
-                                                   structTy->elements().end()},
-                               jsonPtr / "field" / index, nullptr, insertPt);
+        auto elePtr = createParamContent(
+            SmallVector<Type *>{structTy->elements().begin(),
+                                structTy->elements().end()},
+            jsonPtr / "field" / index, nullptr, insertPt, recursion_depth);
         IRB.SetInsertPoint(insertPt);
         auto eleTy = elePtr->getType()->getPointerElementType();
         dataCopy(IRB.CreateGEP(type, typePtr,
@@ -395,7 +412,7 @@ Value *DriverGenerator::createParamContent(
       auto innerInsertPt = &*IRB.GetInsertPoint();
       fuzzBufferJson[jsonPtr / "Repeat"] = arrTy->getNumElements();
       auto elePtr = createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
-                                       innerInsertPt);
+                                       innerInsertPt, recursion_depth);
       IRB.SetInsertPoint(innerInsertPt);
       dataCopy(IRB.CreateGEP(type, typePtr, {IRB.getInt32(0), phi}), elePtr,
                eleTy, innerInsertPt);
@@ -575,6 +592,11 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
         IRBuilder<> IRB(insertPt);
         auto jsonPtrAsID = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
         auto eleTy = pointerTy->getElementType();
+        StructType *eleSt = dyn_cast<StructType>(eleTy);
+        if (eleSt and eleSt->isOpaque()) {
+          // replace opaque struct type with uint8
+          eleTy = Type::getInt8Ty(*C);
+        }
         assert(M->getDataLayout().getTypeAllocSize(eleTy) > 0);
         auto eleSize = IRB.getInt64(M->getDataLayout().getTypeAllocSize(eleTy));
         // if it's a string, directly fill it
@@ -612,16 +634,24 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
             Value *count = _count.is_null() ? IRB.getInt64(1)
                            : _count.is_number()
                                ? cast<Value>(IRB.getInt64(_count))
-                               : ocallFunc->getArg(_count["co_param_pos"]);
+                               : IRB.CreateIntCast(
+                                     ocallFunc->getArg(_count["co_param_pos"]),
+                                     Type::getInt64Ty(*C), false);
             Value *size = nullptr;
             if (_size.is_null()) {
               size = eleSize;
             } else if (_size.is_number()) {
-              eleTy = IRB.getIntNTy(_size);
-              eleSize = IRB.getInt64(_size);
-              size = IRB.getInt64(_size);
+              // means "size" bytes
+              size_t num_size = _size;
+              size = IRB.getInt64(num_size);
+              if (eleTy->isIntegerTy() && num_size <= 8) {
+                // we can regard it as (size*8)bits integer
+                eleTy = IRB.getIntNTy(num_size * 8);
+                eleSize = IRB.getInt64(num_size);
+              }
             } else {
-              size = ocallFunc->getArg(_size["co_param_pos"]);
+              size = IRB.CreateIntCast(ocallFunc->getArg(_size["co_param_pos"]),
+                                       Type::getInt64Ty(*C), false);
             }
             ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
           }

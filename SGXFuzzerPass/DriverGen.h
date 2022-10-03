@@ -20,7 +20,7 @@ public:
   Value *createParamContent(SmallVector<Type *> types,
                             nlohmann::json::json_pointer jsonPtr,
                             std::map<uint64_t, Value *> *paramPtrs,
-                            Instruction *insertPt);
+                            Instruction *insertPt, size_t recursion_depth = 0);
   void fillAtOnce(Value *dstPtr, nlohmann::json::json_pointer jsonPtr,
                   Instruction *insertPt, Type *type = nullptr,
                   Value *arrCnt = nullptr, bool isOcall = false);
