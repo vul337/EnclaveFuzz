@@ -440,16 +440,7 @@ void DriverGenerator::fillAtOnce(Value *dstPtr, json::json_pointer jsonPtr,
                          : (isa<ArrayType>(type) or arrCnt)        ? FUZZ_ARRAY
                          : isa<StructType>(type)                   ? FUZZ_DATA
                                                                    : FUZZ_DATA;
-  size_t preparedSize = _tySize;
   if (arrCnt) {
-    size_t _arrCnt = 0;
-    if (auto constInt = dyn_cast<ConstantInt>(arrCnt)) {
-      _arrCnt = constInt->getZExtValue();
-    } else {
-      _arrCnt = std::max(
-          (size_t)1, std::min((size_t)ClMaxSize / _tySize, (size_t)ClMaxCount));
-    }
-    preparedSize *= _arrCnt;
     tySize = IRB.CreateMul(tySize, arrCnt);
   }
   Value *fuzzDataPtr = IRB.CreateCall(
