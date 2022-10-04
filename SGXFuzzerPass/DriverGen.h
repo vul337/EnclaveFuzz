@@ -34,15 +34,13 @@ public:
   void passStaticAnalysisResultToRuntime(
       SmallVector<Constant *> &ecallFuzzWrapperFuncs);
   bool runOnModule(Module &M);
-  void updateFuzzBufferTotalSize();
-  size_t _updateFuzzBufferTotalSize(nlohmann::json::json_pointer ptr);
 
 private:
   FunctionCallee getIndexOfEcallToBeFuzzed, getFuzzDataPtr, getUserCheckCount,
       _strlen, _wcslen, whetherSetNullPointer;
   Module *M = nullptr;
   LLVMContext *C = nullptr;
-  nlohmann::json edlJson, fuzzBufferJson;
+  nlohmann::json edlJson;
   std::map<Type *, bool> typeHasPointerMap;
 };
 } // namespace llvm

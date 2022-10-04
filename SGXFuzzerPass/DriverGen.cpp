@@ -242,9 +242,6 @@ Value *DriverGenerator::createParamContent(
           edlJson[jsonPtr / "wstring"] == true) {
         // [string/wstring] must exist with [in]
         assert(eleTy->isIntegerTy() and edlJson[jsonPtr / "in"] == true);
-        fuzzBufferJson[jsonPtr / "Max"] = true;
-        fuzzBufferJson[jsonPtr / "TotalSize"] = (size_t)ClMaxLengthOfString;
-        fuzzBufferJson[jsonPtr / "ID"] = jsonPtr.to_string();
         Value *fuzzDataPtr = IRB.CreatePointerCast(
             IRB.CreateCall(getFuzzDataPtr,
                            {IRB.getInt64(0), jsonPtrAsID,
@@ -356,10 +353,6 @@ Value *DriverGenerator::createParamContent(
             // fall back
             FOR_LOOP_BEG(insertPt, ptCnt)
             auto innerInsertPt = &*IRB.GetInsertPoint();
-            fuzzBufferJson[jsonPtr / "Repeat"] = _gArrayCnt;
-            if (not isa<ConstantInt>(ptCnt)) {
-              fuzzBufferJson[jsonPtr / "Max"] = true;
-            }
             auto elePtr =
                 createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
                                    innerInsertPt, recursion_depth);
@@ -410,7 +403,6 @@ Value *DriverGenerator::createParamContent(
       // fall back
       FOR_LOOP_BEG(insertPt, eleCnt)
       auto innerInsertPt = &*IRB.GetInsertPoint();
-      fuzzBufferJson[jsonPtr / "Repeat"] = arrTy->getNumElements();
       auto elePtr = createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
                                        innerInsertPt, recursion_depth);
       IRB.SetInsertPoint(innerInsertPt);
@@ -456,13 +448,10 @@ void DriverGenerator::fillAtOnce(Value *dstPtr, json::json_pointer jsonPtr,
     } else {
       _arrCnt = std::max(
           (size_t)1, std::min((size_t)ClMaxSize / _tySize, (size_t)ClMaxCount));
-      fuzzBufferJson[jsonPtr / (isOcall ? "Unknown" : "Max")] = true;
     }
     preparedSize *= _arrCnt;
     tySize = IRB.CreateMul(tySize, arrCnt);
   }
-  fuzzBufferJson[jsonPtr / "TotalSize"] = preparedSize;
-  fuzzBufferJson[jsonPtr / "ID"] = jsonPtr.to_string();
   Value *fuzzDataPtr = IRB.CreateCall(
       getFuzzDataPtr, {tySize, jsonPtrAsID, IRB.getInt32(byteType)});
   dataCopy(dstPtr, fuzzDataPtr, type, insertPt, arrCnt);
@@ -604,9 +593,6 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
             edlJson[jsonPtr / "wstring"] == true) {
           // [string/wstring] must exist with [in]
           assert(eleTy->isIntegerTy() and edlJson[jsonPtr / "in"] == true);
-          fuzzBufferJson[jsonPtr / "Max"] = true;
-          fuzzBufferJson[jsonPtr / "TotalSize"] = (size_t)ClMaxLengthOfString;
-          fuzzBufferJson[jsonPtr / "ID"] = jsonPtr.to_string();
           Value *fuzzDataPtr = IRB.CreatePointerCast(
               IRB.CreateCall(getFuzzDataPtr,
                              {IRB.getInt64(0), jsonPtrAsID,
@@ -669,15 +655,6 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
               // fall back
               FOR_LOOP_BEG(insertPt, ptCnt)
               auto innerInsertPt = &*IRB.GetInsertPoint();
-              if (auto constInt = dyn_cast<ConstantInt>(ptCnt)) {
-                fuzzBufferJson[jsonPtr / "Repeat"] = constInt->getZExtValue();
-              } else {
-                fuzzBufferJson[jsonPtr / "Repeat"] =
-                    std::max((size_t)1, std::min((size_t)ClMaxSize /
-                                                     eleSize->getZExtValue(),
-                                                 (size_t)ClMaxCount));
-                fuzzBufferJson[jsonPtr / "Unknown"] = true;
-              }
               auto elePtr = createParamContent(
                   {eleTy},
                   json::json_pointer("/untrusted") / ocallName / "parameter" /
@@ -762,13 +739,6 @@ void DriverGenerator::passStaticAnalysisResultToRuntime(
   }
   globalEcallFuzzWrapperNameArr->setInitializer(
       ConstantArray::get(ecallFuzzWrapperNameArrTy, wrapperNames));
-
-  // pass fuzz data buffer layout json to runtime via global string
-  auto fuzzDataBufferLayoutJsonStr =
-      IRB.CreateGlobalStringPtr(to_string(fuzzBufferJson), "", 0, M);
-  auto fuzzDataBufferLayoutJson = cast<GlobalVariable>(M->getOrInsertGlobal(
-      "sgx_fuzzer_data_buffer_layout_json", IRB.getInt8PtrTy()));
-  fuzzDataBufferLayoutJson->setInitializer(fuzzDataBufferLayoutJsonStr);
 }
 
 bool DriverGenerator::runOnModule(Module &M) {
@@ -797,55 +767,7 @@ bool DriverGenerator::runOnModule(Module &M) {
   for (auto &ocallInfo : edlJson["untrusted"].items()) {
     createOcallFunc(ocallInfo.key());
   }
-  updateFuzzBufferTotalSize();
-  // dbgs() << fuzzBufferJson.dump(4) << "\n";
   // at the end
   passStaticAnalysisResultToRuntime(ecallFuzzWrapperFuncs);
   return true;
-}
-
-void DriverGenerator::updateFuzzBufferTotalSize() {
-  for (auto domain : {"trusted", "untrusted"}) {
-    auto domainPtr = json::json_pointer() / domain;
-    for (auto func : fuzzBufferJson[domain].items()) {
-      auto funcPtr = domainPtr / func.key();
-      if (fuzzBufferJson[funcPtr / "TotalSize"].is_null()) {
-        size_t totalSize = 0;
-        // get total size of fuzz data prepared for parameters
-        totalSize += _updateFuzzBufferTotalSize(funcPtr / "parameter");
-        // get total size of fuzz data prepared for return
-        if (!fuzzBufferJson[funcPtr / "return" / "TotalSize"].is_null()) {
-          assert(fuzzBufferJson[funcPtr / "return" / "TotalSize"].is_number());
-          totalSize += (size_t)fuzzBufferJson[funcPtr / "return" / "TotalSize"];
-        } else if (!fuzzBufferJson[funcPtr / "return" / "field"].is_null()) {
-          auto size = _updateFuzzBufferTotalSize(funcPtr / "return" / "field");
-          assert(fuzzBufferJson[funcPtr / "return" / "Repeat"].is_null());
-          fuzzBufferJson[funcPtr / "return" / "TotalSize"] = size;
-          totalSize += size;
-        }
-        fuzzBufferJson[funcPtr / "TotalSize"] = totalSize;
-      }
-    }
-  }
-}
-
-size_t DriverGenerator::_updateFuzzBufferTotalSize(json::json_pointer ptr) {
-  size_t totalSize = 0;
-  for (size_t index = 0; index < fuzzBufferJson[ptr].size(); index++) {
-    auto itemPtr = ptr / std::to_string(index);
-    if (!fuzzBufferJson[itemPtr / "TotalSize"].is_null()) {
-      assert(fuzzBufferJson[itemPtr / "TotalSize"].is_number());
-    } else if (!fuzzBufferJson[itemPtr / "field"].is_null()) {
-      auto size = _updateFuzzBufferTotalSize(itemPtr / "field");
-      if (not fuzzBufferJson[itemPtr / "Repeat"].is_null()) {
-        assert(fuzzBufferJson[itemPtr / "Repeat"].is_number());
-        size *= (size_t)fuzzBufferJson[itemPtr / "Repeat"];
-      }
-      fuzzBufferJson[itemPtr / "TotalSize"] = size;
-    } else
-      // e.g. [out] for ECall/[in] for OCall needn't to prepare fuzz data
-      continue;
-    totalSize += (size_t)fuzzBufferJson[itemPtr / "TotalSize"];
-  }
-  return totalSize;
 }
