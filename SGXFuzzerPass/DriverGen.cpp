@@ -104,6 +104,12 @@ void DriverGenerator::initialize(Module &M) {
 // propagate [in]/[out]/[user_check] to it's element
 void DriverGenerator::inheritDirectionAttr(json::json_pointer jsonPtr,
                                            size_t field_index) {
+  if (edlJson[jsonPtr / "field"].is_null()) {
+    edlJson[jsonPtr / "field"] = json::object();
+  }
+  if (edlJson[jsonPtr / "field" / field_index].is_null()) {
+    edlJson[jsonPtr / "field" / field_index] = json::object();
+  }
   if (edlJson[jsonPtr / "user_check"] == true) {
     edlJson[jsonPtr / "field" / field_index / "user_check"] = true;
   }
