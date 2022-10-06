@@ -33,7 +33,7 @@ static cl::opt<std::string>
 // param is at the end of life, if create param at global, we have to declare
 // the max count of array in advance
 static cl::opt<size_t> ClMaxCount(
-    "max-count", cl::init(25),
+    "max-count", cl::init(1024),
     cl::desc("Max element count of global array passed as paramter of ECall"),
     cl::Hidden);
 
