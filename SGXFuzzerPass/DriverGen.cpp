@@ -359,12 +359,16 @@ Value *DriverGenerator::createParamContent(
   } else if (auto structTy = dyn_cast<StructType>(type)) {
     if (!ClEnableFillAtOnce or hasPointerElement(structTy)) {
       // fall back
+      // structure's member pointers may have size/count attributes(deep copy),
+      // so we have to prepare a map to record everything
+      std::map<uint64_t, Value *> preparedSubFieldParamPtrs;
       for (size_t index = 0; index < structTy->getNumElements(); index++) {
         inheritDirectionAttr(jsonPtr, index);
         auto elePtr = createParamContent(
             SmallVector<Type *>{structTy->elements().begin(),
                                 structTy->elements().end()},
-            jsonPtr / "field" / index, nullptr, insertPt, recursion_depth);
+            jsonPtr / "field" / index, preparedSubFieldParamPtrs, insertPt,
+            recursion_depth);
         IRB.SetInsertPoint(insertPt);
         auto eleTy = elePtr->getType()->getPointerElementType();
         dataCopy(IRB.CreateGEP(type, typePtr,
