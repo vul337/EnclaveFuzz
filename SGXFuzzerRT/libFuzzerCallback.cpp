@@ -266,7 +266,7 @@ public:
         memcpy(buf, data.c_str(), strLen);
         auto newLen =
             LLVMFuzzerMutate((uint8_t *)buf, strLen, MAX_STRING_LENGTH);
-        assert(newLen <= MAX_STRING_LENGTH);
+        sgxfuzz_assert(newLen <= MAX_STRING_LENGTH);
         buf[newLen] = '\0';
         mutatorJson[ptr / "Data"] = std::string(buf);
         break;
@@ -430,7 +430,8 @@ public:
     } else if (reqQueue.size() > 1) {
       abort();
     }
-    // log_debug("reqQueue add %s %s", DataID.c_str(), req.StrAsParamID.c_str());
+    // log_debug("reqQueue add %s %s", DataID.c_str(),
+    // req.StrAsParamID.c_str());
     reqQueue[DataID][req.StrAsParamID] = req;
   }
 

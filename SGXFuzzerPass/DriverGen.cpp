@@ -37,16 +37,6 @@ static cl::opt<size_t> ClMaxCount(
     cl::desc("Max element count of global array passed as paramter of ECall"),
     cl::Hidden);
 
-static cl::opt<size_t> ClMaxSize(
-    "max-size", cl::init(1000),
-    cl::desc("Max total size of global array passed as paramter of ECall"),
-    cl::Hidden);
-
-static cl::opt<size_t> ClMaxLengthOfString(
-    "max-length-of-string", cl::init(100),
-    cl::desc("Max length of global string passed as paramter of ECall"),
-    cl::Hidden);
-
 static cl::opt<bool>
     ClEnableFillAtOnce("enable-fill-at-once", cl::init(true),
                        cl::desc("Enable fill parameter data at once for pure "
@@ -242,28 +232,13 @@ Value *DriverGenerator::createParamContent(
           edlJson[jsonPtr / "wstring"] == true) {
         // [string/wstring] must exist with [in]
         assert(eleTy->isIntegerTy() and edlJson[jsonPtr / "in"] == true);
-        Value *fuzzDataPtr = IRB.CreatePointerCast(
+        contentPtr = IRB.CreatePointerCast(
             IRB.CreateCall(getFuzzDataPtr,
                            {IRB.getInt64(0), jsonPtrAsID,
                             IRB.getInt32(edlJson[jsonPtr / "string"] == true
                                              ? FUZZ_STRING
                                              : FUZZ_WSTRING)}),
             pointerTy);
-        Value *charCnt = IRB.CreateCall(
-            edlJson[jsonPtr / "string"] == true ? _strlen : _wcslen,
-            fuzzDataPtr);
-        auto _strPtr = CreateZeroInitizerGlobal(
-            jsonPtr.to_string(), ArrayType::get(eleTy, ClMaxLengthOfString));
-        Value *maxStrLen = IRB.getInt64(ClMaxLengthOfString - 1);
-        Value *copyLen = IRB.CreateSelect(IRB.CreateICmpULT(charCnt, maxStrLen),
-                                          charCnt, maxStrLen);
-        contentPtr = IRB.CreateGEP(
-            _strPtr->getValueType(), _strPtr,
-            {cast<Value>(IRB.getInt64(0)), cast<Value>(IRB.getInt64(0))});
-        IRB.CreateMemCpy(contentPtr, MaybeAlign(), fuzzDataPtr, MaybeAlign(),
-                         IRB.CreateMul(eleSize, copyLen));
-        IRB.CreateStore(Constant::getNullValue(eleTy),
-                        IRB.CreateGEP(eleTy, contentPtr, copyLen));
       } else {
         // calculate count of elements the pointer point to
         Value *ptCnt = nullptr;
@@ -335,9 +310,7 @@ Value *DriverGenerator::createParamContent(
             _gArrayCnt = constCnt->getZExtValue();
           } else {
             // ptCnt is unknown, give it a max count
-            _gArrayCnt = std::max(
-                (size_t)1, std::min((size_t)ClMaxSize / eleSize->getZExtValue(),
-                                    (size_t)ClMaxCount));
+            _gArrayCnt = std::max((size_t)1, (size_t)ClMaxCount);
             auto gArrayCnt = IRB.getInt64(_gArrayCnt);
             // set ptCnt must <= gArrayCnt
             ptCnt = IRB.CreateSelect(IRB.CreateICmpULT(ptCnt, gArrayCnt), ptCnt,
