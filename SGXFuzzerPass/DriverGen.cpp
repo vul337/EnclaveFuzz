@@ -367,7 +367,7 @@ Value *DriverGenerator::createParamContent(
         auto elePtr = createParamContent(
             SmallVector<Type *>{structTy->elements().begin(),
                                 structTy->elements().end()},
-            jsonPtr / "field" / index, preparedSubFieldParamPtrs, insertPt,
+            jsonPtr / "field" / index, &preparedSubFieldParamPtrs, insertPt,
             recursion_depth);
         IRB.SetInsertPoint(insertPt);
         auto eleTy = elePtr->getType()->getPointerElementType();
