@@ -17,13 +17,26 @@ public:
   void dataCopy(Value *dstPtr, Value *srcPtr, Type *type, Instruction *insertPt,
                 Value *arrCnt = nullptr);
   GlobalVariable *CreateZeroInitizerGlobal(StringRef Name, Type *Ty);
+
+  /// @brief I don't use jsonPtr.to_string() as jsonPtrAsID, instead, I use
+  /// parentID+currentID, since later has InstanceID info
+  /// @param types
+  /// @param jsonPtr
+  /// @param parentID
+  /// @param currentID
+  /// @param paramPtrs
+  /// @param insertPt
+  /// @param recursion_depth
+  /// @return
   Value *createParamContent(SmallVector<Type *> types,
                             nlohmann::json::json_pointer jsonPtr,
+                            Value *parentID, Value *currentID,
                             std::map<uint64_t, Value *> *paramPtrs,
                             Instruction *insertPt, size_t recursion_depth = 0);
   void fillAtOnce(Value *dstPtr, nlohmann::json::json_pointer jsonPtr,
-                  Instruction *insertPt, Type *type = nullptr,
-                  Value *arrCnt = nullptr, bool isOcall = false);
+                  Value *jsonPtrAsID, Instruction *insertPt,
+                  Type *type = nullptr, Value *arrCnt = nullptr,
+                  bool isOcall = false);
   bool hasPointerElement(Type *type);
   bool _hasPointerElement(Type *type, size_t level = 0);
   Function *createEcallFuzzWrapperFunc(std::string ecallName);
@@ -37,7 +50,8 @@ public:
 
 private:
   FunctionCallee getIndexOfEcallToBeFuzzed, getFuzzDataPtr, getUserCheckCount,
-      _strlen, _wcslen, whetherSetNullPointer;
+      _strlen, _wcslen, whetherSetNullPointer, DFJoinID, DFGetInstanceID;
+  Constant *GStr0 = nullptr, *GStrField = nullptr, *GNullInt8Ptr = nullptr;
   Module *M = nullptr;
   LLVMContext *C = nullptr;
   nlohmann::json edlJson;

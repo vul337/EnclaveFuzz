@@ -619,6 +619,31 @@ public:
     allocatedMemAreas.clear();
   }
 
+  void *managedMalloc(size_t size) {
+    void *ptr = malloc(size);
+    allocatedMemAreas.push_back((uint8_t *)ptr);
+    return ptr;
+  }
+
+  char *managedStr2CStr(std::string str) {
+    char *cStr = (char *)managedMalloc(str.length() + 1);
+    memcpy(cStr, str.c_str(), str.length());
+    cStr[str.length()] = '\0';
+    return cStr;
+  }
+
+  char *jsonID(char *parentID, char *currentID, char *appendID) {
+    sgxfuzz_assert(parentID and currentID);
+    std::string fullID = std::string(parentID) + "/" + std::string(currentID) +
+                         (appendID ? ("/" + std::string(appendID)) : "");
+    return managedStr2CStr(fullID);
+  }
+
+  char *getInstanceID(char *origID, unsigned long instanceIdx) {
+    auto instanceID = std::string(origID) + "-" + std::to_string(instanceIdx);
+    return managedStr2CStr(instanceID);
+  }
+
 private:
   InputJsonDataInfo consumerData, mutatorData;
   std::map<std::string /* DataID */,
@@ -729,4 +754,12 @@ extern "C" uint8_t *get_bytes(size_t byteArrLen, char *cStrAsParamID,
 
 extern "C" bool is_null_pointer(char *cStrAsParamID) {
   return data_factory.hintSetNull(cStrAsParamID);
+}
+
+extern "C" char *DFJoinID(char *parentID, char *currentID, char *appendID) {
+  return data_factory.jsonID(parentID, currentID, appendID);
+}
+
+extern "C" char *DFGetInstanceID(char *origID, unsigned long i) {
+  return data_factory.getInstanceID(origID, i);
 }
