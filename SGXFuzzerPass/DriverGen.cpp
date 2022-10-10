@@ -79,8 +79,8 @@ void DriverGenerator::initialize(Module &M) {
       M.getOrInsertFunction("DFGetInstanceID", Type::getInt8PtrTy(*C),
                             Type::getInt8PtrTy(*C), Type::getInt64Ty(*C));
 
-  GStr0 = IRB.CreateGlobalStringPtr("0", "", 0, this->M);
-  GStrField = IRB.CreateGlobalStringPtr("field", "", 0, this->M);
+  GStr0 = IRB.CreateGlobalStringPtr("0", "GStr0", 0, this->M);
+  GStrField = IRB.CreateGlobalStringPtr("field", "GStrField", 0, this->M);
   GNullInt8Ptr = Constant::getNullValue(Type::getInt8PtrTy(*C));
 
   // read *.edl.json file
@@ -223,7 +223,7 @@ Value *DriverGenerator::createParamContent(
   IRB.SetInsertPoint(insertPt);
   // use json pointer as node ID
   auto jsonPtrAsID =
-      IRB.CreateCall(DFJoinID, {parentID, currentID, GNullInt8Ptr});
+      IRB.CreateCall(DFJoinID, {parentID, currentID, GNullInt8Ptr}, "id");
   // we have labelled all data belonged to [in]/[out]/[user_check] pointer with
   // same attribute label If it's not labelled, then set default true
   bool feedRandom = whetherFeedRandom(jsonPtr);

@@ -355,8 +355,8 @@ public:
       // assume reqQueue is one-element queue, reason that I use queue is to
       // avoid future adjustment
       sgxfuzz_assert(reqQueue.size() == 1);
-      for (auto pair : reqQueue) {
-        mutatorData.bjdataBase64 = pair.first;
+      for (auto it = reqQueue.begin(); it != reqQueue.end();) {
+        mutatorData.bjdataBase64 = it->first;
         mutatorData.bjdata = DecodeBase64(mutatorData.bjdataBase64);
         try {
           mutatorData.json =
@@ -372,8 +372,8 @@ public:
         // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
         mutateOnMutatorJSon(false);
         /// process \c reqQueue
-        auto paramReqs = pair.second;
-        reqQueue.erase(mutatorData.bjdataBase64);
+        auto paramReqs = it->second;
+        it = reqQueue.erase(it);
         // log_debug("reqQueue remove %s", mutatorData.bjdataBase64.c_str());
         sgxfuzz_assert(reqQueue.empty());
         for (auto paramReq : paramReqs) {
@@ -468,7 +468,7 @@ public:
       // Already prepared data for current ID
       FuzzDataTy dataTy = consumerJson[consumerJsonPtr / "DataType"];
       log_debug("Get JSON item [%s]", strAsParamID.c_str());
-      dumpJson(consumerJson[consumerJsonPtr]);
+      // dumpJson(consumerJson[consumerJsonPtr]);
       switch (dataTy) {
       case FUZZ_ARRAY:
       case FUZZ_DATA:
