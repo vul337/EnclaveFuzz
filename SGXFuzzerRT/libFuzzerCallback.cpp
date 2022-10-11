@@ -14,6 +14,7 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -665,15 +666,69 @@ void ShowAllECalls() {
   log_debug("[Init] Num of ECall: %d\n", sgx_fuzzer_ecall_num);
   std::string ecalls;
   for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-    ecalls += std::string(sgx_fuzzer_ecall_wrapper_name_array[i]) + "\n";
+    ecalls += std::string("  " + std::to_string(i) + " - " + sgx_fuzzer_ecall_wrapper_name_array[i]) + "\n";
   }
   log_debug("ECalls:\n%s", ecalls.c_str());
+}
+
+// 0 for random
+enum FuzzerTestModeTy{TEST_ONE, TEST_RANDOM, TEST_USER};
+std::vector<int> fuzzerSeq;
+FuzzerTestModeTy fuzzerMode;
+
+
+
+void split(const std::string &s, char delim, std::vector<std::string> &elems) {
+  std::stringstream ss(s);
+  std::string item;
+  while (std::getline(ss, item, delim)) {
+    elems.push_back(item);
+  }
 }
 
 // libFuzzer Callbacks
 extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   (void)argc;
   (void)argv;
+
+  // default mode is random
+  fuzzerMode = TEST_RANDOM;
+
+  for (int i = 0; i < *argc; ++i) {
+    std::string opt = std::string((*argv)[i]);
+    size_t pos;
+
+    pos = opt.find("--sgxfuzz_test_one=");
+    if (pos != std::string::npos) {
+      fuzzerMode = TEST_ONE;
+      fuzzerSeq.push_back(std::stoi(opt.substr(pos + 19)));
+      log_debug("[Init] TestOne: %d\n", fuzzerSeq[0]);
+    }
+
+    pos = opt.find("--sgxfuzz_test_user=");
+    if (pos != std::string::npos) {
+      fuzzerMode = TEST_USER;
+      std::string seq = opt.substr(pos + 20);
+      std::vector<std::string> elems;
+      split(seq, ',', elems);
+      for (auto elem : elems) {
+        fuzzerSeq.push_back(std::stoi(elem));
+      }
+
+      log_debug("[Init] TestUser: ");
+      for (auto id : fuzzerSeq) {
+        printf("%d ", id);
+      }
+      printf("\n");
+    }
+
+    pos = opt.find("--sgxfuzz_print_ecalls");
+    if (pos != std::string::npos) {
+      ShowAllECalls();
+      exit(0);
+    }
+
+  }
   ShowAllECalls();
   return 0;
 }
@@ -718,12 +773,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
   // Test body
-  for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-    log_debug("[TEST] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
-    ret = sgx_fuzzer_ecall_array[i]();
-    sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
-                  sgx_fuzzer_ecall_wrapper_name_array[i]);
-    hasTest = true;
+  if (fuzzerMode == TEST_ONE || fuzzerMode == TEST_USER) {
+    for(auto ecall_id:fuzzerSeq) {
+      log_debug("[TEST] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
+      ret = sgx_fuzzer_ecall_array[ecall_id]();
+      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
+                    sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
+      hasTest = true;
+    }
+  } else {
+    for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
+      log_debug("[TEST] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
+      ret = sgx_fuzzer_ecall_array[i]();
+      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
+                    sgx_fuzzer_ecall_wrapper_name_array[i]);
+      hasTest = true;
+    }
   }
 
   // Destroy Enclave
