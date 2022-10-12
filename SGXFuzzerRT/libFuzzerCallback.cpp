@@ -88,7 +88,7 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
   vsnprintf(buf, BUFSIZ, format, ap);
   va_end(ap);
   // output
-  std::cerr << prefix << std::string(buf) << std::endl;
+  std::cerr << prefix << std::string(buf);
 }
 
 // DataFactory Util
@@ -101,6 +101,7 @@ enum FuzzDataTy {
   FUZZ_COUNT,
   FUZZ_RET,
   FUZZ_BOOL,
+  FUZZ_SEQ,
 };
 
 enum DataOp {
@@ -205,6 +206,25 @@ public:
     }
     case FUZZ_BOOL: {
       mutatorJson[JSonPtr / "Data"] = (bool)(rand() % 100 < 20);
+      break;
+    }
+    case FUZZ_SEQ: {
+      std::vector<int> callSeq(req.size);
+      // array [0,req.size)
+      std::iota(callSeq.begin(), callSeq.end(), 0);
+      // Fisher–Yates shuffle
+      for (int i = callSeq.size() - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        std::swap(callSeq[i], callSeq[j]);
+      }
+      mutatorJson[JSonPtr / "Data"] = EncodeBase64(
+          std::vector<uint8_t>((uint8_t *)callSeq.data(),
+                               (uint8_t *)(callSeq.data() + callSeq.size())));
+      break;
+    }
+    default: {
+      abort();
+      break;
     }
     }
   }
@@ -316,6 +336,27 @@ public:
       }
       case FUZZ_BOOL: {
         mutatorJson[ptr / "Data"] = (bool)(rand() % 100 < 20);
+        break;
+      }
+      case FUZZ_SEQ: {
+        auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
+        sgxfuzz_assert(byteArr.size() % sizeof(int) == 0);
+        std::vector<int> callSeq((int *)byteArr.data(),
+                                 (int *)(byteArr.data() + byteArr.size()));
+        // Fisher–Yates shuffle
+        for (int i = callSeq.size() - 1; i > 0; i--) {
+          int j = rand() % (i + 1);
+          std::swap(callSeq[i], callSeq[j]);
+        }
+
+        mutatorJson[ptr / "Data"] = EncodeBase64(
+            std::vector<uint8_t>((uint8_t *)callSeq.data(),
+                                 (uint8_t *)(callSeq.data() + callSeq.size())));
+        break;
+      }
+      default: {
+        abort();
+        break;
       }
       }
     }
@@ -347,7 +388,7 @@ public:
         sgxfuzz_assert(mutatorData.json.empty());
       }
       mutatorData.dataID = getSha1Str(mutatorData.bjdata);
-      log_debug("[Before Mutate, ID: %s]", mutatorData.dataID.c_str());
+      log_debug("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
       dumpJson(mutatorData.json);
 
       /// Arbitrarily mutate on \c mutatorJson
@@ -367,7 +408,7 @@ public:
           sgxfuzz_assert(mutatorData.json.empty());
         }
         mutatorData.dataID = getSha1Str(mutatorData.bjdata);
-        log_debug("[Before Mutate, ID: %s]", mutatorData.dataID.c_str());
+        log_debug("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
         dumpJson(mutatorData.json);
 
         // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
@@ -375,7 +416,7 @@ public:
         /// process \c reqQueue
         auto paramReqs = it->second;
         it = reqQueue.erase(it);
-        // log_debug("reqQueue remove %s", mutatorData.bjdataBase64.c_str());
+        // log_debug("reqQueue remove %s\n", mutatorData.bjdataBase64.c_str());
         sgxfuzz_assert(reqQueue.empty());
         for (auto paramReq : paramReqs) {
           auto req = paramReq.second;
@@ -407,7 +448,7 @@ public:
     sgxfuzz_assert(mutatorData.bjdata.size() <= MaxSize);
 
     memcpy(Data, mutatorData.bjdata.data(), mutatorData.bjdata.size());
-    log_debug("[After Mutate, ID: %s]", mutatorData.dataID.c_str());
+    log_debug("[After Mutate, ID: %s]\n", mutatorData.dataID.c_str());
     dumpJson(mutatorData.json);
     size_t newSize = mutatorData.bjdata.size();
     mutatorData.clear();
@@ -431,7 +472,7 @@ public:
     } else if (reqQueue.size() > 1) {
       abort();
     }
-    // log_debug("reqQueue add %s %s", DataID.c_str(),
+    // log_debug("reqQueue add %s %s\n", DataID.c_str(),
     // req.StrAsParamID.c_str());
     reqQueue[DataID][req.StrAsParamID] = req;
   }
@@ -459,7 +500,7 @@ public:
     auto &consumerJson = consumerData.json;
     if (consumerJson[consumerJsonPtr].is_null()) {
       // Send request to mutator that we need data for current ID
-      log_debug("Need mutator create data for current [%s]",
+      log_debug("Need mutator create data for current [%s]\n",
                 strAsParamID.c_str());
       SendRequest(consumerData.bjdataBase64,
                   {strAsParamID, DATA_CREATE, byteArrLen, dataTy});
@@ -468,7 +509,7 @@ public:
     } else {
       // Already prepared data for current ID
       FuzzDataTy dataTy = consumerJson[consumerJsonPtr / "DataType"];
-      log_debug("Get JSON item [%s]", strAsParamID.c_str());
+      log_debug("Get JSON item [%s]\n", strAsParamID.c_str());
       // dumpJson(consumerJson[consumerJsonPtr]);
       switch (dataTy) {
       case FUZZ_ARRAY:
@@ -480,7 +521,7 @@ public:
         if (preparedDataSize < byteArrLen) {
           size_t extraSizeNeeded = byteArrLen - preparedDataSize;
           // Send request to mutator that prepared data is not enough
-          log_debug("Need mutator provide more data [%ld] for current [%s]",
+          log_debug("Need mutator provide more data [%ld] for current [%s]\n",
                     extraSizeNeeded, strAsParamID.c_str());
           SendRequest(consumerData.bjdataBase64,
                       {strAsParamID, DATA_EXPAND, extraSizeNeeded, dataTy});
@@ -494,7 +535,7 @@ public:
         if (preparedDataSize > byteArrLen) {
           size_t sizeNeedReduced = preparedDataSize - byteArrLen;
           // Send request to mutator that prepared data is too much
-          log_debug("Need mutator provide less data [%d] for current [%s]",
+          log_debug("Need mutator provide less data [%d] for current [%s]\n",
                     sizeNeedReduced, strAsParamID.c_str());
           SendRequest(consumerData.bjdataBase64,
                       {strAsParamID, DATA_SHRINK, sizeNeedReduced, dataTy});
@@ -548,6 +589,10 @@ public:
           allocatedMemAreas.push_back(dst);
         }
         *dst = data ? 1 : 0;
+        break;
+      }
+      default: {
+        abort();
         break;
       }
       }
@@ -608,7 +653,7 @@ public:
       sgxfuzz_assert(consumerData.json.empty());
     }
     consumerData.dataID = getSha1Str(consumerData.bjdata);
-    log_debug("[Before Test, ID: %s]", consumerData.dataID.c_str());
+    log_debug("[Before Test, ID: %s]\n", consumerData.dataID.c_str());
     dumpJson(consumerData.json);
   }
 
@@ -645,6 +690,22 @@ public:
     return managedStr2CStr(instanceID);
   }
 
+  std::vector<int> getCallSequence(size_t funcNum) {
+    auto &consumerJson = consumerData.json;
+    if (consumerJson["CallSeq"].is_null()) {
+      SendRequest(consumerData.bjdataBase64,
+                  {"CallSeq", DATA_CREATE, funcNum, FUZZ_SEQ});
+      leaveLLVMFuzzerTestOneInput();
+      // Shouldn't reach here, avoid compile warning
+      abort();
+    } else {
+      auto byteArr = DecodeBase64(std::string(consumerJson["CallSeq"]["Data"]));
+      sgxfuzz_assert(byteArr.size() % sizeof(int) == 0);
+      return std::vector<int>((int *)byteArr.data(),
+                              (int *)(byteArr.data() + byteArr.size()));
+    }
+  }
+
 private:
   InputJsonDataInfo consumerData, mutatorData;
   std::map<std::string /* DataID */,
@@ -655,11 +716,11 @@ private:
 FuzzDataFactory data_factory;
 
 void FuzzDataFactory::dumpJson(ordered_json json) {
-  log_debug_np("%s", json.dump(4).c_str());
+  log_debug_np("%s\n", json.dump(4).c_str());
 }
 
 void FuzzDataFactory::dumpJsonPtr(ordered_json::json_pointer ptr) {
-  log_debug("%s", ptr.to_string().c_str());
+  log_debug("%s\n", ptr.to_string().c_str());
 }
 
 void ShowAllECalls() {
@@ -670,7 +731,7 @@ void ShowAllECalls() {
                           sgx_fuzzer_ecall_wrapper_name_array[i]) +
               "\n";
   }
-  log_debug("ECalls:\n%s", ecalls.c_str());
+  log_debug("ECalls:\n%s\n", ecalls.c_str());
 }
 
 // 0 for random
@@ -717,9 +778,9 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
       log_debug("[Init] TestUser: ");
       for (auto id : fuzzerSeq) {
-        printf("%d ", id);
+        log_debug_np("%d ", id);
       }
-      printf("\n");
+      log_debug_np("\n");
     }
 
     pos = opt.find("--sgxfuzz_print_ecalls");
@@ -774,7 +835,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   // Test body
   if (fuzzerMode == TEST_ONE || fuzzerMode == TEST_USER) {
     for (auto ecall_id : fuzzerSeq) {
-      log_debug("[TEST] ECall: %s",
+      log_debug("[TEST] ECall: %s\n",
                 sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
       ret = sgx_fuzzer_ecall_array[ecall_id]();
       sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
@@ -782,8 +843,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
       hasTest = true;
     }
   } else {
-    for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-      log_debug("[TEST] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
+    auto callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
+    for (int i : callSeq) {
+      sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
+      log_debug("[TEST] ECall-%d: %s\n", i,
+                sgx_fuzzer_ecall_wrapper_name_array[i]);
       ret = sgx_fuzzer_ecall_array[i]();
       sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
                     sgx_fuzzer_ecall_wrapper_name_array[i]);
@@ -802,7 +866,7 @@ exit:
   data_factory.clearAtConsumerEnd();
   if (hasTest)
     succeedTimes++;
-  log_debug("fullSucceedTimes/succeedTimes/emitTimes=%ld/%ld/%ld",
+  log_debug("fullSucceedTimes/succeedTimes/emitTimes=%ld/%ld/%ld\n",
             fullSucceedTimes, succeedTimes, emitTimes);
   return 0;
 }
