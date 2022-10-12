@@ -666,17 +666,17 @@ void ShowAllECalls() {
   log_debug("[Init] Num of ECall: %d\n", sgx_fuzzer_ecall_num);
   std::string ecalls;
   for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-    ecalls += std::string("  " + std::to_string(i) + " - " + sgx_fuzzer_ecall_wrapper_name_array[i]) + "\n";
+    ecalls += std::string("  " + std::to_string(i) + " - " +
+                          sgx_fuzzer_ecall_wrapper_name_array[i]) +
+              "\n";
   }
   log_debug("ECalls:\n%s", ecalls.c_str());
 }
 
 // 0 for random
-enum FuzzerTestModeTy{TEST_ONE, TEST_RANDOM, TEST_USER};
+enum FuzzerTestModeTy { TEST_ONE, TEST_RANDOM, TEST_USER };
 std::vector<int> fuzzerSeq;
 FuzzerTestModeTy fuzzerMode;
-
-
 
 void split(const std::string &s, char delim, std::vector<std::string> &elems) {
   std::stringstream ss(s);
@@ -727,7 +727,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       ShowAllECalls();
       exit(0);
     }
-
   }
   ShowAllECalls();
   return 0;
@@ -774,8 +773,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
   // Test body
   if (fuzzerMode == TEST_ONE || fuzzerMode == TEST_USER) {
-    for(auto ecall_id:fuzzerSeq) {
-      log_debug("[TEST] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
+    for (auto ecall_id : fuzzerSeq) {
+      log_debug("[TEST] ECall: %s",
+                sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
       ret = sgx_fuzzer_ecall_array[ecall_id]();
       sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
                     sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
