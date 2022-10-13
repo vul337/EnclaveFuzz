@@ -1,4 +1,6 @@
 #include "libFuzzerCallback.h"
+#include <boost/algorithm/string.hpp>
+#include <boost/program_options.hpp>
 #include <chrono>
 #include <cstdarg>
 #include <cstddef>
@@ -22,6 +24,7 @@
 #include <vector>
 
 using ordered_json = nlohmann::ordered_json;
+namespace po = boost::program_options;
 
 sgx_enclave_id_t global_eid = 0;
 
@@ -777,14 +780,6 @@ enum FuzzerTestModeTy { TEST_ONE, TEST_RANDOM, TEST_USER };
 std::vector<int> fuzzerSeq;
 FuzzerTestModeTy fuzzerMode;
 
-void split(const std::string &s, char delim, std::vector<std::string> &elems) {
-  std::stringstream ss(s);
-  std::string item;
-  while (std::getline(ss, item, delim)) {
-    elems.push_back(item);
-  }
-}
-
 // libFuzzer Callbacks
 extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   (void)argc;
@@ -793,39 +788,57 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   // default mode is random
   fuzzerMode = TEST_RANDOM;
 
-  for (int i = 0; i < *argc; ++i) {
-    std::string opt = std::string((*argv)[i]);
-    size_t pos;
+  // Declare the supported options.
+  po::options_description desc("LibFuzzerCallback's inner options");
+  desc.add_options()("inner_help", "produce help message")(
+      "sgxfuzz_print_ecalls", "show all ecalls valid in this Enclave")(
+      "sgxfuzz_test_one", po::value<int>(), "test only one API user specified")(
+      "sgxfuzz_test_user", po::value<std::vector<std::string>>()->multitoken(),
+      "test a number of APIs user specified");
 
-    pos = opt.find("--sgxfuzz_test_one=");
-    if (pos != std::string::npos) {
-      fuzzerMode = TEST_ONE;
-      fuzzerSeq.push_back(std::stoi(opt.substr(pos + 19)));
-      log_debug("[Init] TestOne: %d\n", fuzzerSeq[0]);
-    }
+  po::variables_map vm;
+  po::parsed_options parsed = po::command_line_parser(*argc, *argv)
+                                  .options(desc)
+                                  .allow_unregistered()
+                                  .run();
+  std::vector<std::string> to_pass_further =
+      collect_unrecognized(parsed.options, po::include_positional);
+  po::store(parsed, vm);
+  po::notify(vm);
 
-    pos = opt.find("--sgxfuzz_test_user=");
-    if (pos != std::string::npos) {
-      fuzzerMode = TEST_USER;
-      std::string seq = opt.substr(pos + 20);
-      std::vector<std::string> elems;
-      split(seq, ',', elems);
-      for (auto elem : elems) {
-        fuzzerSeq.push_back(std::stoi(elem));
+  // process options
+  if (vm.count("inner_help")) {
+    std::stringstream ss;
+    ss << desc << "\n";
+    log_debug(ss.str().c_str());
+    exit(0);
+  } else if (vm.count("sgxfuzz_test_one")) {
+    fuzzerMode = TEST_ONE;
+    fuzzerSeq.push_back(vm["sgxfuzz_test_one"].as<int>());
+    log_debug("[Init] TestOne: %d\n", fuzzerSeq[0]);
+  } else if (vm.count("sgxfuzz_test_user")) {
+    fuzzerMode = TEST_USER;
+    std::vector<std::string> indicesVec =
+        vm["sgxfuzz_test_user"].as<std::vector<std::string>>();
+    for (auto indices : indicesVec) {
+      std::vector<std::string> indexVec;
+      boost::split(indexVec, indices, [](char c) { return c == ','; });
+      for (auto index : indexVec) {
+        boost::trim(index);
+        if (index == "")
+          continue;
+        fuzzerSeq.push_back(std::stoi(index, 0, 0));
       }
-
-      log_debug("[Init] TestUser: ");
-      for (auto id : fuzzerSeq) {
-        log_debug_np("%d ", id);
-      }
-      log_debug_np("\n");
     }
 
-    pos = opt.find("--sgxfuzz_print_ecalls");
-    if (pos != std::string::npos) {
-      ShowAllECalls();
-      exit(0);
+    log_debug("[Init] TestUser: ");
+    for (auto id : fuzzerSeq) {
+      log_debug_np("%d ", id);
     }
+    log_debug_np("\n");
+  } else if (vm.count("sgxfuzz_print_ecalls")) {
+    ShowAllECalls();
+    exit(0);
   }
   ShowAllECalls();
   return 0;
@@ -879,8 +892,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
   }
   for (int i : callSeq) {
-    data_factory.updateCurrentCalledECallIndex(i);
     sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
+    data_factory.updateCurrentCalledECallIndex(i);
     log_debug("[TEST] ECall-%d: %s\n", i,
               sgx_fuzzer_ecall_wrapper_name_array[i]);
     ret = sgx_fuzzer_ecall_array[i]();
