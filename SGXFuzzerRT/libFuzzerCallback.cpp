@@ -481,7 +481,9 @@ public:
   /// byte array prepared for current \p cStrAsParamID, \c SendRequest to
   /// mutator phase
   /// @param cStrAsParamID Using JSon pointer string as ID
-  /// @param dst A pre-allocated memory area
+  /// @param dst A pre-allocated memory area, if nullptr, I will provide a valid
+  /// memory area which should be destroyed at clearAtConsumerEnd() before leave
+  /// LLVMFuzzerTestOneInput
   /// @param byteArrLen
   /// @param dataTy
   /// @return
@@ -492,7 +494,8 @@ public:
       return dst;
     }
 
-    std::string strAsParamID(cStrAsParamID);
+    int times = ECallCalledTimesMap[currentCalledECallIndex];
+    std::string strAsParamID = std::to_string(times) + cStrAsParamID;
     strAsParamID = std::regex_replace(strAsParamID, std::regex("/"), "_");
 
     auto consumerJsonPtr =
@@ -706,12 +709,29 @@ public:
     }
   }
 
+  void initECallCalledTimesMap(int ECallNum) {
+    ECallCalledTimesMap = std::vector<int>(ECallNum);
+    std::fill(ECallCalledTimesMap.begin(), ECallCalledTimesMap.end(), 0);
+  }
+
+  void updateCurrentCalledECallIndex(int index) {
+    currentCalledECallIndex = index;
+  }
+
+  void increaseECallCalledTime(int ECallIdx) {
+    ECallCalledTimesMap[ECallIdx]++;
+  }
+
+  void destroyECallCalledTimesMap() { ECallCalledTimesMap.clear(); }
+
 private:
   InputJsonDataInfo consumerData, mutatorData;
   std::map<std::string /* DataID */,
            std::map<std::string /* ParamID */, RequestInfo>>
       reqQueue;
   std::vector<uint8_t *> allocatedMemAreas;
+  std::vector<int> ECallCalledTimesMap;
+  int currentCalledECallIndex;
 };
 FuzzDataFactory data_factory;
 
@@ -817,6 +837,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   sgx_status_t ret;
   static size_t emitTimes = 0, fullSucceedTimes = 0, succeedTimes = 0;
   bool hasTest = false;
+  std::vector<int> callSeq;
+  data_factory.initECallCalledTimesMap(sgx_fuzzer_ecall_num);
   /// Deserialize data to \c FuzzDataFactory::ConsumerJSon
   data_factory.deserializeToConsumerJson(Data, Size);
 
@@ -834,25 +856,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
   // Test body
   if (fuzzerMode == TEST_ONE || fuzzerMode == TEST_USER) {
-    for (auto ecall_id : fuzzerSeq) {
-      log_debug("[TEST] ECall: %s\n",
-                sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
-      ret = sgx_fuzzer_ecall_array[ecall_id]();
-      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
-                    sgx_fuzzer_ecall_wrapper_name_array[ecall_id]);
-      hasTest = true;
-    }
+    callSeq = fuzzerSeq;
   } else {
-    auto callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
-    for (int i : callSeq) {
-      sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
-      log_debug("[TEST] ECall-%d: %s\n", i,
-                sgx_fuzzer_ecall_wrapper_name_array[i]);
-      ret = sgx_fuzzer_ecall_array[i]();
-      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] ECall: %s",
-                    sgx_fuzzer_ecall_wrapper_name_array[i]);
-      hasTest = true;
-    }
+    callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
+  }
+  for (int i : callSeq) {
+    data_factory.updateCurrentCalledECallIndex(i);
+    sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
+    log_debug("[TEST] ECall-%d: %s\n", i,
+              sgx_fuzzer_ecall_wrapper_name_array[i]);
+    ret = sgx_fuzzer_ecall_array[i]();
+    sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER,
+                  "[FAIL] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
+    data_factory.increaseECallCalledTime(i);
+    hasTest = true;
   }
 
   // Destroy Enclave
@@ -864,6 +881,7 @@ exit:
   /// Clear \c FuzzDataFactory::ConsumerJSon and free temp buffer before leave
   /// current round
   data_factory.clearAtConsumerEnd();
+  data_factory.destroyECallCalledTimesMap();
   if (hasTest)
     succeedTimes++;
   log_debug("fullSucceedTimes/succeedTimes/emitTimes=%ld/%ld/%ld\n",
