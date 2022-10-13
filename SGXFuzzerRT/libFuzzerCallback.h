@@ -6,7 +6,6 @@
 #include "nlohmann/json.hpp"
 #include "sgx_urts.h"
 #include <algorithm>
-#include <boost/beast/core/detail/base64.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

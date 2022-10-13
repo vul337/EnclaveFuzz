@@ -8,6 +8,7 @@
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <ostream>
 #include <regex>
@@ -607,12 +608,15 @@ public:
   /// @param origData A byte array
   /// @return Base64 string
   std::string EncodeBase64(std::vector<uint8_t> origData) {
-    size_t encodedSize =
-        boost::beast::detail::base64::encoded_size(origData.size());
+    if (origData.empty()) {
+      return "";
+    }
+
+    size_t encodedSize = 4 * ((origData.size() + 2) / 3);
     char base64CStr[encodedSize + 1];
-    auto encodeResult = boost::beast::detail::base64::encode(
-        base64CStr, origData.data(), origData.size());
-    sgxfuzz_assert(encodeResult == encodedSize);
+    size_t encodeResult = EVP_EncodeBlock((uint8_t *)base64CStr,
+                                          origData.data(), origData.size());
+    sgxfuzz_assert(encodedSize == encodeResult);
     base64CStr[encodedSize] = '\0';
     return std::string(base64CStr);
   }
@@ -621,12 +625,26 @@ public:
   /// @param base64Str Base64 string
   /// @return Plain byte array with corret size
   std::vector<uint8_t> DecodeBase64(std::string base64Str) {
+    if (base64Str.empty()) {
+      return std::vector<uint8_t>();
+    }
+
     size_t base64StrSize = base64Str.size();
-    uint8_t byteArr[boost::beast::detail::base64::decoded_size(base64StrSize)] =
-        {0};
-    auto decodeResult = boost::beast::detail::base64::decode(
-        byteArr, base64Str.c_str(), base64StrSize);
-    return std::vector<uint8_t>(byteArr, byteArr + decodeResult.first);
+    size_t decodedSize = 3 * base64StrSize / 4;
+    uint8_t byteArr[decodedSize + 1];
+    size_t decodeResult =
+        EVP_DecodeBlock(byteArr, (uint8_t *)base64Str.c_str(), base64StrSize);
+    sgxfuzz_assert(decodedSize == decodeResult);
+    size_t equalSignCnt = 0;
+    for (size_t i = base64StrSize; i > 0; i--) {
+      if (base64Str[i - 1] == '=') {
+        equalSignCnt++;
+      } else {
+        break;
+      }
+    }
+    sgxfuzz_assert(equalSignCnt <= 2);
+    return std::vector<uint8_t>(byteArr, byteArr + decodeResult - equalSignCnt);
   }
 
   size_t getUserCheckCount(char *cStrAsParamID) {
