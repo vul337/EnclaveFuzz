@@ -10,7 +10,6 @@
 
 #include "AddressSanitizer.hpp"
 #include "AdjustUSP.hpp"
-#include "SGXSanManifest.h"
 #include "SensitiveLeakSan.hpp"
 
 using namespace llvm;
@@ -51,10 +50,9 @@ struct SGXSanNewPass : PassInfoMixin<SGXSanNewPass> {
           F.getName().startswith("fuzzer_ocall_") ||
           F.getName().startswith("sgx_fuzzer_ecall_")) {
         Changed |= adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
-        // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial
-        // function, (linkonce_odr type function) in library which will check
-        // shadowbyte whether instrumented or not is not necessary. don't call
-        // instrumentFunction()
+        // Since we have monitored malloc-serial function, (linkonce_odr type
+        // function) in library which will check shadowbyte whether instrumented
+        // or not is not necessary. don't call instrumentFunction()
       } else {
         // hook sgx-specifical callee, normal asan, elrange check, Out-Addr
         // Whitelist check, GlobalPropageteWhitelist Sensitive area check,
@@ -112,10 +110,9 @@ struct SGXSanPass : public ModulePass {
           F.getName().startswith("fuzzer_ocall_") ||
           F.getName().startswith("sgx_fuzzer_ecall_")) {
         Changed |= adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
-        // When USE_SGXSAN_MALLOC==0: since we have monitored malloc-serial
-        // function, (linkonce_odr type function) in library which will check
-        // shadowbyte whether instrumented or not is not necessary. don't call
-        // instrumentFunction()
+        // Since we have monitored malloc-serial function, (linkonce_odr type
+        // function) in library which will check shadowbyte whether instrumented
+        // or not is not necessary. don't call instrumentFunction()
       } else {
         const TargetLibraryInfo *TLI =
             &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);

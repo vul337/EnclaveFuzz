@@ -1,23 +1,18 @@
 #include "SensitiveLeakSan.hpp"
 #include "AddressSanitizer.hpp"
-#include "SGXSanManifest.h"
 #include "config.h"
-#include "json.hpp"
-#include "llvm/Demangle/Demangle.h"
+#include "nlohmann/json.hpp"
 #include <filesystem>
 
 using namespace llvm;
 using ordered_json = nlohmann::ordered_json;
+namespace fs = std::filesystem;
 
 // #define DUMP_VALUE_FLOW
 // #define SHOW_WORK_OBJ_PTS
-#if (USE_SGXSAN_MALLOC)
-#define MALLOC_USABLE_SZIE_STR "sgxsan_malloc_usable_size"
-#else
 // use our malloc series (which use dlmalloc as backend), and override original
 // dlmalloc and tcmalloc libraries
 #define MALLOC_USABLE_SZIE_STR "malloc_usable_size"
-#endif
 
 static cl::opt<int> ClHeapAllocatorsMaxCollectionTimes(
     "heap-allocators-max-collection-times",
@@ -226,25 +221,6 @@ Value *SensitiveLeakSan::getHeapObjSize(CallInst *CI, IRBuilder<> &IRB) {
   assert(CI->getFunctionType()->getReturnType()->isPointerTy());
   return IRB.CreateCall(func_malloc_usable_size,
                         {IRB.CreatePointerCast(CI, IRB.getInt8PtrTy())});
-  // std::string calleeName = demangle(getDirectCalleeName(CI).str());
-  // if (calleeName.find("new") != std::string::npos || calleeName == "malloc")
-  // {
-  //     return CI->getArgOperand(0);
-  // }
-  // else if (calleeName == "realloc")
-  // {
-  //     return CI->getArgOperand(1);
-  // }
-  // else if (calleeName == "calloc")
-  // {
-  //     return IRB.CreateNUWMul(CI->getArgOperand(0), CI->getArgOperand(1));
-  // }
-  // else
-  // {
-  //     abort();
-  // }
-
-  // return nullptr;
 }
 
 std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal) {
@@ -746,7 +722,14 @@ void SensitiveLeakSan::initSVF() {
 
   // register heap allocator wrappers to SVF ExtAPI.json
   ExtAPIJsonFile = std::string(SVF_PROJECT_PATH) + "/" + EXTAPI_JSON_PATH;
-  std::filesystem::copy(ExtAPIJsonFile, ExtAPIJsonFile + ".orig");
+  auto targetPath = fs::path(ExtAPIJsonFile),
+       origPath = fs::path(ExtAPIJsonFile + ".orig");
+  if (fs::exists(origPath)) {
+    fs::remove(targetPath);
+    fs::copy(ExtAPIJsonFile + ".orig", ExtAPIJsonFile);
+  } else {
+    fs::copy(ExtAPIJsonFile, ExtAPIJsonFile + ".orig");
+  }
   std::ifstream ifs(ExtAPIJsonFile);
   if (not ifs.is_open())
     abort();
@@ -984,7 +967,7 @@ SensitiveLeakSan::SensitiveLeakSan(Module &ArgM, CFLSteensAAResult &AAResult) {
 }
 
 SensitiveLeakSan::~SensitiveLeakSan() {
-  std::filesystem::rename(ExtAPIJsonFile + ".orig", ExtAPIJsonFile);
+  fs::rename(ExtAPIJsonFile + ".orig", ExtAPIJsonFile);
 }
 
 StringRef SensitiveLeakSan::getParentFuncName(SVF::SVFVar *node) {

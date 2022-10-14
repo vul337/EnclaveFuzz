@@ -4,8 +4,6 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
 
-#include "SGXSanManifest.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <sstream>

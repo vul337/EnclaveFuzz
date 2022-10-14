@@ -1,13 +1,7 @@
 #!/bin/bash
 set -e
 
-# clean pass
-cd Pass
+# clean
 rm -rf  Debug-build \
         Release-build \
-        ../output/libSGXSanPass.so
-
-# clean runtime
-cd ../SGXSanRT
-make clean -s
-rm -f ../output/libSGXSanRT{App.a,App.so,Enclave.a} ../output/SGXSanRTEnclave.edl
+        install

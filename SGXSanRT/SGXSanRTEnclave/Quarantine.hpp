@@ -13,15 +13,11 @@ struct QuarantineElement {
   uptr user_size;
 };
 
-#if (USE_SGXSAN_MALLOC)
-typedef std::deque<QuarantineElement> QuarantineQueueTy;
-#else
 // Use SGXSan::ContainerAllocator(dlmalloc series as backend) avoid
 // malloc-new-malloc's like infinitive loop
 typedef std::deque<QuarantineElement,
                    SGXSan::ContainerAllocator<QuarantineElement>>
     QuarantineQueueTy;
-#endif
 
 class QuarantineCache {
 public:

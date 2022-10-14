@@ -58,7 +58,6 @@ static void init_shadow_memory_out_enclave() {
   // need to use it again, must collect_layout_infos again
   SensitivePoisoner::collect_layout_infos();
   SensitivePoisoner::shallow_poison_senitive();
-  init_real_malloc_usable_size();
   get_mmap_infos();
 }
 

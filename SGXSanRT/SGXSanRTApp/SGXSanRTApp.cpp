@@ -21,6 +21,7 @@
 #include "SGXSanLog.hpp"
 #include "SGXSanManifest.h"
 #include "SGXSanRTUBridge.hpp"
+#include "config.h"
 
 struct SGXSanMMapInfo {
   uint64_t start = 0;
@@ -32,11 +33,7 @@ struct SGXSanMMapInfo {
   bool is_private = false;
 };
 
-// pass string to ENCLAVE_FILENAME
-// (https://stackoverflow.com/questions/54602025/how-to-pass-a-string-from-a-make-file-into-a-c-program)
-#define _xstr(s) _str(s)
-#define _str(s) #s
-std::string enclave_name(_xstr(ENCLAVE_FILENAME));
+std::string enclave_name(ENCLAVE_FILENAME);
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
 uint64_t kEnclaveMemBeg = 0, kEnclaveMemEnd = 0, kEnclaveShadowBeg = 0,

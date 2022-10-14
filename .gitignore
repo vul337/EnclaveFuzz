@@ -1,7 +1,5 @@
 *.o
 *.a
 *.so
-output/
-build
-Debug-build
-Release-build
+*build
+install

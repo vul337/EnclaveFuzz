@@ -25,7 +25,6 @@
 #include "Util/DPItem.h"
 #include "Util/config.h"
 #include "WPA/Andersen.h"
-#include "WPA/FlowSensitiveTBHC.h"
 
 #include "PassCommon.hpp"
 #include "SGXSanInstVisitor.hpp"

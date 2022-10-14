@@ -12,9 +12,6 @@
 #include <pthread.h>
 #include <unordered_set>
 
-#if (USE_SGXSAN_MALLOC)
-size_t (*real_malloc_usable_size)(void *) = nullptr;
-#endif
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
 
@@ -222,16 +219,4 @@ size_t tc_malloc_size(void *ptr) {
   (void)ptr;
   abort();
   return 0;
-}
-
-void init_real_malloc_usable_size() {
-#if (USE_SGXSAN_MALLOC)
-  if ((void *)malloc == (void *)dlmalloc) {
-    // Use dlmalloc series
-    real_malloc_usable_size = dlmalloc_usable_size;
-  } else {
-    // Use tcmalloc series
-    real_malloc_usable_size = tc_malloc_size;
-  }
-#endif
 }

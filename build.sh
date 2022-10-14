@@ -1,28 +1,21 @@
 #!/bin/bash
-# you may need `export EName="xxx"` in shell or soft-link "enclave.signed.so" to signed enclave file
 set -e
-mkdir -p output
 
 if [[ $1 == 'debug' ]]; then
-    PASS_BUILD_MOD=Debug
-    PASS_CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Debug"
-    RT_MAKE_FLAGS="SGX_DEBUG=1 SGX_PRERELEASE=0"
+    BUILD_MOD=Debug
 else
-    PASS_BUILD_MOD=Release
-    PASS_CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release"
-    RT_MAKE_FLAGS="SGX_DEBUG=0 SGX_PRERELEASE=1"
+    BUILD_MOD=Release
 fi
 
-# build pass
-cd Pass
-cmake ${PASS_CMAKE_FLAGS} -B ${PASS_BUILD_MOD}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/../output
-cmake --build ${PASS_BUILD_MOD}-build -j$(nproc)
-rm -rf ../output/libSGXSanPass.so
-cmake --install ${PASS_BUILD_MOD}-build
-cd ..
-
-# build runtime
-cd SGXSanRT
-make -j$(nproc) -s ${RT_MAKE_FLAGS}
-ln -fs ../SGXSanRT/libSGXSanRT{App.a,App.so,Enclave.a} ../output/
-ln -fs ../SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl ../output/
+# build sgx_edger8r
+if [ ! -f Tool/sgx_edger8r ]
+then
+    cd edger8r
+    dune build
+    cd ..
+    cp edger8r/_build/default/linux/Edger8r.bc Tool/sgx_edger8r
+fi
+# build
+cmake -DCMAKE_BUILD_TYPE=${BUILD_MOD} -B ${BUILD_MOD}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/install
+cmake --build ${BUILD_MOD}-build -j$(nproc)
+cmake --install ${BUILD_MOD}-build

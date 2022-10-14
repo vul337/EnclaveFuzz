@@ -1879,9 +1879,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                    MDBuilder(*C).createBranchWeights(1, 100000));
 
   IRB.SetInsertPoint(ShadowByteCheck_BB);
-#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
   IRB.CreateCall(WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt);
-#endif
 
   Type *ShadowTy =
       IntegerType::get(*C, std::max(8U, TypeSize >> Mapping.Scale));
@@ -3123,13 +3121,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
       instrumentSecMemIntrinsic(CI);
     FunctionModified = true;
   }
-#if (USE_SGXSAN_MALLOC)
-  for (auto CI : HeapCIToInstrument) {
-    if (!suppressInstrumentationSiteForDebug(NumInstrumented))
-      instrumentHeapCall(CI);
-    FunctionModified = true;
-  }
-#endif
   if (!isFuncAtEnclaveTBridge) {
     for (auto Inst : GlobalVariableStoreInsts) {
       if (!suppressInstrumentationSiteForDebug(NumInstrumented))
@@ -4341,16 +4332,6 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   SGXSanMemmoveS = M.getOrInsertFunction("sgxsan_memmove_s", IRB.getInt32Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty());
-#if (USE_SGXSAN_MALLOC)
-  SGXSanMalloc = M.getOrInsertFunction("sgxsan_malloc", IRB.getInt8PtrTy(),
-                                       IRB.getInt64Ty());
-  SGXSanFree =
-      M.getOrInsertFunction("sgxsan_free", IRB.getVoidTy(), IRB.getInt8PtrTy());
-  SGXSanCalloc = M.getOrInsertFunction("sgxsan_calloc", IRB.getInt8PtrTy(),
-                                       IRB.getInt64Ty(), IRB.getInt64Ty());
-  SGXSanRealloc = M.getOrInsertFunction("sgxsan_realloc", IRB.getInt8PtrTy(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty());
-#endif
 
   is_pointer_readable =
       M.getOrInsertFunction("is_pointer_readable", IRB.getInt1Ty(),
