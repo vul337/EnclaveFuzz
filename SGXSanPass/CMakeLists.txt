@@ -12,6 +12,7 @@ find_package(LLVM REQUIRED CONFIG)
 # get SVF direcory
 set(SVF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../SVF")
 get_filename_component(SVF_DIR ${SVF_DIR} ABSOLUTE)
+message(STATUS "SVF_DIR: ${SVF_DIR}")
 
 # get SVF Mode
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -19,6 +20,7 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 else()
     set(SVF_MODE "Release")
 endif()
+message(STATUS "SVF_MODE: ${SVF_MODE}")
 
 # LLVM is normally built without RTTI. Be consistent with that.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-unused -Wno-comment -fno-rtti -std=c++17")
