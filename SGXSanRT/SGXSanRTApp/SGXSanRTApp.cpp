@@ -169,12 +169,17 @@ void reg_sgxsan_sigaction() {
                "Fail to regist SIGSEGV action\n");
 }
 
+// Overridden by SanitizerCoverage Pass
+extern "C" __attribute__((weak)) uint8_t *getCovMapAddr() { return nullptr; }
+
 // create shadow memory outside enclave for elrange
 // because shadow is independent of elrange, we just need one block of memory
 // for shadow, and don't need consider shadow gap.
 void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size,
-                                     uptr *shadow_beg_ptr,
-                                     uptr *shadow_end_ptr) {
+                                     uptr *shadow_beg_ptr, uptr *shadow_end_ptr,
+                                     uint8_t **cov_map_beg_ptr) {
+  *cov_map_beg_ptr = getCovMapAddr();
+
   g_enclave_base = enclave_base;
   g_enclave_size = enclave_size;
 

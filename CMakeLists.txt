@@ -11,7 +11,7 @@ install(TARGETS
         SGXSanRTApp
         SGXSanRTEnclave
         SGXFuzzerPass
-        SGXFuzzerRTApp
+        SGXFuzzerRT
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
 

@@ -10,7 +10,7 @@ enclave {
     };
 
     untrusted {
-        void sgxsan_ocall_init_shadow_memory(uint64_t enclave_base, uint64_t enclave_size, [out] uint64_t *shadow_beg_ptr, [out] uint64_t *shadow_end_ptr);
+        void sgxsan_ocall_init_shadow_memory(uint64_t enclave_base, uint64_t enclave_size, [out] uint64_t *shadow_beg_ptr, [out] uint64_t *shadow_end_ptr, [out] uint8_t **cov_map_beg_ptr);
         void sgxsan_ocall_print_string([in, string] const char *str);
         void sgxsan_ocall_addr2line([in, count=arr_cnt] uint64_t *addr_arr, size_t arr_cnt, int level);
         void sgxsan_ocall_addr2func_name(uint64_t addr, [out, count=buf_size] char *func_name, size_t buf_size);

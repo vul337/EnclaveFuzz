@@ -10,10 +10,9 @@
 extern "C" {
 #endif
 void sgxsan_ecall_notify_update_mmap_infos(void);
-sgx_status_t SGX_CDECL sgxsan_ocall_init_shadow_memory(uptr enclave_base,
-                                                       uptr enclave_size,
-                                                       uptr *shadow_beg_ptr,
-                                                       uptr *shadow_end_ptr);
+sgx_status_t SGX_CDECL sgxsan_ocall_init_shadow_memory(
+    uptr enclave_base, uptr enclave_size, uptr *shadow_beg_ptr,
+    uptr *shadow_end_ptr, uint8_t **cov_map_beg_ptr);
 sgx_status_t SGX_CDECL sgxsan_ocall_print_string(const char *str);
 sgx_status_t SGX_CDECL sgxsan_ocall_addr2line(uint64_t *addr_arr,
                                               size_t arr_cnt, int level = 0);

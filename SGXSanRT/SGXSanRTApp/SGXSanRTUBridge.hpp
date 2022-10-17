@@ -11,8 +11,8 @@ extern "C" {
 #endif
 sgx_status_t sgxsan_ecall_notify_update_mmap_infos(sgx_enclave_id_t eid);
 void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size,
-                                     uptr *shadow_beg_ptr,
-                                     uptr *shadow_end_ptr);
+                                     uptr *shadow_beg_ptr, uptr *shadow_end_ptr,
+                                     uint8_t **cov_map_beg_ptr);
 void sgxsan_ocall_print_string(const char *str);
 void sgxsan_ocall_addr2line(uint64_t *addr_arr, size_t arr_cnt, int level = 0);
 void sgxsan_ocall_addr2func_name(uint64_t addr, char *func_name,

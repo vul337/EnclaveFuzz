@@ -26,6 +26,8 @@ struct SGXSanMMapInfo {
 pthread_rwlock_t mmap_info_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 size_t SGXSanMMapInfoRealCount = 0;
 SGXSanMMapInfo *SGXSanMMapInfos = nullptr;
+// Used by SanCov Pass for Enclave
+uint8_t *__SGXSanCovMap;
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -45,7 +47,8 @@ static void init_shadow_memory_out_enclave() {
   // only use LowMem and LowShadow
   sgxsan_error(SGX_SUCCESS != sgxsan_ocall_init_shadow_memory(
                                   g_enclave_base, g_enclave_size,
-                                  &kEnclaveShadowBeg, &kEnclaveShadowEnd),
+                                  &kEnclaveShadowBeg, &kEnclaveShadowEnd,
+                                  &__SGXSanCovMap),
                "sgxsan_ocall_init_shadow_memory failed");
   sgxsan_error(sgx_register_exception_handler(1, sgxsan_exception_handler) ==
                    nullptr,
