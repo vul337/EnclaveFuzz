@@ -3,11 +3,15 @@ project(SGXSan)
 
 add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
+add_subdirectory(SGXFuzzerPass)
+add_subdirectory(SGXFuzzerRT)
 
 install(TARGETS
         SGXSanPass
         SGXSanRTApp
         SGXSanRTEnclave
+        SGXFuzzerPass
+        SGXFuzzerRTApp
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
 
