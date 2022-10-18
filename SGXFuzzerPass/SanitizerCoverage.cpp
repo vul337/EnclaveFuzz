@@ -1,3 +1,4 @@
+// https://github.com/llvm/llvm-project/blob/llvmorg-13.0.1/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
 //===-- SanitizerCoverage.cpp - coverage instrumentation for sanitizers ---===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -41,6 +42,18 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
+#include "SanitizerCoverage.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include <cstdint>
+#include <string>
+#include <system_error>
+#include <vector>
+
+using json = nlohmann::json;
 using namespace llvm;
 
 #define DEBUG_TYPE "sancov"
@@ -79,17 +92,22 @@ const char SanCovPCsSectionName[] = "sancov_pcs";
 
 const char SanCovLowestStackName[] = "__sancov_lowest_stack";
 
+static cl::opt<std::string> ClInstrumentJson(
+    "instrument-json",
+    cl::desc("The json file used to record statistics of instrumentation"),
+    cl::Hidden, cl::init("InstrumentStatistics.json"));
+
 static cl::opt<int> ClCoverageLevel(
-    "sanitizer-coverage-level",
+    "sgx-sanitizer-coverage-level",
     cl::desc("Sanitizer Coverage. 0: none, 1: entry block, 2: all blocks, "
              "3: all blocks and critical edges"),
-    cl::Hidden, cl::init(0));
+    cl::Hidden, cl::init(2));
 
-static cl::opt<bool> ClTracePC("sanitizer-coverage-trace-pc",
+static cl::opt<bool> ClTracePC("sgx-sanitizer-coverage-trace-pc",
                                cl::desc("Experimental pc tracing"), cl::Hidden,
                                cl::init(false));
 
-static cl::opt<bool> ClTracePCGuard("sanitizer-coverage-trace-pc-guard",
+static cl::opt<bool> ClTracePCGuard("sgx-sanitizer-coverage-trace-pc-guard",
                                     cl::desc("pc tracing with a guard"),
                                     cl::Hidden, cl::init(false));
 
@@ -99,43 +117,43 @@ static cl::opt<bool> ClTracePCGuard("sanitizer-coverage-trace-pc-guard",
 // This way the coverage instrumentation does not need to acquire the PCs
 // at run-time. Works with trace-pc-guard, inline-8bit-counters, and
 // inline-bool-flag.
-static cl::opt<bool> ClCreatePCTable("sanitizer-coverage-pc-table",
+static cl::opt<bool> ClCreatePCTable("sgx-sanitizer-coverage-pc-table",
                                      cl::desc("create a static PC table"),
                                      cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
-    ClInline8bitCounters("sanitizer-coverage-inline-8bit-counters",
+    ClInline8bitCounters("sgx-sanitizer-coverage-inline-8bit-counters",
                          cl::desc("increments 8-bit counter for every edge"),
                          cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
-    ClInlineBoolFlag("sanitizer-coverage-inline-bool-flag",
+    ClInlineBoolFlag("sgx-sanitizer-coverage-inline-bool-flag",
                      cl::desc("sets a boolean flag for every edge"), cl::Hidden,
                      cl::init(false));
 
 static cl::opt<bool>
-    ClCMPTracing("sanitizer-coverage-trace-compares",
+    ClCMPTracing("sgx-sanitizer-coverage-trace-compares",
                  cl::desc("Tracing of CMP and similar instructions"),
                  cl::Hidden, cl::init(false));
 
-static cl::opt<bool> ClDIVTracing("sanitizer-coverage-trace-divs",
+static cl::opt<bool> ClDIVTracing("sgx-sanitizer-coverage-trace-divs",
                                   cl::desc("Tracing of DIV instructions"),
                                   cl::Hidden, cl::init(false));
 
-static cl::opt<bool> ClGEPTracing("sanitizer-coverage-trace-geps",
+static cl::opt<bool> ClGEPTracing("sgx-sanitizer-coverage-trace-geps",
                                   cl::desc("Tracing of GEP instructions"),
                                   cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
-    ClPruneBlocks("sanitizer-coverage-prune-blocks",
+    ClPruneBlocks("sgx-sanitizer-coverage-prune-blocks",
                   cl::desc("Reduce the number of instrumented blocks"),
                   cl::Hidden, cl::init(true));
 
-static cl::opt<bool> ClStackDepth("sanitizer-coverage-stack-depth",
+static cl::opt<bool> ClStackDepth("sgx-sanitizer-coverage-stack-depth",
                                   cl::desc("max stack depth tracing"),
                                   cl::Hidden, cl::init(false));
 
-namespace {
+namespace llvm {
 
 SanitizerCoverageOptions getOptions(int LegacyCoverageLevel) {
   SanitizerCoverageOptions Res;
@@ -175,17 +193,54 @@ SanitizerCoverageOptions OverrideFromCL(SanitizerCoverageOptions Options) {
   Options.PCTable |= ClCreatePCTable;
   Options.NoPrune |= !ClPruneBlocks;
   Options.StackDepth |= ClStackDepth;
+#if 0
   if (!Options.TracePCGuard && !Options.TracePC &&
       !Options.Inline8bitCounters && !Options.StackDepth &&
       !Options.InlineBoolFlag)
     Options.TracePCGuard = true; // TracePCGuard is default.
+#endif
   return Options;
+}
+
+void WriteFile(const std::string &FileName, const std::string &Contents) {
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(FileName, EC);
+  if (EC) {
+    errs() << EC.message() << '\n';
+    return;
+  }
+  OS << Contents;
+}
+
+std::string ReadFile(std::string FileName) {
+  auto buf = MemoryBuffer::getFile(FileName);
+  if (auto err = buf.getError()) {
+    errs() << FileName << ": " << err.message() << "\n";
+    return "";
+  }
+  return buf.get()->getBuffer().str();
+}
+
+__attribute__((used)) void dumpJson(json json) {
+  dbgs() << json.dump(4) << "\n";
+}
+
+bool isAtUBridge(Module &M) {
+  bool atUBridge = false;
+  for (auto &GV : M.globals()) {
+    if (GV.getName().contains("ocall_table_")) {
+      atUBridge = true;
+      break;
+    }
+  }
+  return atUBridge;
 }
 
 using DomTreeCallback = function_ref<const DominatorTree *(Function &F)>;
 using PostDomTreeCallback =
     function_ref<const PostDominatorTree *(Function &F)>;
 
+#if 0
 class ModuleSanitizerCoverage {
 public:
   ModuleSanitizerCoverage(
@@ -260,6 +315,18 @@ private:
   const SpecialCaseList *Allowlist;
   const SpecialCaseList *Blocklist;
 };
+#endif
+
+ModuleSanitizerCoverage::ModuleSanitizerCoverage(
+    const SanitizerCoverageOptions &Options, const SpecialCaseList *Allowlist,
+    const SpecialCaseList *Blocklist)
+    : Options(OverrideFromCL(Options)), Allowlist(Allowlist),
+      Blocklist(Blocklist) {}
+
+void ModuleSanitizerCoverage::SetNoSanitizeMetadata(Instruction *I) {
+  I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
+                 MDNode::get(*C, None));
+}
 
 class ModuleSanitizerCoverageLegacyPass : public ModulePass {
 public:
@@ -307,8 +374,9 @@ private:
   std::unique_ptr<SpecialCaseList> Blocklist;
 };
 
-} // namespace
+} // namespace llvm
 
+#if 0
 PreservedAnalyses ModuleSanitizerCoveragePass::run(Module &M,
                                                    ModuleAnalysisManager &MAM) {
   ModuleSanitizerCoverage ModuleSancov(Options, Allowlist.get(),
@@ -324,6 +392,7 @@ PreservedAnalyses ModuleSanitizerCoveragePass::run(Module &M,
     return PreservedAnalyses::none();
   return PreservedAnalyses::all();
 }
+#endif
 
 std::pair<Value *, Value *>
 ModuleSanitizerCoverage::CreateSecStartEnd(Module &M, const char *Section,
@@ -386,8 +455,10 @@ Function *ModuleSanitizerCoverage::CreateInitCallsForSections(
   return CtorFunc;
 }
 
-bool ModuleSanitizerCoverage::instrumentModule(
-    Module &M, DomTreeCallback DTCallback, PostDomTreeCallback PDTCallback) {
+bool ModuleSanitizerCoverage::instrumentModule(Module &M,
+                                               DomTreeCallback DTCallback,
+                                               PostDomTreeCallback PDTCallback,
+                                               bool IsModuleAtEnclave) {
   if (Options.CoverageType == SanitizerCoverageOptions::SCK_None)
     return false;
   if (Allowlist &&
@@ -480,9 +551,71 @@ bool ModuleSanitizerCoverage::instrumentModule(
   SanCovTracePCGuard =
       M.getOrInsertFunction(SanCovTracePCGuardName, VoidTy, Int32PtrTy);
 
+  CurModuleAtEnclave = IsModuleAtEnclave;
+  std::string InstrumentJsonStr = ReadFile(ClInstrumentJson);
+  json InstrumentJson;
+  GlobalVariable *App8bitCounterArrayForEnclave = nullptr;
+  try {
+    InstrumentJson = json::parse(InstrumentJsonStr);
+    assert(not InstrumentJson["SUM"].is_null());
+  } catch (json::parse_error &e) {
+    InstrumentJson["SUM"] = 0;
+  }
+  CurInstrumentJson = &InstrumentJson[CurModule->getName().str()];
+  if (CurModuleAtEnclave) {
+    dbgs() << "== SGXSanCov(Enclave, CovType=" << Options.CoverageType
+           << "): " << CurModule->getName() << " ==\n";
+    if (not CurInstrumentJson->is_null()) {
+      dbgs() << "Already process " << CurModule->getName() << ", ignore it\n";
+      return false;
+    } else {
+      WholeEnclave8bitCounterArraySize = (size_t)InstrumentJson["SUM"];
+      // extern uint8_t *__SGXSanCovMap;
+      WholeEnclave8bitCounterArrayAddr = cast<GlobalVariable>(
+          CurModule->getOrInsertGlobal("__SGXSanCovMap", Int8PtrTy));
+      WholeEnclave8bitCounterArrayAddr->setLinkage(
+          GlobalValue::ExternalLinkage);
+    }
+  } else {
+    dbgs() << "== SGXSanCov: " << CurModule->getName() << " ==\n";
+    if (not isAtUBridge(*CurModule)) {
+      // do nothing at app side except it's at UBridge, then we will not prepare
+      // multiple same structure
+      return false;
+    } else {
+      assert(((size_t)InstrumentJson["SUM"]) > 0);
+      // since we directly get total numbers from enclave, so only keep one
+      // array for whole module
+      auto arrTy = ArrayType::get(Int8Ty, (size_t)InstrumentJson["SUM"]);
+      App8bitCounterArrayForEnclave = cast<GlobalVariable>(
+          CurModule->getOrInsertGlobal("__sancov_gen_", arrTy));
+      App8bitCounterArrayForEnclave->setInitializer(
+          ConstantAggregateZero::get(arrTy));
+      App8bitCounterArrayForEnclave->setLinkage(GlobalValue::PrivateLinkage);
+      App8bitCounterArrayForEnclave->setSection(
+          getSectionName(SanCovCountersSectionName));
+      App8bitCounterArrayForEnclave->setAlignment(
+          Align(DL->getTypeStoreSize(Int8Ty).getFixedSize()));
+      GlobalsToAppendToUsed.push_back(App8bitCounterArrayForEnclave);
+    }
+  }
+
   for (auto &F : M)
     instrumentFunction(F, DTCallback, PDTCallback);
 
+  if (CurModuleAtEnclave) {
+    size_t totalSize = 0;
+    for (auto item : CurInstrumentJson->items()) {
+      assert(item.key() != "Total");
+      if (item.value().is_number()) {
+        totalSize += (size_t)item.value();
+      }
+    }
+    // dbgs() << "Total instrument " << totalSize << "\n";
+    (*CurInstrumentJson)["Total"] = totalSize;
+    InstrumentJson["SUM"] = (size_t)InstrumentJson["SUM"] + totalSize;
+    WriteFile(ClInstrumentJson, InstrumentJson.dump(4));
+  }
   Function *Ctor = nullptr;
 
   if (FunctionGuardArray)
@@ -493,12 +626,39 @@ bool ModuleSanitizerCoverage::instrumentModule(
     Ctor = CreateInitCallsForSections(M, SanCovModuleCtor8bitCountersName,
                                       SanCov8bitCountersInitName, Int8Ty,
                                       SanCovCountersSectionName);
+  if (App8bitCounterArrayForEnclave) {
+    assert(not CurModuleAtEnclave);
+    Ctor = CreateInitCallsForSections(M, SanCovModuleCtor8bitCountersName,
+                                      SanCov8bitCountersInitName, Int8Ty,
+                                      SanCovCountersSectionName);
+    // Section start of SanCovCountersSectionName has been generated just by
+    // CreateInitCallsForSections
+    Value *SecStart =
+        CurModule->getNamedValue(getSectionStart(SanCovCountersSectionName));
+    if (SecStart == nullptr) {
+      auto SecStartEnd =
+          CreateSecStartEnd(M, SanCovCountersSectionName, Int8Ty);
+      SecStart = SecStartEnd.first;
+    }
+    FunctionCallee CtorSetCovMapAddr =
+        M.getOrInsertFunction("__sancov_ctor_setCovMapAddr", VoidTy);
+    FunctionCallee setCovMapAddr =
+        M.getOrInsertFunction("setCovMapAddr", VoidTy, Int8PtrTy);
+    auto EntryBB = BasicBlock::Create(
+        *C, "", cast<Function>(CtorSetCovMapAddr.getCallee()));
+    auto retVoidI = ReturnInst::Create(*C, EntryBB);
+    IRBuilder<> IRB(retVoidI);
+    IRB.CreateCall(setCovMapAddr, {SecStart});
+    appendToGlobalCtors(M, cast<Function>(CtorSetCovMapAddr.getCallee()),
+                        SanCtorAndDtorPriority);
+  }
   if (FunctionBoolArray) {
     Ctor = CreateInitCallsForSections(M, SanCovModuleCtorBoolFlagName,
                                       SanCovBoolFlagInitName, Int1Ty,
                                       SanCovBoolFlagSectionName);
   }
   if (Ctor && Options.PCTable) {
+    assert(false);
     auto SecStartEnd = CreateSecStartEnd(M, SanCovPCsSectionName, IntptrTy);
     FunctionCallee InitFunction = declareSanitizerInitFunction(
         M, SanCovPCsInitName, {IntptrPtrTy, IntptrPtrTy});
@@ -599,6 +759,9 @@ void ModuleSanitizerCoverage::instrumentFunction(
     return; // Should not instrument sanitizer init functions.
   if (F.getName().startswith("__sanitizer_"))
     return; // Don't instrument __sanitizer_* callbacks.
+  if (F.getName().startswith("sgxsan_ocall_") ||
+      F.getName().startswith("sgx_sgxsan_ecall_"))
+    return; // Don't instrument e/ocall of runtime of sgxsan.
   // Don't touch available_externally functions, their actual body is elewhere.
   if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
     return;
@@ -619,8 +782,10 @@ void ModuleSanitizerCoverage::instrumentFunction(
     return;
   if (Blocklist && Blocklist->inSection("coverage", "fun", F.getName()))
     return;
-  if (F.hasFnAttribute(Attribute::NoSanitizeCoverage))
+  if (F.hasFnAttribute(Attribute::NoSanitizeCoverage)) {
+    assert(false);
     return;
+  }
   if (Options.CoverageType >= SanitizerCoverageOptions::SCK_Edge)
     SplitAllCriticalEdges(
         F, CriticalEdgeSplittingOptions().setIgnoreUnreachableDests());
@@ -664,6 +829,14 @@ void ModuleSanitizerCoverage::instrumentFunction(
             (isa<CallInst>(Inst) && !isa<IntrinsicInst>(Inst)))
           IsLeafFunc = false;
     }
+  }
+
+  if (CurModuleAtEnclave) {
+    auto funcName = F.getName().str();
+    // dbgs() << "Blocks of " << funcName << ": " << BlocksToInstrument.size()
+    //        << "\n";
+    assert((*CurInstrumentJson)[funcName].is_null());
+    (*CurInstrumentJson)[funcName] = BlocksToInstrument.size();
   }
 
   InjectCoverage(F, BlocksToInstrument, IsLeafFunc);
@@ -932,6 +1105,22 @@ void ModuleSanitizerCoverage::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
     auto CounterPtr = IRB.CreateGEP(
         Function8bitCounterArray->getValueType(), Function8bitCounterArray,
         {ConstantInt::get(IntptrTy, 0), ConstantInt::get(IntptrTy, Idx)});
+    auto Load = IRB.CreateLoad(Int8Ty, CounterPtr);
+    auto Inc = IRB.CreateAdd(Load, ConstantInt::get(Int8Ty, 1));
+    auto Store = IRB.CreateStore(Inc, CounterPtr);
+    SetNoSanitizeMetadata(Load);
+    SetNoSanitizeMetadata(Store);
+  }
+  if (CurModuleAtEnclave) {
+    auto WholeEnclave8bitCounterArray =
+        IRB.CreateLoad(WholeEnclave8bitCounterArrayAddr->getValueType(),
+                       WholeEnclave8bitCounterArrayAddr);
+    auto CounterPtr = IRB.CreateGEP(
+        WholeEnclave8bitCounterArray->getType()
+            ->getScalarType()
+            ->getPointerElementType(),
+        WholeEnclave8bitCounterArray,
+        ConstantInt::get(Int64Ty, WholeEnclave8bitCounterArraySize++));
     auto Load = IRB.CreateLoad(Int8Ty, CounterPtr);
     auto Inc = IRB.CreateAdd(Load, ConstantInt::get(Int8Ty, 1));
     auto Store = IRB.CreateStore(Inc, CounterPtr);
