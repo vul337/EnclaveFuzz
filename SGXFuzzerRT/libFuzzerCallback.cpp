@@ -902,13 +902,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     data_factory.increaseECallCalledTime(i);
     hasTest = true;
   }
-
-  // Destroy Enclave
-  ret = sgx_destroy_enclave(global_eid);
-  sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave destroy");
   fullSucceedTimes++;
 
 exit:
+  // Destroy Enclave
+  ret = sgx_destroy_enclave(global_eid);
+  sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave destroy");
   /// Clear \c FuzzDataFactory::ConsumerJSon and free temp buffer before leave
   /// current round
   data_factory.clearAtConsumerEnd();

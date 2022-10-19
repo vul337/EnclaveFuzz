@@ -696,6 +696,7 @@ void DriverGenerator::createOcallFunc(std::string ocallName) {
   auto ocallFunc = M->getFunction(ocallName);
   if (not ocallFunc->isDeclaration())
     return;
+  ocallFunc->setLinkage(GlobalValue::WeakAnyLinkage);
   auto EntryBB = BasicBlock::Create(*C, "", ocallFunc);
   // create return instruction
   IRBuilder<> IRB(EntryBB);
