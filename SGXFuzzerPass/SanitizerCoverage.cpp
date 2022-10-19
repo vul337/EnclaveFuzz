@@ -1115,6 +1115,7 @@ void ModuleSanitizerCoverage::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
     auto WholeEnclave8bitCounterArray =
         IRB.CreateLoad(WholeEnclave8bitCounterArrayAddr->getValueType(),
                        WholeEnclave8bitCounterArrayAddr);
+    SetNoSanitizeMetadata(WholeEnclave8bitCounterArray);
     auto CounterPtr = IRB.CreateGEP(
         WholeEnclave8bitCounterArray->getType()
             ->getScalarType()
