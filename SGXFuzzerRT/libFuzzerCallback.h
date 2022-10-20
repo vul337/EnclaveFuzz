@@ -18,11 +18,6 @@
 #include <sys/types.h>
 #include <vector>
 
-#define ENCLAVE_FILENAME "enclave.signed.so"
-#define MAX_STRING_LENGTH 128
-#define MAX_COUNT 128
-#define MAX_SIZE 128
-
 // libFuzzer API
 extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 
