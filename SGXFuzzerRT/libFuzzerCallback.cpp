@@ -954,3 +954,7 @@ extern "C" char *DFJoinID(char *parentID, char *currentID, char *appendID) {
 extern "C" char *DFGetInstanceID(char *origID, unsigned long i) {
   return data_factory.getInstanceID(origID, i);
 }
+
+extern "C" void *DFManagedMalloc(size_t size) {
+  return data_factory.managedMalloc(size);
+}
