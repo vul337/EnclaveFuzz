@@ -27,6 +27,10 @@ using ordered_json = nlohmann::ordered_json;
 namespace po = boost::program_options;
 
 sgx_enclave_id_t global_eid = 0;
+std::string ClEnclaveFileName;
+size_t ClMaxStringLength;
+size_t ClMaxCount;
+size_t ClMaxSize;
 
 // From ELF
 extern uint8_t __start___sancov_cntrs[];
@@ -173,7 +177,7 @@ public:
     switch (req.dataType) {
     case FUZZ_STRING: {
       sgxfuzz_assert(req.size == 0);
-      size_t newStrLen = rand() % (MAX_STRING_LENGTH + 1);
+      size_t newStrLen = rand() % (ClMaxStringLength + 1);
       char newStr[newStrLen + 1];
       fillStrRand(newStr, newStrLen + 1);
       mutatorJson[JSonPtr / "Data"] = std::string(newStr);
@@ -181,7 +185,7 @@ public:
     }
     case FUZZ_WSTRING: {
       sgxfuzz_assert(req.size == 0);
-      size_t newStrLen = rand() % (MAX_STRING_LENGTH + 1);
+      size_t newStrLen = rand() % (ClMaxStringLength + 1);
       wchar_t newStr[newStrLen + 1];
       fillStrRand(newStr, newStrLen + 1);
       mutatorJson[JSonPtr / "Data"] = EncodeBase64(std::vector<uint8_t>(
@@ -191,7 +195,7 @@ public:
     }
     case FUZZ_COUNT:
     case FUZZ_SIZE: {
-      size_t maxValue = req.dataType == FUZZ_SIZE ? MAX_SIZE : MAX_COUNT;
+      size_t maxValue = req.dataType == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
       sgxfuzz_assert(req.size <= sizeof(size_t));
       size_t newData;
       fillRand(&newData, sizeof(size_t));
@@ -286,12 +290,12 @@ public:
       switch (dataTy) {
       case FUZZ_STRING: {
         std::string data = mutatorJson[ptr / "Data"];
-        size_t strLen = std::min(data.size(), (size_t)MAX_STRING_LENGTH);
-        char buf[MAX_STRING_LENGTH + 1];
+        size_t strLen = std::min(data.size(), (size_t)ClMaxStringLength);
+        char buf[ClMaxStringLength + 1];
         memcpy(buf, data.c_str(), strLen);
         auto newLen =
-            LLVMFuzzerMutate((uint8_t *)buf, strLen, MAX_STRING_LENGTH);
-        sgxfuzz_assert(newLen <= MAX_STRING_LENGTH);
+            LLVMFuzzerMutate((uint8_t *)buf, strLen, ClMaxStringLength);
+        sgxfuzz_assert(newLen <= ClMaxStringLength);
         buf[newLen] = '\0';
         mutatorJson[ptr / "Data"] = std::string(buf);
         break;
@@ -300,11 +304,11 @@ public:
         auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
         sgxfuzz_assert(byteArr.size() % sizeof(wchar_t) == 0);
         size_t wStrLen = std::min(byteArr.size() / sizeof(wchar_t),
-                                  (size_t)MAX_STRING_LENGTH);
-        wchar_t wStr[MAX_STRING_LENGTH + 1];
+                                  (size_t)ClMaxStringLength);
+        wchar_t wStr[ClMaxStringLength + 1];
         memcpy(wStr, byteArr.data(), wStrLen);
         auto newLen =
-            LLVMFuzzerMutate((uint8_t *)wStr, wStrLen, MAX_STRING_LENGTH);
+            LLVMFuzzerMutate((uint8_t *)wStr, wStrLen, ClMaxStringLength);
         wStr[newLen] = '\0';
         mutatorJson[ptr / "Data"] =
             EncodeBase64(std::vector<uint8_t>(wStr, wStr + newLen + 1));
@@ -313,7 +317,7 @@ public:
       case FUZZ_SIZE:
       case FUZZ_COUNT: {
         if (canChangeSize) {
-          size_t maxValue = dataTy == FUZZ_SIZE ? MAX_SIZE : MAX_COUNT;
+          size_t maxValue = dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
           size_t data = mutatorJson[ptr / "Data"];
           switch (rand() % 2) {
           case 0x0:
@@ -791,7 +795,17 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   // Declare the supported options.
   po::options_description desc("LibFuzzerCallback's inner options");
   desc.add_options()("inner_help", "produce help message")(
-      "sgxfuzz_print_ecalls", "show all ecalls valid in this Enclave")(
+      "enclave_file_name",
+      po::value<std::string>(&ClEnclaveFileName)
+          ->default_value("enclave.signed.so"),
+      "Name of target Enclave file")(
+      "max_count", po::value<size_t>(&ClMaxCount)->default_value(32),
+      "Max count of elements for pointer which size is unknown or not fixed")(
+      "max_size", po::value<size_t>(&ClMaxSize)->default_value(128),
+      "Max size of pointer element")(
+      "max_str_len", po::value<size_t>(&ClMaxStringLength)->default_value(128),
+      "Max length of string")("sgxfuzz_print_ecalls",
+                              "show all ecalls valid in this Enclave")(
       "sgxfuzz_test_one", po::value<int>(), "test only one API user specified")(
       "sgxfuzz_test_user", po::value<std::vector<std::string>>()->multitoken(),
       "test a number of APIs user specified");
@@ -880,7 +894,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
   emitTimes++;
   // Initialize Enclave
-  ret = sgx_create_enclave(ENCLAVE_FILENAME,
+  ret = sgx_create_enclave(ClEnclaveFileName.c_str(),
                            SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
                            NULL, &global_eid, NULL);
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
