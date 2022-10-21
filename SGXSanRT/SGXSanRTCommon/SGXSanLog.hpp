@@ -59,8 +59,6 @@ void sgxsan_print_stack_trace(log_level ll = LOG_LEVEL_ERROR);
   } while (0);
 #endif
 
-#define sgxsan_assert(cond) sgxsan_error(!(cond), "Assert Fail: " #cond "\n");
-
 #ifdef IN_ENCLAVE
 #define sgxsan_warning(cond, ...)                                              \
   do {                                                                         \

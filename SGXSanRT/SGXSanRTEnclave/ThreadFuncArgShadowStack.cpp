@@ -1,4 +1,5 @@
 #include "ThreadFuncArgShadowStack.hpp"
+#include "SGXSanAssert.h"
 #include "SGXSanLog.hpp"
 #include <algorithm>
 #include <assert.h>
@@ -41,15 +42,15 @@ __thread size_t
 
 // a serial of c wrapper for instrumentation
 void ThreadFuncArgShadowStack::init() {
-  assert(thread_func_arg_shadow_stack_current_depth == 0);
+  sgxsan_assert(thread_func_arg_shadow_stack_current_depth == 0);
 }
 
 void ThreadFuncArgShadowStack::destroy() {
-  assert(thread_func_arg_shadow_stack_current_depth == 0);
+  sgxsan_assert(thread_func_arg_shadow_stack_current_depth == 0);
 }
 
 void ThreadFuncArgShadowStack::poison_arg(uint64_t func_addr, int64_t arg_pos) {
-  assert(-1 <= arg_pos && arg_pos <= (MAX_ARG_NUM - 2));
+  sgxsan_assert(-1 <= arg_pos && arg_pos <= (MAX_ARG_NUM - 2));
   // There is no shadow stack frame for current function (stack_depth == 0 or
   // top.func_addr != func_addr): 1) the caller maybe uninstrumented since it's
   // a third-party library's function (ret case)
@@ -66,12 +67,12 @@ void ThreadFuncArgShadowStack::poison_arg(uint64_t func_addr, int64_t arg_pos) {
 
 void ThreadFuncArgShadowStack::unpoison_arg(uint64_t func_addr,
                                             int64_t arg_pos) {
-  assert(-1 <= arg_pos && arg_pos <= (MAX_ARG_NUM - 2));
-  assert(thread_func_arg_shadow_stack_current_depth > 0);
+  sgxsan_assert(-1 <= arg_pos && arg_pos <= (MAX_ARG_NUM - 2));
+  sgxsan_assert(thread_func_arg_shadow_stack_current_depth > 0);
   auto &top =
       thread_func_arg_shadow_stack[thread_func_arg_shadow_stack_current_depth -
                                    1];
-  assert(top.func_addr == func_addr);
+  sgxsan_assert(top.func_addr == func_addr);
   top.arg_shadow[arg_pos + 1] = false;
 }
 
@@ -79,7 +80,7 @@ void ThreadFuncArgShadowStack::show_arg_shadow(uint64_t func_addr) {
   auto &top =
       thread_func_arg_shadow_stack[thread_func_arg_shadow_stack_current_depth -
                                    1];
-  assert(top.func_addr == func_addr);
+  sgxsan_assert(top.func_addr == func_addr);
   log_trace("[ Argument Shadow of 0x%lx ]:", func_addr);
   for (auto shadow_item : top.arg_shadow) {
     log_trace(" %d", shadow_item);
@@ -88,7 +89,7 @@ void ThreadFuncArgShadowStack::show_arg_shadow(uint64_t func_addr) {
 }
 
 bool ThreadFuncArgShadowStack::query_arg(uint64_t func_addr, int64_t arg_pos) {
-  assert(-1 <= arg_pos && arg_pos <= (MAX_ARG_NUM - 2));
+  sgxsan_assert(-1 <= arg_pos && arg_pos <= (MAX_ARG_NUM - 2));
   // There is no shadow stack frame for current function (stack_depth == 0 or
   // top.func_addr != func_addr): 1) the caller maybe uninstrumented since it's
   // a third-party library's function (arg case) 2) there is no inter-procedure
@@ -119,7 +120,7 @@ void ThreadFuncArgShadowStack::clear_frame(uint64_t func_addr) {
   FuncArgShadowTy &top =
       thread_func_arg_shadow_stack[thread_func_arg_shadow_stack_current_depth -
                                    1];
-  assert(top.func_addr == func_addr);
+  sgxsan_assert(top.func_addr == func_addr);
   // clear arg_shadow
   uint64_t *p = (uint64_t *)top.arg_shadow;
   for (size_t step = 0; step < (MAX_ARG_NUM / 8); step++) {
@@ -145,7 +146,7 @@ void ThreadFuncArgShadowStack::push_frame(uint64_t func_addr) {
 void ThreadFuncArgShadowStack::pop_frame(uint64_t func_addr) {
   sgxsan_error(thread_func_arg_shadow_stack_current_depth == 0,
                "Under bottom of thread_func_arg_shadow_stack");
-  assert(
+  sgxsan_assert(
       thread_func_arg_shadow_stack[thread_func_arg_shadow_stack_current_depth -
                                    1]
           .func_addr == func_addr);

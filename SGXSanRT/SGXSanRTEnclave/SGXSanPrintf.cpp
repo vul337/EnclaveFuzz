@@ -31,7 +31,7 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
 #endif
     const char *prefix = log_level_to_prefix[ll];
     offset = strlen(buf);
-    assert(strlen(prefix) < BUFSIZ - offset);
+    sgxsan_assert(strlen(prefix) < BUFSIZ - offset);
     strcat_s(buf + offset, BUFSIZ - offset, prefix);
   }
 
@@ -65,7 +65,7 @@ void print_shadow(void *ptr) {
 }
 
 void print_ptr(char *info, uint64_t addr, uint64_t size) {
-  assert(addr && size);
+  sgxsan_assert(addr && size);
   uint64_t shadow_addr = MEM_TO_SHADOW(addr);
   log_trace("%s\n[Addr: 0x%lx(0x%lx) =Shadow=> 0x%lx]\n", info, addr, size,
             shadow_addr);

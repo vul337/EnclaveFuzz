@@ -1,10 +1,11 @@
 #include "PoisonSensitiveGlobal.hpp"
 #include "SGXSanCommonPoison.hpp"
+#include "SGXSanLog.hpp"
 
 static uint8_t SENSITIVE_FLAG = 0x20;
 void _PoisonSensitiveGlobal(__slsan_global *globalToBePolluted) {
 
-  assert(
+  sgxsan_assert(
       IsAligned(globalToBePolluted->global_variable_addr, SHADOW_GRANULARITY));
   size_t shadowSpanMinusOne =
       (globalToBePolluted->size + (SHADOW_GRANULARITY - 1)) /

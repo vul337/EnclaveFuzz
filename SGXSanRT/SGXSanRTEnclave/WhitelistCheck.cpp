@@ -43,7 +43,7 @@ public:
                                   bool used_to_cmp, char *parent_func);
   static void add_in_enclave_access_cnt() {
     if (m_whitelist_active) {
-      assert(m_whitelist);
+      sgxsan_assert(m_whitelist);
       m_in_enclave_access_cnt++;
     }
   }
@@ -108,7 +108,7 @@ std::pair<const void *, size_t> merge_adjacent_memory(const void *addr1,
                                                       size_t len1,
                                                       const void *addr2,
                                                       size_t len2) {
-  assert(addr1 && addr2 && len1 > 0 && len2 > 0);
+  sgxsan_assert(addr1 && addr2 && len1 > 0 && len2 > 0);
   const void *result_addr = nullptr;
   size_t result_len = 0;
   if ((uptr)addr1 <= (uptr)addr2 && (uptr)addr2 + len2 <= (uptr)addr1 + len1) {
@@ -132,8 +132,8 @@ void WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size) {
   // there may be ocall and ocall return before enter first ecall
   if (!m_whitelist)
     return;
-  assert(ptr && size > 0 && !m_whitelist_active &&
-         sgx_is_outside_enclave(ptr, size));
+  sgxsan_assert(ptr && size > 0 && !m_whitelist_active &&
+                sgx_is_outside_enclave(ptr, size));
   iter();
   log_trace("[Whitelist] [%s(0x%p) %s] 0x%p(0x%llx)\n", "Thread", m_whitelist,
             "+", ptr, size);
@@ -162,7 +162,7 @@ void WhitelistOfAddrOutEnclave::add(const void *ptr, size_t size) {
 }
 
 bool WhitelistOfAddrOutEnclave::add_global(const void *ptr, size_t size) {
-  assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
+  sgxsan_assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
   pthread_rwlock_wrlock(&m_rwlock_global_whitelist);
   iter(true);
   log_trace("[Whitelist] [%s %s] 0x%p(0x%llx)\n", "Global", "+", ptr, size);
@@ -196,11 +196,11 @@ bool WhitelistOfAddrOutEnclave::double_fetch_detect(const void *ptr,
                                                     size_t size,
                                                     bool used_to_cmp,
                                                     char *parent_func) {
-  assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
+  sgxsan_assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
   // there may be ocall and ocall return before enter first ecall
   if (!m_whitelist_active)
     return false;
-  assert(m_whitelist && m_control_fetchs);
+  sgxsan_assert(m_whitelist && m_control_fetchs);
   if (used_to_cmp) {
     // it's a fetch used to compare, maybe used to 'check'
     while (m_control_fetchs->size() >= CONTROL_FETCH_QUEUE_MAX_SIZE) {
@@ -247,11 +247,11 @@ WhitelistOfAddrOutEnclave::query(const void *ptr, size_t size) {
       false_ret = std::tuple<const void *, size_t, bool>(nullptr, 0, false);
   if (ptr == nullptr)
     return false_ret;
-  assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
+  sgxsan_assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
   // there may be ocall and ocall return before enter first ecall
   if (!m_whitelist_active)
     return ignore_ret;
-  assert(m_whitelist);
+  sgxsan_assert(m_whitelist);
 #if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
   m_out_of_enclave_access_cnt++;
 #endif
@@ -338,7 +338,7 @@ void WhitelistOfAddrOutEnclave::global_propagate(const void *ptr) {
   bool is_at_global = false;
   std::tie(find_start, find_size, is_at_global) = query(ptr, 1);
   if (is_at_global == false && find_size != 0 /* return case 2 */) {
-    assert(sgx_is_outside_enclave(find_start, find_size));
+    sgxsan_assert(sgx_is_outside_enclave(find_start, find_size));
     log_trace("[Whitelist] [Thread(0x%p)] => 0x%p => [Global]\n", m_whitelist,
               ptr);
     sgxsan_error(add_global(find_start, find_size) == false,

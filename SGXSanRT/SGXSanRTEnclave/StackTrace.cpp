@@ -52,7 +52,7 @@ uint64_t get_last_return_address(uint64_t enclave_base_addr,
                                  unsigned int level) {
   std::vector<uint64_t> ret_addrs;
   libunwind_backtrace(ret_addrs, enclave_base_addr, level + 2);
-  assert(ret_addrs.size() == level + 2);
+  sgxsan_assert(ret_addrs.size() == level + 2);
   return ret_addrs[level + 1];
 }
 

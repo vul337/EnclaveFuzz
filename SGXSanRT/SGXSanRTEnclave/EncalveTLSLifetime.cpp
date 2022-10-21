@@ -1,6 +1,7 @@
 #include "EncalveTLSLifetime.hpp"
 #include "Quarantine.hpp"
 #include "SGXInternal.hpp"
+#include "SGXSanLog.hpp"
 #include "ThreadFuncArgShadowStack.hpp"
 #include "WhitelistCheck.hpp"
 
@@ -13,7 +14,7 @@ void EnclaveTLSConstructorAtTBridgeBegin() {
     init_thread_func_arg_shadow_stack();
   }
   TLS_init_count++;
-  assert(TLS_init_count < 1024);
+  sgxsan_assert(TLS_init_count < 1024);
 }
 
 void EnclaveTLSDestructorAtTBridgeEnd() {
@@ -23,5 +24,5 @@ void EnclaveTLSDestructorAtTBridgeEnd() {
     destroy_thread_func_arg_shadow_stack();
   }
   TLS_init_count--;
-  assert(TLS_init_count >= 0);
+  sgxsan_assert(TLS_init_count >= 0);
 }

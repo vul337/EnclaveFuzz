@@ -19,7 +19,7 @@ bool SensitivePoisoner::get_layout_info(const uint64_t start_rva,
   static int count = 0;
   (void)count;
   uint64_t rva = start_rva + layout->rva;
-  assert(IsAligned(rva, 0x1000));
+  sgxsan_assert(IsAligned(rva, 0x1000));
   log_trace_np("%d\t%s\n", ++count, __FUNCTION__);
   log_trace_np("\tEntry Id     = %4u, %-16s, ", layout->id,
                layout_id_str[layout->id & ~(GROUP_FLAG)]);
@@ -118,7 +118,7 @@ void SensitivePoisoner::show_layout_ex(
     std::pair<uint64_t, uint32_t> ele1 = list1[i];
     if (i < list2.size()) {
       std::pair<uint64_t, uint32_t> ele2 = list2[i];
-      assert(ele2.first < ele1.first);
+      sgxsan_assert(ele2.first < ele1.first);
       log_debug(
           "\t\t[0x%lX...0x%lX, 0x%lX]=>[0x%lX...0x%lX, 0x%lX]\n",
           ele2.first + base_addr, ele1.first + base_addr,

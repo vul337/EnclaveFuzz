@@ -1,10 +1,11 @@
 #include "EdgeCheck.hpp"
 #include "ErrorReport.hpp"
 #include "PoisonCheck.hpp"
+#include "SGXSanAssert.h"
 #include "WhitelistCheck.hpp"
 
 void sgxsan_edge_check(void *ptr, uint64_t len, int cnt) {
-  assert(len > 0 && cnt != 0);
+  sgxsan_assert(len > 0 && cnt != 0);
   uint64_t min_size = len * std::max(1, cnt);
   if (min_size < len) {
     // int overflow

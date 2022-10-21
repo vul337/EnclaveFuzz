@@ -82,8 +82,9 @@ void *MALLOC(size_t size) {
   uptr alloc_beg = reinterpret_cast<uptr>(allocated);
   // If dlmalloc doesn't return an aligned memory, it's troublesome.
   // If it is so, we start to posion from RoundUpTo(allocated)
-  assert(IsAligned(alloc_beg, alignment) &&
-         "here I want to see whether dlmalloc return an unaligned memory");
+  sgxsan_assert(
+      IsAligned(alloc_beg, alignment) &&
+      "here I want to see whether dlmalloc return an unaligned memory");
   uptr alloc_end = alloc_beg + needed_size;
 
   uptr user_beg = alloc_beg + rz_size;

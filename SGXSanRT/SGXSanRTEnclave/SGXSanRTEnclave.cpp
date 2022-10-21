@@ -55,7 +55,7 @@ static void init_shadow_memory_out_enclave() {
                "sgx_register_exception_handler failed");
   kEnclaveMemBeg = g_enclave_base;
   kEnclaveMemEnd = g_enclave_base + g_enclave_size - 1;
-  assert(kEnclaveShadowBeg == SGXSAN_SHADOW_MAP_BASE);
+  sgxsan_assert(kEnclaveShadowBeg == SGXSAN_SHADOW_MAP_BASE);
   // collect_layout_infos will store result to static global STL variable,
   // however, these STL variable will initialize to 0 afer __asan_init, so if
   // need to use it again, must collect_layout_infos again
@@ -138,7 +138,7 @@ bool is_pointer_readable(void *ptr, size_t element_size, int count) {
   if (ptr == nullptr)
     return false;
   auto length = element_size * std::max(1, count);
-  assert(length > 0);
+  sgxsan_assert(length > 0);
   pthread_rwlock_rdlock(&mmap_info_rwlock);
   auto result = false;
   auto index = _search_closest_mmap_info_index((uint64_t)ptr, 0,

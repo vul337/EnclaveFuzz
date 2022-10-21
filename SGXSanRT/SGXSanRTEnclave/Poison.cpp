@@ -1,6 +1,7 @@
 #include "Poison.hpp"
 #include "PoisonCheck.hpp"
 #include "SGXSanCommonPoison.hpp"
+#include "SGXSanLog.hpp"
 #include "SGXSanManifest.h"
 #include <algorithm>
 #include <sgx_trts.h>
@@ -93,11 +94,11 @@ void __asan_allocas_unpoison(uptr top, uptr bottom) {
 // only 'shallow-poison'/'0-unpoison' shadow which relative address is valid to
 // access
 void sgxsan_shallow_poison_valid_shadow(uptr addr, uptr size, uint8_t value) {
-  assert(size > 0);
+  sgxsan_assert(size > 0);
   if (value >= (uint8_t)0x80)
     abort();
   else
-    assert((value & 0x0F) == 0);
+    sgxsan_assert((value & 0x0F) == 0);
 
   uptr addr_low_bits = addr % SHADOW_GRANULARITY;
   uptr complement = 0;
@@ -138,7 +139,7 @@ void sgxsan_shallow_poison_valid_shadow(uptr addr, uptr size, uint8_t value) {
 // or shallow-poisoned) addr may be not aligned to `SHADOW_GRANULARITY`
 void sgxsan_shallow_poison_object(uptr addr, uptr size, uint8_t value,
                                   bool ignore_shadow_after_scope) {
-  assert(size > 0 and value < (uint8_t)0x80 and (value & 0x0F) == 0);
+  sgxsan_assert(size > 0 and value < (uint8_t)0x80 and (value & 0x0F) == 0);
   uptr addr_low_bits = addr % SHADOW_GRANULARITY;
   uptr complement = 0;
   if (addr_low_bits != 0) {
@@ -146,7 +147,7 @@ void sgxsan_shallow_poison_object(uptr addr, uptr size, uint8_t value,
     uptr shadow_addr = MEM_TO_SHADOW(addr);
     uint8_t shadow_value = *(uint8_t *)shadow_addr;
     if (shadow_value >= (uint8_t)0x80) {
-      assert(shadow_value == 0xf8);
+      sgxsan_assert(shadow_value == 0xf8);
       if (ignore_shadow_after_scope) {
         *(uint8_t *)shadow_addr = value;
       }
@@ -157,7 +158,7 @@ void sgxsan_shallow_poison_object(uptr addr, uptr size, uint8_t value,
         *(uint8_t *)shadow_addr = value;
       } else if (addr_low_bits + size <= (shadow_value & 0x0F)) {
         *(uint8_t *)shadow_addr = (uint8_t)(value + (shadow_value & 0x0F));
-        assert(size < complement);
+        sgxsan_assert(size < complement);
       } else
         abort();
     }
@@ -174,12 +175,12 @@ void sgxsan_shallow_poison_object(uptr addr, uptr size, uint8_t value,
 void __sgxsan_shallow_poison_aligned_object(uptr addr, uptr size, uint8_t value,
                                             bool ignore_shadow_after_scope) {
   // checked by parent func
-  // assert(size > 0 and value < (uint8_t)0x80 and (value & 0x0F) == 0);
+  // sgxsan_assert(size > 0 and value < (uint8_t)0x80 and (value & 0x0F) == 0);
 
-  assert(addr % SHADOW_GRANULARITY == 0);
+  sgxsan_assert(addr % SHADOW_GRANULARITY == 0);
   uptr shadow_addr = MEM_TO_SHADOW(addr);
   uptr shadow_size = (size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
-  // assert(shadow_size >= 1);
+  // sgxsan_assert(shadow_size >= 1);
 
   // process middle shadow bytes
   size_t step_size = 8, remained_size = shadow_size - 1, step = 0;
@@ -203,7 +204,7 @@ void __sgxsan_shallow_poison_aligned_object(uptr addr, uptr size, uint8_t value,
   shadow_addr += (shadow_size - 1);
   uint8_t shadow_value = *(uint8_t *)shadow_addr;
   if (shadow_value >= (uint8_t)0x80) {
-    assert(shadow_value == 0xf8);
+    sgxsan_assert(shadow_value == 0xf8);
     if (ignore_shadow_after_scope) {
       *(uint8_t *)shadow_addr = value;
     }
@@ -213,9 +214,9 @@ void __sgxsan_shallow_poison_aligned_object(uptr addr, uptr size, uint8_t value,
 
 void sgxsan_check_shadow_bytes_match_obj(uptr obj_addr, uptr obj_size,
                                          uptr shadow_bytes_len) {
-  assert(obj_size > 0 && obj_addr % SHADOW_GRANULARITY == 0);
-  assert((obj_size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY >=
-         shadow_bytes_len);
+  sgxsan_assert(obj_size > 0 && obj_addr % SHADOW_GRANULARITY == 0);
+  sgxsan_assert((obj_size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY >=
+                shadow_bytes_len);
 }
 
 // we assume operated memory is valid, otherwise mem transfer operation before
@@ -223,9 +224,10 @@ void sgxsan_check_shadow_bytes_match_obj(uptr obj_addr, uptr obj_size,
 void sgxsan_shallow_shadow_copy_on_mem_transfer(uptr dst_addr, uptr src_addr,
                                                 uptr dst_size, uptr copy_cnt) {
   // should already instrumented check at Pass-End
-  assert(dst_size != 0 && copy_cnt != 0 &&
-         sgxsan_region_is_in_elrange_and_poisoned(src_addr, copy_cnt, 0x20) &&
-         sgx_is_within_enclave((void *)dst_addr, dst_size));
+  sgxsan_assert(
+      dst_size != 0 && copy_cnt != 0 &&
+      sgxsan_region_is_in_elrange_and_poisoned(src_addr, copy_cnt, 0x20) &&
+      sgx_is_within_enclave((void *)dst_addr, dst_size));
 
   if (copy_cnt > dst_size)
     copy_cnt = dst_size;
@@ -236,10 +238,10 @@ void sgxsan_shallow_shadow_copy_on_mem_transfer(uptr dst_addr, uptr src_addr,
       (dst_size + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
   uptr src_shadow_size =
       (copy_cnt + SHADOW_GRANULARITY - 1) / SHADOW_GRANULARITY;
-  assert(src_shadow_size <= dst_shadow_size);
+  sgxsan_assert(src_shadow_size <= dst_shadow_size);
 
   uint8_t last_dst_shadow_byte = dst_shadow_addr[dst_shadow_size - 1];
-  assert(last_dst_shadow_byte < 0x80);
+  sgxsan_assert(last_dst_shadow_byte < 0x80);
 
   memcpy(dst_shadow_addr, src_shadow_addr, src_shadow_size);
 
