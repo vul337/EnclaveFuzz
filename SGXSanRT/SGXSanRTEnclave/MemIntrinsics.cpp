@@ -33,13 +33,13 @@ void *__asan_memcpy(void *dst, const void *src, uptr size) {
     ASAN_READ_RANGE(src, size);
     isSrcInEnclave = true;
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query_ex(src, size, false, false, nullptr);
+    WhitelistQueryEx(src, size, false, false, nullptr);
     SGXSAN_ELRANGE_CHECK_END;
 
     SGXSAN_ELRANGE_CHECK_BEG(dst, size)
     ASAN_WRITE_RANGE(dst, size);
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query(dst, size);
+    WhitelistQuery(dst, size);
     if (isSrcInEnclave) {
       SGXSAN_WARNING_DETAIL(
           sgxsan_region_is_poisoned_filtered((uint64_t)src, size,
@@ -61,7 +61,7 @@ void *__asan_memset(void *dst, int c, uptr size) {
     SGXSAN_ELRANGE_CHECK_BEG(dst, size)
     ASAN_WRITE_RANGE(dst, size);
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query(dst, size);
+    WhitelistQuery(dst, size);
     SGXSAN_ELRANGE_CHECK_END;
   }
   return memset(dst, c, size);
@@ -78,13 +78,13 @@ void *__asan_memmove(void *dst, const void *src, uptr size) {
     ASAN_READ_RANGE(src, size);
     isSrcInEnclave = true;
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query_ex(src, size, false, false, nullptr);
+    WhitelistQueryEx(src, size, false, false, nullptr);
     SGXSAN_ELRANGE_CHECK_END;
 
     SGXSAN_ELRANGE_CHECK_BEG(dst, size)
     ASAN_WRITE_RANGE(dst, size);
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query(dst, size);
+    WhitelistQuery(dst, size);
     if (isSrcInEnclave) {
       SGXSAN_WARNING_DETAIL(
           sgxsan_region_is_poisoned_filtered((uint64_t)src, size,
@@ -115,13 +115,13 @@ errno_t sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
     ASAN_READ_RANGE(src, count);
     isSrcInEnclave = true;
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query_ex(src, count, false, false, nullptr);
+    WhitelistQueryEx(src, count, false, false, nullptr);
     SGXSAN_ELRANGE_CHECK_END;
 
     SGXSAN_ELRANGE_CHECK_BEG(dst, dstSize)
     ASAN_WRITE_RANGE(dst, dstSize);
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query(dst, dstSize);
+    WhitelistQuery(dst, dstSize);
     if (isSrcInEnclave) {
       SGXSAN_WARNING_DETAIL(
           sgxsan_region_is_poisoned_filtered((uint64_t)src, count,
@@ -143,7 +143,7 @@ errno_t sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t count) {
     SGXSAN_ELRANGE_CHECK_BEG(dst, dstSize > count ? dstSize : count)
     ASAN_WRITE_RANGE(dst, dstSize > count ? dstSize : count);
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query(dst, dstSize > count ? dstSize : count);
+    WhitelistQuery(dst, dstSize > count ? dstSize : count);
     SGXSAN_ELRANGE_CHECK_END;
   }
   return memset_s(dst, dstSize, c, count);
@@ -161,13 +161,13 @@ int sgxsan_memmove_s(void *dst, size_t sizeInBytes, const void *src,
     ASAN_READ_RANGE(src, count);
     isSrcInEnclave = true;
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query_ex(src, count, false, false, nullptr);
+    WhitelistQueryEx(src, count, false, false, nullptr);
     SGXSAN_ELRANGE_CHECK_END;
 
     SGXSAN_ELRANGE_CHECK_BEG(dst, sizeInBytes)
     ASAN_WRITE_RANGE(dst, sizeInBytes);
     SGXSAN_ELRANGE_CHECK_MID
-    WhitelistOfAddrOutEnclave_query(dst, sizeInBytes);
+    WhitelistQuery(dst, sizeInBytes);
     if (isSrcInEnclave) {
       SGXSAN_WARNING_DETAIL(
           sgxsan_region_is_poisoned_filtered((uint64_t)src, count,

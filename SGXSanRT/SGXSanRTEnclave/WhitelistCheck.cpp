@@ -362,9 +362,8 @@ void WhitelistOfAddrOutEnclave_add(const void *start, size_t size) {
   WhitelistOfAddrOutEnclave::add(start, size);
 }
 
-void WhitelistOfAddrOutEnclave_query_ex(const void *ptr, size_t size,
-                                        bool is_write, bool used_to_cmp,
-                                        char *parent_func) {
+void WhitelistQueryEx(const void *ptr, size_t size, bool is_write,
+                      bool used_to_cmp, char *parent_func) {
   if (ptr == nullptr)
     return; // leave it to guard page check
   if (not is_write) {
@@ -372,10 +371,10 @@ void WhitelistOfAddrOutEnclave_query_ex(const void *ptr, size_t size,
         ptr, size, used_to_cmp, parent_func);
     sgxsan_warning(res, "Detect Double-Fetch Situation\n");
   }
-  WhitelistOfAddrOutEnclave_query(ptr, size);
+  WhitelistQuery(ptr, size);
 }
 
-void WhitelistOfAddrOutEnclave_query(const void *ptr, size_t size) {
+void WhitelistQuery(const void *ptr, size_t size) {
   if (ptr == nullptr)
     return; // leave it to guard page check
   size_t find_size;
@@ -384,17 +383,15 @@ void WhitelistOfAddrOutEnclave_query(const void *ptr, size_t size) {
   sgxsan_warning(find_size == 0, "Illegal access outside-enclave: 0x%p\n", ptr);
 }
 
-void WhitelistOfAddrOutEnclave_global_propagate(const void *addr) {
+void WhitelistGlobalPropagate(const void *addr) {
   WhitelistOfAddrOutEnclave::global_propagate(addr);
 }
 
-void WhitelistOfAddrOutEnclave_active() { WhitelistOfAddrOutEnclave::active(); }
+void WhitelistActive() { WhitelistOfAddrOutEnclave::active(); }
 
-void WhitelistOfAddrOutEnclave_deactive() {
-  WhitelistOfAddrOutEnclave::deactive();
-}
+void WhitelistDeactive() { WhitelistOfAddrOutEnclave::deactive(); }
 
-void WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt() {
+void WhitelistAddInEnclaveAccessCnt() {
 #if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
   WhitelistOfAddrOutEnclave::add_in_enclave_access_cnt();
 #endif

@@ -753,11 +753,9 @@ private:
   FunctionCallee AMDGPUAddressPrivate;
 
   GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
-  FunctionCallee WhitelistOfAddrOutEnclave_active,
-      WhitelistOfAddrOutEnclave_deactive, WhitelistOfAddrOutEnclave_query_ex,
-      WhitelistOfAddrOutEnclave_global_propagate,
-      WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt, sgxsan_edge_check,
-      SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
+  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQueryEx,
+      WhitelistGlobalPropagate, WhitelistAddInEnclaveAccessCnt,
+      sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
       EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd,
       is_pointer_readable, SGXSanMalloc, SGXSanFree, SGXSanCalloc,
       SGXSanRealloc;
@@ -1879,7 +1877,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                    MDBuilder(*C).createBranchWeights(1, 100000));
 
   IRB.SetInsertPoint(ShadowByteCheck_BB);
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt);
+  IRB.CreateCall(WhitelistAddInEnclaveAccessCnt);
 
   Type *ShadowTy =
       IntegerType::get(*C, std::max(8U, TypeSize >> Mapping.Scale));
@@ -1936,7 +1934,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                      MDBuilder(*C).createBranchWeights(100000, 1));
 
     IRB.SetInsertPoint(TotallyOutELRANGE_BB);
-    IRB.CreateCall(WhitelistOfAddrOutEnclave_query_ex,
+    IRB.CreateCall(WhitelistQueryEx,
                    {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
                     ConstantInt::get(IntptrTy, (TypeSize >> 3)),
                     IRB.getInt1(IsWrite), IRB.getInt1(hasCmpUser(OrigIns)),
@@ -3980,7 +3978,7 @@ void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI) {
   IRBuilder<> IRB(SI);
   Value *val = SI->getValueOperand();
 
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_global_propagate,
+  IRB.CreateCall(WhitelistGlobalPropagate,
                  {val->getType()->isPointerTy()
                       ? IRB.CreatePointerCast(val, IRB.getInt8PtrTy())
                       : IRB.CreateIntToPtr(val, IRB.getInt8PtrTy())});
@@ -4095,19 +4093,19 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI) {
       instrumentParameterCheck(operand, IRB, DL, 0);
     }
   }
-  // instrument `WhitelistOfAddrOutEnclave_active` before RealEcall
+  // instrument `WhitelistActive` before RealEcall
   IRB.SetInsertPoint(CI);
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
-  // instrument `WhitelistOfAddrOutEnclave_deactive` after RealEcall
+  IRB.CreateCall(WhitelistActive);
+  // instrument `WhitelistDeactive` after RealEcall
   IRB.SetInsertPoint(CI->getNextNode());
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
+  IRB.CreateCall(WhitelistDeactive);
 
   return true;
 }
 
 bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
   IRBuilder<> IRB(&OcallWrapper.front().front());
-  IRB.CreateCall(WhitelistOfAddrOutEnclave_deactive);
+  IRB.CreateCall(WhitelistDeactive);
 
   for (auto RetInst :
        SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec) {
@@ -4143,7 +4141,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
       }
     }
     IRB.SetInsertPoint(RetInst);
-    IRB.CreateCall(WhitelistOfAddrOutEnclave_active);
+    IRB.CreateCall(WhitelistActive);
   }
   return true;
 }
@@ -4306,18 +4304,16 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   EnclaveTLSDestructorAtTBridgeEnd = M.getOrInsertFunction(
       "EnclaveTLSDestructorAtTBridgeEnd", IRB.getVoidTy());
 
-  WhitelistOfAddrOutEnclave_active = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_active", IRB.getVoidTy());
-  WhitelistOfAddrOutEnclave_deactive = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_deactive", IRB.getVoidTy());
-  WhitelistOfAddrOutEnclave_query_ex = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_query_ex", IRB.getVoidTy(), IRB.getInt8PtrTy(),
-      IntptrTy, IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
-  WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt = M.getOrInsertFunction(
-      "WhitelistOfAddrOutEnclave_add_in_enclave_access_cnt", IRB.getVoidTy());
-  WhitelistOfAddrOutEnclave_global_propagate =
-      M.getOrInsertFunction("WhitelistOfAddrOutEnclave_global_propagate",
-                            IRB.getVoidTy(), IRB.getInt8PtrTy());
+  WhitelistActive = M.getOrInsertFunction("WhitelistActive", IRB.getVoidTy());
+  WhitelistDeactive =
+      M.getOrInsertFunction("WhitelistDeactive", IRB.getVoidTy());
+  WhitelistQueryEx = M.getOrInsertFunction(
+      "WhitelistQueryEx", IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy,
+      IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
+  WhitelistAddInEnclaveAccessCnt =
+      M.getOrInsertFunction("WhitelistAddInEnclaveAccessCnt", IRB.getVoidTy());
+  WhitelistGlobalPropagate = M.getOrInsertFunction(
+      "WhitelistGlobalPropagate", IRB.getVoidTy(), IRB.getInt8PtrTy());
 
   sgxsan_edge_check = M.getOrInsertFunction("sgxsan_edge_check",
                                             IRB.getVoidTy(), IRB.getInt8PtrTy(),
