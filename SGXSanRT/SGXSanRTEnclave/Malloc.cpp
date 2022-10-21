@@ -55,7 +55,6 @@ void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *),
 void *MALLOC(size_t size) {
   if (size == 0) {
     sgxsan_warning(size == 0, "Malloc 0 size\n");
-    return nullptr;
   }
 
   if (not asan_inited) {
