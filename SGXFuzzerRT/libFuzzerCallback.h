@@ -59,7 +59,7 @@ void sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt, ...);
     }                                                                          \
   } while (0);
 
-#define sgxfuzz_assert(cond) sgxfuzz_error(!(cond), #cond "\n");
+#define sgxfuzz_assert(cond) sgxfuzz_error(!(cond), "Assert Fail: " #cond "\n");
 
 #define sgxfuzz_warning(cond, ...)                                             \
   do {                                                                         \

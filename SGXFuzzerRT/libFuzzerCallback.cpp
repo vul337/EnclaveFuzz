@@ -170,6 +170,16 @@ public:
     cStrBuf[size] = '\0';
   }
 
+  template <class T>
+  void _insertString(ordered_json &mutatorJson,
+                     ordered_json::json_pointer ptr) {
+    size_t newStrLen = rand() % (ClMaxStringLength + 1);
+    T newStr[newStrLen + 1];
+    fillStrRand(newStr, newStrLen + 1);
+    mutatorJson[ptr] = EncodeBase64(std::vector<uint8_t>(
+        (uint8_t *)newStr, (uint8_t *)(newStr + newStrLen + 1)));
+  }
+
   void insertItemInMutatorJSon(RequestInfo req) {
     auto &mutatorJson = mutatorData.json;
     nlohmann::ordered_json::json_pointer JSonPtr("/" + req.StrAsParamID);
@@ -177,20 +187,12 @@ public:
     switch (req.dataType) {
     case FUZZ_STRING: {
       sgxfuzz_assert(req.size == 0);
-      size_t newStrLen = rand() % (ClMaxStringLength + 1);
-      char newStr[newStrLen + 1];
-      fillStrRand(newStr, newStrLen + 1);
-      mutatorJson[JSonPtr / "Data"] = std::string(newStr);
+      _insertString<char>(mutatorJson, JSonPtr / "Data");
       break;
     }
     case FUZZ_WSTRING: {
       sgxfuzz_assert(req.size == 0);
-      size_t newStrLen = rand() % (ClMaxStringLength + 1);
-      wchar_t newStr[newStrLen + 1];
-      fillStrRand(newStr, newStrLen + 1);
-      mutatorJson[JSonPtr / "Data"] = EncodeBase64(std::vector<uint8_t>(
-          (uint8_t *)newStr,
-          (uint8_t *)newStr + sizeof(wchar_t) * (newStrLen + 1)));
+      _insertString<wchar_t>(mutatorJson, JSonPtr / "Data");
       break;
     }
     case FUZZ_COUNT:
@@ -280,6 +282,24 @@ public:
     }
   }
 
+  template <class T>
+  void _mutateString(ordered_json &mutatorJson,
+                     ordered_json::json_pointer ptr) {
+    auto byteArr = DecodeBase64(std::string(mutatorJson[ptr]));
+    sgxfuzz_assert(byteArr.size() % sizeof(T) == 0);
+    size_t strLen =
+        std::min((byteArr.size() / sizeof(T)) - 1, (size_t)ClMaxStringLength);
+    T str[ClMaxStringLength + 1];
+    memcpy(str, byteArr.data(), strLen * sizeof(T));
+    auto newRawLen = LLVMFuzzerMutate((uint8_t *)str, strLen * sizeof(T),
+                                      ClMaxStringLength * sizeof(T));
+    sgxfuzz_assert(newRawLen <= ClMaxStringLength * sizeof(T));
+    size_t newLen = (newRawLen + sizeof(T) - 1) / sizeof(T);
+    str[newLen] = '\0';
+    mutatorJson[ptr] =
+        EncodeBase64(std::vector<uint8_t>(str, str + newLen + 1));
+  }
+
   void mutateOnMutatorJSon(bool canChangeSize = true) {
     auto &mutatorJson = mutatorData.json;
     for (auto pair : mutatorJson.items()) {
@@ -289,29 +309,11 @@ public:
       FuzzDataTy dataTy = mutatorJson[ptr / "DataType"];
       switch (dataTy) {
       case FUZZ_STRING: {
-        std::string data = mutatorJson[ptr / "Data"];
-        size_t strLen = std::min(data.size(), (size_t)ClMaxStringLength);
-        char buf[ClMaxStringLength + 1];
-        memcpy(buf, data.c_str(), strLen);
-        auto newLen =
-            LLVMFuzzerMutate((uint8_t *)buf, strLen, ClMaxStringLength);
-        sgxfuzz_assert(newLen <= ClMaxStringLength);
-        buf[newLen] = '\0';
-        mutatorJson[ptr / "Data"] = std::string(buf);
+        _mutateString<char>(mutatorJson, ptr / "Data");
         break;
       }
       case FUZZ_WSTRING: {
-        auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
-        sgxfuzz_assert(byteArr.size() % sizeof(wchar_t) == 0);
-        size_t wStrLen = std::min(byteArr.size() / sizeof(wchar_t),
-                                  (size_t)ClMaxStringLength);
-        wchar_t wStr[ClMaxStringLength + 1];
-        memcpy(wStr, byteArr.data(), wStrLen);
-        auto newLen =
-            LLVMFuzzerMutate((uint8_t *)wStr, wStrLen, ClMaxStringLength);
-        wStr[newLen] = '\0';
-        mutatorJson[ptr / "Data"] =
-            EncodeBase64(std::vector<uint8_t>(wStr, wStr + newLen + 1));
+        _mutateString<wchar_t>(mutatorJson, ptr / "Data");
         break;
       }
       case FUZZ_SIZE:
@@ -485,6 +487,18 @@ public:
     reqQueue[DataID][req.StrAsParamID] = req;
   }
 
+  template <class T>
+  void _getString(uint8_t *&dst, ordered_json &consumerJson,
+                  ordered_json::json_pointer ptr) {
+    std::vector<uint8_t> data = DecodeBase64(std::string(consumerJson[ptr]));
+    if (dst == nullptr) {
+      dst = (uint8_t *)managedMalloc(data.size());
+    }
+    memcpy(dst, data.data(), data.size());
+    sgxfuzz_assert(data.size() % sizeof(T) == 0 and
+                   (((T *)dst)[data.size() / sizeof(T) - 1] == '\0'));
+  }
+
   /// @brief get byte array from \c ConsumerJSon, and save it to \p dst. If no
   /// byte array prepared for current \p cStrAsParamID, \c SendRequest to
   /// mutator phase
@@ -497,7 +511,7 @@ public:
   /// @return
   uint8_t *getBytes(const char *cStrAsParamID, uint8_t *dst, size_t byteArrLen,
                     FuzzDataTy dataTy) {
-    if (byteArrLen == 0 and (dataTy != FUZZ_STRING or dataTy != FUZZ_WSTRING)) {
+    if (byteArrLen == 0 and dataTy != FUZZ_STRING and dataTy != FUZZ_WSTRING) {
       // Do nothing
       return dst;
     }
@@ -539,8 +553,7 @@ public:
           leaveLLVMFuzzerTestOneInput();
         }
         if (dst == nullptr) {
-          dst = (uint8_t *)malloc(byteArrLen);
-          allocatedMemAreas.push_back(dst);
+          dst = (uint8_t *)managedMalloc(byteArrLen);
         }
         memcpy(dst, data.data(), byteArrLen);
         if (preparedDataSize > byteArrLen) {
@@ -558,27 +571,12 @@ public:
       }
       case FUZZ_WSTRING: {
         sgxfuzz_assert(byteArrLen == 0);
-        std::vector<uint8_t> data =
-            DecodeBase64(std::string(consumerJson[consumerJsonPtr / "Data"]));
-        if (dst == nullptr) {
-          dst = (uint8_t *)malloc(data.size());
-          allocatedMemAreas.push_back(dst);
-        }
-        memcpy(dst, data.data(), data.size());
-        sgxfuzz_assert(
-            data.size() % sizeof(wchar_t) == 0 and
-            (((wchar_t *)dst)[data.size() / sizeof(wchar_t) - 1] == '\0'));
+        _getString<wchar_t>(dst, consumerJson, consumerJsonPtr / "Data");
         break;
       }
       case FUZZ_STRING: {
         sgxfuzz_assert(byteArrLen == 0);
-        std::string data = consumerJson[consumerJsonPtr / "Data"];
-        if (dst == nullptr) {
-          dst = (uint8_t *)malloc(data.size() + 1);
-          allocatedMemAreas.push_back(dst);
-        }
-        memcpy(dst, data.c_str(), data.size());
-        dst[data.size()] = '\0';
+        _getString<char>(dst, consumerJson, consumerJsonPtr / "Data");
         break;
       }
       case FUZZ_SIZE:
@@ -586,8 +584,7 @@ public:
         sgxfuzz_assert((byteArrLen <= sizeof(size_t)));
         size_t data = consumerJson[consumerJsonPtr / "Data"];
         if (dst == nullptr) {
-          dst = (uint8_t *)malloc(byteArrLen);
-          allocatedMemAreas.push_back(dst);
+          dst = (uint8_t *)managedMalloc(byteArrLen);
         }
         memcpy(dst, &data, byteArrLen);
         break;
@@ -596,8 +593,7 @@ public:
         sgxfuzz_assert((byteArrLen == sizeof(bool)));
         bool data = consumerJson[consumerJsonPtr / "Data"];
         if (dst == nullptr) {
-          dst = (uint8_t *)malloc(sizeof(bool));
-          allocatedMemAreas.push_back(dst);
+          dst = (uint8_t *)managedMalloc(sizeof(bool));
         }
         *dst = data ? 1 : 0;
         break;
@@ -911,7 +907,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     log_debug("[TEST] ECall-%d: %s\n", i,
               sgx_fuzzer_ecall_wrapper_name_array[i]);
     ret = sgx_fuzzer_ecall_array[i]();
-    sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER,
+    sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
+                      ret != SGX_ERROR_ECALL_NOT_ALLOWED,
                   "[FAIL] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
     data_factory.increaseECallCalledTime(i);
     hasTest = true;
