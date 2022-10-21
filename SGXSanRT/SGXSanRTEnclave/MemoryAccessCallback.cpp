@@ -21,7 +21,7 @@
       }                                                                        \
     }                                                                          \
     SGXSAN_ELRANGE_CHECK_MID                                                   \
-    WhitelistQueryEx((void *)addr, size, is_write, used_to_cmp, parent_func);  \
+    WhitelistQuery((void *)addr, size, is_write, used_to_cmp, parent_func);    \
     SGXSAN_ELRANGE_CHECK_END;                                                  \
   }
 
@@ -44,7 +44,7 @@ __asan_loadN(uptr addr, uptr size, bool used_to_cmp, char *parent_func) {
     ReportGenericError(pc, bp, sp, addr, false, size, true);
   }
   SGXSAN_ELRANGE_CHECK_MID
-  WhitelistQueryEx((void *)addr, size, false, used_to_cmp, parent_func);
+  WhitelistQuery((void *)addr, size, false, used_to_cmp, parent_func);
   SGXSAN_ELRANGE_CHECK_END;
 }
 
@@ -56,6 +56,6 @@ __asan_storeN(uptr addr, uptr size, bool used_to_cmp, char *parent_func) {
     ReportGenericError(pc, bp, sp, addr, true, size, true);
   }
   SGXSAN_ELRANGE_CHECK_MID
-  WhitelistQueryEx((void *)addr, size, true, used_to_cmp, parent_func);
+  WhitelistQuery((void *)addr, size, true, used_to_cmp, parent_func);
   SGXSAN_ELRANGE_CHECK_END;
 }

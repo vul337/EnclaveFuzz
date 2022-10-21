@@ -362,8 +362,8 @@ void WhitelistOfAddrOutEnclave_add(const void *start, size_t size) {
   WhitelistOfAddrOutEnclave::add(start, size);
 }
 
-void WhitelistQueryEx(const void *ptr, size_t size, bool is_write,
-                      bool used_to_cmp, char *parent_func) {
+void WhitelistQuery(const void *ptr, size_t size, bool is_write,
+                    bool used_to_cmp, char *parent_func) {
   if (ptr == nullptr)
     return; // leave it to guard page check
   if (not is_write) {
@@ -371,12 +371,6 @@ void WhitelistQueryEx(const void *ptr, size_t size, bool is_write,
         ptr, size, used_to_cmp, parent_func);
     sgxsan_warning(res, "Detect Double-Fetch Situation\n");
   }
-  WhitelistQuery(ptr, size);
-}
-
-void WhitelistQuery(const void *ptr, size_t size) {
-  if (ptr == nullptr)
-    return; // leave it to guard page check
   size_t find_size;
   std::tie(std::ignore, find_size, std::ignore) =
       WhitelistOfAddrOutEnclave::query(ptr, size);

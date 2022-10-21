@@ -753,7 +753,7 @@ private:
   FunctionCallee AMDGPUAddressPrivate;
 
   GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
-  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQueryEx,
+  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQuery,
       WhitelistGlobalPropagate, WhitelistAddInEnclaveAccessCnt,
       sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
       EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd,
@@ -1934,7 +1934,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                      MDBuilder(*C).createBranchWeights(100000, 1));
 
     IRB.SetInsertPoint(TotallyOutELRANGE_BB);
-    IRB.CreateCall(WhitelistQueryEx,
+    IRB.CreateCall(WhitelistQuery,
                    {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
                     ConstantInt::get(IntptrTy, (TypeSize >> 3)),
                     IRB.getInt1(IsWrite), IRB.getInt1(hasCmpUser(OrigIns)),
@@ -4307,8 +4307,8 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   WhitelistActive = M.getOrInsertFunction("WhitelistActive", IRB.getVoidTy());
   WhitelistDeactive =
       M.getOrInsertFunction("WhitelistDeactive", IRB.getVoidTy());
-  WhitelistQueryEx = M.getOrInsertFunction(
-      "WhitelistQueryEx", IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy,
+  WhitelistQuery = M.getOrInsertFunction(
+      "WhitelistQuery", IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy,
       IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
   WhitelistAddInEnclaveAccessCnt =
       M.getOrInsertFunction("WhitelistAddInEnclaveAccessCnt", IRB.getVoidTy());

@@ -140,7 +140,7 @@ private:
   FunctionCallee AMDGPUAddressPrivate;
 
   GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
-  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQueryEx,
+  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQuery,
       WhitelistGlobalPropagate, WhitelistAddInEnclaveAccessCnt,
       sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
       EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd,
