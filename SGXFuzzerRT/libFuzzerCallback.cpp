@@ -32,6 +32,12 @@ size_t ClMaxStringLength;
 size_t ClMaxCount;
 size_t ClMaxSize;
 
+// Fuzz sequence
+enum FuzzerTestModeTy { TEST_ONE, TEST_RANDOM, TEST_USER };
+static std::vector<int> gFuzzerSeq;
+static std::vector<int> gFilterOutIndices;
+static FuzzerTestModeTy gFuzzerMode;
+
 // From ELF
 extern uint8_t __start___sancov_cntrs[];
 
@@ -775,18 +781,18 @@ void ShowAllECalls() {
   log_debug("ECalls:\n%s\n", ecalls.c_str());
 }
 
-// 0 for random
-enum FuzzerTestModeTy { TEST_ONE, TEST_RANDOM, TEST_USER };
-std::vector<int> fuzzerSeq;
-FuzzerTestModeTy fuzzerMode;
-
 // libFuzzer Callbacks
 extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   (void)argc;
   (void)argv;
 
+  std::map<std::string, int> wrapperName2Idx;
+  for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
+    wrapperName2Idx[sgx_fuzzer_ecall_wrapper_name_array[i]] = i;
+  }
+
   // default mode is random
-  fuzzerMode = TEST_RANDOM;
+  gFuzzerMode = TEST_RANDOM;
 
   // Declare the supported options.
   po::options_description desc("LibFuzzerCallback's inner options");
@@ -795,13 +801,15 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       po::value<std::string>(&ClEnclaveFileName)
           ->default_value("enclave.signed.so"),
       "Name of target Enclave file")(
-      "max_count", po::value<size_t>(&ClMaxCount)->default_value(32),
+      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(32),
       "Max count of elements for pointer which size is unknown or not fixed")(
-      "max_size", po::value<size_t>(&ClMaxSize)->default_value(128),
+      "cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(128),
       "Max size of pointer element")(
-      "max_str_len", po::value<size_t>(&ClMaxStringLength)->default_value(128),
-      "Max length of string")("sgxfuzz_print_ecalls",
-                              "show all ecalls valid in this Enclave")(
+      "cb_max_str_len",
+      po::value<size_t>(&ClMaxStringLength)->default_value(128),
+      "Max length of string")("cb_filter_out", po::value<std::string>(),
+                              "Specified ECalls that we don't test")(
+      "sgxfuzz_print_ecalls", "show all ecalls valid in this Enclave")(
       "sgxfuzz_test_one", po::value<int>(), "test only one API user specified")(
       "sgxfuzz_test_user", po::value<std::vector<std::string>>()->multitoken(),
       "test a number of APIs user specified");
@@ -823,11 +831,11 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
     log_debug(ss.str().c_str());
     exit(0);
   } else if (vm.count("sgxfuzz_test_one")) {
-    fuzzerMode = TEST_ONE;
-    fuzzerSeq.push_back(vm["sgxfuzz_test_one"].as<int>());
-    log_debug("[Init] TestOne: %d\n", fuzzerSeq[0]);
+    gFuzzerMode = TEST_ONE;
+    gFuzzerSeq.push_back(vm["sgxfuzz_test_one"].as<int>());
+    log_debug("Test one: %d\n", gFuzzerSeq[0]);
   } else if (vm.count("sgxfuzz_test_user")) {
-    fuzzerMode = TEST_USER;
+    gFuzzerMode = TEST_USER;
     std::vector<std::string> indicesVec =
         vm["sgxfuzz_test_user"].as<std::vector<std::string>>();
     for (auto indices : indicesVec) {
@@ -837,18 +845,42 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
         boost::trim(index);
         if (index == "")
           continue;
-        fuzzerSeq.push_back(std::stoi(index, 0, 0));
+        gFuzzerSeq.push_back(std::stoi(index, 0, 0));
       }
     }
 
-    log_debug("[Init] TestUser: ");
-    for (auto id : fuzzerSeq) {
-      log_debug_np("%d ", id);
+    log_debug("Test user specified:");
+    for (auto id : gFuzzerSeq) {
+      log_debug_np(" %d", id);
     }
     log_debug_np("\n");
   } else if (vm.count("sgxfuzz_print_ecalls")) {
     ShowAllECalls();
     exit(0);
+  }
+
+  if (vm.count("cb_filter_out")) {
+    std::string fiterOutECalls = vm["cb_filter_out"].as<std::string>();
+    std::vector<std::string> fiterOutECallVec;
+    boost::split(fiterOutECallVec, fiterOutECalls,
+                 [](char c) { return c == ','; });
+    for (auto fiterOutECall : fiterOutECallVec) {
+      boost::trim(fiterOutECall);
+      if (fiterOutECall == "") {
+        continue;
+      }
+      std::string fuzzWrapperPrefix = "fuzz_";
+      if (wrapperName2Idx.count(fuzzWrapperPrefix + fiterOutECall)) {
+        size_t fiterOutECallIdx =
+            wrapperName2Idx[fuzzWrapperPrefix + fiterOutECall];
+        gFilterOutIndices.push_back(fiterOutECallIdx);
+      }
+    }
+    log_debug("Filter out:");
+    for (auto filterOutIdx : gFilterOutIndices) {
+      log_debug_np(" %d", filterOutIdx);
+    }
+    log_debug_np("\n");
   }
   ShowAllECalls();
   return 0;
@@ -896,16 +928,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
   // Test body
-  if (fuzzerMode == TEST_ONE || fuzzerMode == TEST_USER) {
-    callSeq = fuzzerSeq;
+  if (gFuzzerMode == TEST_ONE || gFuzzerMode == TEST_USER) {
+    callSeq = gFuzzerSeq;
   } else {
     callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
   }
   for (int i : callSeq) {
     sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
-    data_factory.updateCurrentCalledECallIndex(i);
+    if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
+        gFilterOutIndices.end()) {
+      // Filter it out
+      continue;
+    }
+
     log_debug("[TEST] ECall-%d: %s\n", i,
               sgx_fuzzer_ecall_wrapper_name_array[i]);
+    data_factory.updateCurrentCalledECallIndex(i);
     ret = sgx_fuzzer_ecall_array[i]();
     sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
                       ret != SGX_ERROR_ECALL_NOT_ALLOWED,
