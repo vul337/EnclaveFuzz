@@ -49,7 +49,7 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
 void *MALLOC(size_t size) {
   if (size == 0) {
     sgxsan_warning(true, "Malloc 0 size\n");
-    return nullptr;
+    // return nullptr;
   }
 
   if (not asan_inited) {
