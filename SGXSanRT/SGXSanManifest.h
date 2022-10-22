@@ -11,7 +11,7 @@
 #define SHOW_TID 0
 
 // after modification, need rebuild both rt and pass
-#define SGXSAN_SHADOW_MAP_BASE 0x7fff8000
+#define SGXSAN_SHADOW_MAP_BASE 0x18000000000ULL
 #define SHADOW_SCALE 3
 
 // current may only support granularity 8
