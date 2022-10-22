@@ -336,7 +336,7 @@ Value *DriverGenerator::createParamContent(
                 IRB.CreateCall(DFGetInstanceID, {GStr0, phi}), nullptr,
                 innerInsertPt, recursion_depth);
             IRB.SetInsertPoint(innerInsertPt);
-            dataCopy(IRB.CreateGEP(eleTy, contentPtr, {phi}), elePtr, eleTy,
+            dataCopy(IRB.CreateGEP(eleTy, contentPtr, phi), elePtr, eleTy,
                      innerInsertPt);
             FOR_LOOP_END(ptCnt)
           } else if (feedRandom) {
@@ -659,7 +659,7 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
               dataCopy(
                   IRB.CreateGEP(
                       arg.getType()->getScalarType()->getPointerElementType(),
-                      &arg, {phi}),
+                      &arg, phi),
                   elePtr, eleTy, innerInsertPt);
               FOR_LOOP_END(ptCnt)
             } else {
