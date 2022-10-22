@@ -5,6 +5,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
+#include <unordered_set>
 
 /// This struct defines the shadow mapping using the rule:
 ///   shadow = (mem >> Scale) ADD-or-OR Offset.
@@ -18,8 +19,8 @@ struct ShadowMapping {
   bool InGlobal;
 };
 
-extern "C" ShadowMapping ASanGetShadowMapping(llvm::Triple &TargetTriple,
-                                              int LongSize, bool IsKasan);
+ShadowMapping ASanGetShadowMapping(llvm::Triple &TargetTriple, int LongSize,
+                                   bool IsKasan);
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 static const size_t kNumberOfAccessSizes = 5;

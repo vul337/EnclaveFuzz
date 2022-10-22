@@ -16,6 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
+#include "AddressSanitizer.h"
 #include "PassCommon.hpp"
 #include "SGXSanInstVisitor.hpp"
 #include "llvm/ADT/ArrayRef.h"
@@ -177,7 +178,7 @@ const char kAMDGPUAddressSharedName[] = "llvm.amdgcn.is.shared";
 const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
-static const size_t kNumberOfAccessSizes = 5;
+// static const size_t kNumberOfAccessSizes = 5;
 
 static const unsigned kAllocaRzSize = 32;
 
@@ -439,12 +440,14 @@ namespace {
 /// If InGlobal is true, then
 ///   extern char __asan_shadow[];
 ///   shadow = (mem >> Scale) + &__asan_shadow
+#if 0
 struct ShadowMapping {
   int Scale;
   uint64_t Offset;
   bool OrShadowOffset;
   bool InGlobal;
 };
+#endif
 
 } // end anonymous namespace
 
@@ -613,6 +616,7 @@ private:
 char ASanGlobalsMetadataWrapperPass::ID = 0;
 
 /// AddressSanitizer: instrument the code in module to find memory bugs.
+#if 0
 struct AddressSanitizer {
   AddressSanitizer(Module &M, const GlobalsMetadata *GlobalsMD,
                    bool CompileKernel = false, bool Recover = false,
@@ -683,19 +687,6 @@ struct AddressSanitizer {
   bool maybeInsertAsanInitAtFunctionEntry(Function &F);
   bool maybeInsertDynamicShadowAtFunctionEntry(Function &F);
   void markEscapedLocalAllocas(Function &F);
-  void declareAdditionalSymbol(Module &M);
-  void instrumentSecMemIntrinsic(CallInst *CI);
-  void instrumentHeapCall(CallInst *CI);
-  static Type *unpackArrayType(Type *type);
-  void __instrumentTLSMgr(Function *ecallWrapper);
-  void instrumentGlobalPropageteWhitelist(StoreInst *SI);
-  bool instrumentRealEcall(CallInst *CI);
-  bool instrumentOcallWrapper(Function &OcallWrapper);
-  bool instrumentParameterCheck(Value *operand, IRBuilder<> &IRB,
-                                const DataLayout &DL, int depth,
-                                Value *eleCnt = nullptr,
-                                Value *operandAddr = nullptr,
-                                bool checkCurrentLevelPtr = true);
 
 private:
   friend struct FunctionStackPoisoner;
@@ -751,20 +742,41 @@ private:
 
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
-
-  GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
-  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQuery,
-      WhitelistGlobalPropagate, WhitelistAddInEnclaveAccessCnt,
-      sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
-      EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd,
-      is_pointer_readable, SGXSanMalloc, SGXSanFree, SGXSanCalloc,
-      SGXSanRealloc;
-  std::unordered_set<Function *> TLSMgrInstrumentedEcall;
-  Value *SGXSanEnclaveBase = nullptr, *SGXSanEnclaveEndPlus1 = nullptr;
-  bool isFuncAtEnclaveTBridge = false;
-  Constant *curFuncGlobalNameStrPtr = nullptr;
-  SmallVector<StoreInst *> GlobalVariableStoreInsts;
 };
+#endif
+
+AddressSanitizer::AddressSanitizer(
+    Module &M, const GlobalsMetadata *GlobalsMD, bool CompileKernel,
+    bool Recover, bool UseAfterScope,
+    AsanDetectStackUseAfterReturnMode UseAfterReturn)
+    : CompileKernel(ClEnableKasan.getNumOccurrences() > 0 ? ClEnableKasan
+                                                          : CompileKernel),
+      Recover(ClRecover.getNumOccurrences() > 0 ? ClRecover : Recover),
+      UseAfterScope(UseAfterScope || ClUseAfterScope),
+      UseAfterReturn(ClUseAfterReturn.getNumOccurrences() ? ClUseAfterReturn
+                                                          : UseAfterReturn),
+      GlobalsMD(*GlobalsMD) {
+  C = &(M.getContext());
+  LongSize = M.getDataLayout().getPointerSizeInBits();
+  IntptrTy = Type::getIntNTy(*C, LongSize);
+  TargetTriple = Triple(M.getTargetTriple());
+
+  Mapping = getShadowMapping(TargetTriple, LongSize, this->CompileKernel);
+
+  assert(this->UseAfterReturn != AsanDetectStackUseAfterReturnMode::Invalid);
+}
+
+uint64_t AddressSanitizer::getAllocaSizeInBytes(const AllocaInst &AI) const {
+  uint64_t ArraySize = 1;
+  if (AI.isArrayAllocation()) {
+    const ConstantInt *CI = dyn_cast<ConstantInt>(AI.getArraySize());
+    assert(CI && "non-constant array size");
+    ArraySize = CI->getZExtValue();
+  }
+  Type *Ty = AI.getAllocatedType();
+  uint64_t SizeInBytes = AI.getModule()->getDataLayout().getTypeAllocSize(Ty);
+  return SizeInBytes * ArraySize;
+}
 
 class AddressSanitizerLegacyPass : public FunctionPass {
 public:
@@ -806,6 +818,7 @@ private:
   AsanDetectStackUseAfterReturnMode UseAfterReturn;
 };
 
+#if 0
 class ModuleAddressSanitizer {
 public:
   ModuleAddressSanitizer(Module &M, const GlobalsMetadata *GlobalsMD,
@@ -903,6 +916,45 @@ private:
   Function *AsanCtorFunction = nullptr;
   Function *AsanDtorFunction = nullptr;
 };
+#endif
+
+ModuleAddressSanitizer::ModuleAddressSanitizer(Module &M,
+                                               const GlobalsMetadata *GlobalsMD,
+                                               bool CompileKernel, bool Recover,
+                                               bool UseGlobalsGC,
+                                               bool UseOdrIndicator,
+                                               AsanDtorKind DestructorKind)
+    : GlobalsMD(*GlobalsMD),
+      CompileKernel(ClEnableKasan.getNumOccurrences() > 0 ? ClEnableKasan
+                                                          : CompileKernel),
+      Recover(ClRecover.getNumOccurrences() > 0 ? ClRecover : Recover),
+      UseGlobalsGC(UseGlobalsGC && ClUseGlobalsGC && !this->CompileKernel),
+      // Enable aliases as they should have no downside with ODR indicators.
+      UsePrivateAlias(UseOdrIndicator || ClUsePrivateAlias),
+      UseOdrIndicator(UseOdrIndicator || ClUseOdrIndicator),
+      // Not a typo: ClWithComdat is almost completely pointless without
+      // ClUseGlobalsGC (because then it only works on modules without
+      // globals, which are rare); it is a prerequisite for ClUseGlobalsGC;
+      // and both suffer from gold PR19002 for which UseGlobalsGC constructor
+      // argument is designed as workaround. Therefore, disable both
+      // ClWithComdat and ClUseGlobalsGC unless the frontend says it's ok to
+      // do globals-gc.
+      UseCtorComdat(UseGlobalsGC && ClWithComdat && !this->CompileKernel),
+      DestructorKind(DestructorKind) {
+  C = &(M.getContext());
+  int LongSize = M.getDataLayout().getPointerSizeInBits();
+  IntptrTy = Type::getIntNTy(*C, LongSize);
+  TargetTriple = Triple(M.getTargetTriple());
+  Mapping = getShadowMapping(TargetTriple, LongSize, this->CompileKernel);
+
+  if (ClOverrideDestructorKind != AsanDtorKind::Invalid)
+    this->DestructorKind = ClOverrideDestructorKind;
+  assert(this->DestructorKind != AsanDtorKind::Invalid);
+}
+
+uint64_t ModuleAddressSanitizer::getMinRedzoneSizeForGlobal() const {
+  return getRedzoneSizeForScale(Mapping.Scale);
+}
 
 class ModuleAddressSanitizerLegacyPass : public ModulePass {
 public:
@@ -4334,7 +4386,7 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
                             IRB.getInt8PtrTy(), IntptrTy, IRB.getInt32Ty());
 }
 
-extern "C" ShadowMapping ASanGetShadowMapping(Triple &TargetTriple,
-                                              int LongSize, bool IsKasan) {
+ShadowMapping ASanGetShadowMapping(Triple &TargetTriple, int LongSize,
+                                   bool IsKasan) {
   return getShadowMapping(TargetTriple, LongSize, IsKasan);
 }

@@ -1,5 +1,5 @@
 #include "SensitiveLeakSan.hpp"
-#include "AddressSanitizer.hpp"
+#include "AddressSanitizer.h"
 #include "config.h"
 #include "nlohmann/json.hpp"
 #include <filesystem>

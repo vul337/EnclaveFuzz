@@ -8,7 +8,7 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 
-#include "AddressSanitizer.hpp"
+#include "AddressSanitizer.h"
 #include "AdjustUSP.hpp"
 #include "SensitiveLeakSan.hpp"
 
