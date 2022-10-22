@@ -11,11 +11,11 @@
 #include <string>
 
 static const char *log_level_to_prefix[] = {
-    [LOG_LEVEL_NONE] = "",
-    [LOG_LEVEL_ERROR] = "[SGXSan error] ",
-    [LOG_LEVEL_WARNING] = "[SGXSan warning] ",
-    [LOG_LEVEL_DEBUG] = "[SGXSan debug] ",
-    [LOG_LEVEL_TRACE] = "[SGXSan trace] ",
+    "",
+    "[SGXSan error] ",
+    "[SGXSan warning] ",
+    "[SGXSan debug] ",
+    "[SGXSan trace] ",
 };
 
 // can't call malloc, since malloc may call this function

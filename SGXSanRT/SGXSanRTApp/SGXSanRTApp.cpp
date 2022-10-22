@@ -48,11 +48,11 @@ const bool only_record_readable_mmap_info = true;
 std::string sgxsan_exec(const char *cmd);
 
 static const char *log_level_to_prefix[] = {
-    [LOG_LEVEL_NONE] = "",
-    [LOG_LEVEL_ERROR] = "[SGXSan error] ",
-    [LOG_LEVEL_WARNING] = "[SGXSan warning] ",
-    [LOG_LEVEL_DEBUG] = "[SGXSan debug] ",
-    [LOG_LEVEL_TRACE] = "[SGXSan trace] ",
+    "",
+    "[SGXSan error] ",
+    "[SGXSan warning] ",
+    "[SGXSan debug] ",
+    "[SGXSan trace] ",
 };
 
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {

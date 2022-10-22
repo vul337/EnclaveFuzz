@@ -97,7 +97,7 @@ void SensitivePoisoner::collect_layout_infos() {
 void SensitivePoisoner::do_poison(
     std::string title, std::vector<std::pair<uint64_t, uint32_t>> &list,
     uint64_t base_addr, bool do_poison) {
-  log_debug("[%s]\n", title);
+  log_debug("[%s]\n", title.c_str());
   for (auto ele : list) {
     // sensitive area should be well aligned
     log_debug("\t\t[0x%lX, 0x%lX]=>[0x%lX, 0x%lX]\n", ele.first + base_addr,
@@ -113,7 +113,7 @@ void SensitivePoisoner::do_poison(
 void SensitivePoisoner::show_layout_ex(
     std::string title, std::vector<std::pair<uint64_t, uint32_t>> &list1,
     std::vector<std::pair<uint64_t, uint32_t>> &list2, uint64_t base_addr) {
-  log_debug("[%s]\n", title);
+  log_debug("[%s]\n", title.c_str());
   for (size_t i = 0; i < list1.size(); i++) {
     std::pair<uint64_t, uint32_t> ele1 = list1[i];
     if (i < list2.size()) {
