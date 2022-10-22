@@ -52,11 +52,11 @@ void leaveLLVMFuzzerTestOneInput() { longjmp(sgx_fuzzer_jmp_buf, 0); }
 
 // log util
 static const char *log_level_to_prefix[] = {
-    [LOG_LEVEL_ALWAYS] = "",
-    [LOG_LEVEL_ERROR] = "[SGXFuzz error] ",
-    [LOG_LEVEL_WARNING] = "[SGXFuzz warning] ",
-    [LOG_LEVEL_DEBUG] = "[SGXFuzz debug] ",
-    [LOG_LEVEL_TRACE] = "[SGXFuzz trace] ",
+    "",
+    "[SGXFuzz error] ",
+    "[SGXFuzz warning] ",
+    "[SGXFuzz debug] ",
+    "[SGXFuzz trace] ",
 };
 
 // https://stackoverflow.com/questions/24686846/get-current-time-in-milliseconds-or-hhmmssmmm-format
@@ -214,7 +214,8 @@ public:
     case FUZZ_RET:
     case FUZZ_ARRAY:
     case FUZZ_DATA: {
-      uint8_t newData[req.size] = {0};
+      uint8_t newData[req.size];
+      memset(newData, 0, req.size);
       fillRand(newData, req.size);
       mutatorJson[JSonPtr / "Data"] =
           EncodeBase64(std::vector<uint8_t>(newData, newData + req.size));
@@ -690,6 +691,7 @@ public:
   void clearAtConsumerEnd() {
     consumerData.clear();
     for (auto memArea : allocatedMemAreas) {
+      // log_debug("free %p\n", memArea);
       free(memArea);
     }
     allocatedMemAreas.clear();
@@ -697,6 +699,7 @@ public:
 
   void *managedMalloc(size_t size) {
     void *ptr = malloc(size);
+    // log_debug("malloc %p\n", ptr);
     allocatedMemAreas.push_back((uint8_t *)ptr);
     return ptr;
   }
@@ -980,6 +983,7 @@ extern "C" uint8_t *get_bytes(size_t byteArrLen, char *cStrAsParamID,
 
 extern "C" bool is_null_pointer(char *cStrAsParamID) {
   return data_factory.hintSetNull(cStrAsParamID);
+  // return false;
 }
 
 extern "C" char *DFJoinID(char *parentID, char *currentID, char *appendID) {
