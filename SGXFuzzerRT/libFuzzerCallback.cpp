@@ -173,7 +173,7 @@ public:
   /// @param size \p cStrBuf size
   template <class T> void fillStrRand(T *cStrBuf, size_t size) {
     fillRand(cStrBuf, (size - 1) * sizeof(T));
-    cStrBuf[size] = '\0';
+    cStrBuf[size - 1] = '\0';
   }
 
   template <class T>
@@ -302,6 +302,7 @@ public:
                                       ClMaxStringLength * sizeof(T));
     sgxfuzz_assert(newRawLen <= ClMaxStringLength * sizeof(T));
     size_t newLen = (newRawLen + sizeof(T) - 1) / sizeof(T);
+    sgxfuzz_assert(newLen <= ClMaxStringLength);
     str[newLen] = '\0';
     mutatorJson[ptr] =
         EncodeBase64(std::vector<uint8_t>(str, str + newLen + 1));
@@ -699,7 +700,7 @@ public:
 
   void *managedMalloc(size_t size) {
     void *ptr = malloc(size);
-    // log_debug("malloc %p\n", ptr);
+    // log_debug("malloc %p(%d)\n", ptr, size);
     allocatedMemAreas.push_back((uint8_t *)ptr);
     return ptr;
   }
