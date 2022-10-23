@@ -319,6 +319,7 @@ Value *DriverGenerator::createParamContent(
               IRB.CreateCall(DFJoinID, {parentID, currentID, GStrField}), GStr0,
               nullptr, insertPt, recursion_depth);
         } else {
+          assert(M->getDataLayout().getTypeAllocSize(eleTy) == _eleSize);
           contentPtr = IRB.CreatePointerCast(
               IRB.CreateCall(
                   DFManagedMalloc,
