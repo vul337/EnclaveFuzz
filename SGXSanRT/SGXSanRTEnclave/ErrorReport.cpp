@@ -1,8 +1,5 @@
 #include "ErrorReport.hpp"
 #include "PoisonCheck.hpp"
-#include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanDefs.h"
-#include "SGXSanLog.hpp"
 #include "StackTrace.hpp"
 #include <cstdlib>
 #include <stdarg.h>

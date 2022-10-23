@@ -1,8 +1,5 @@
 #include "SGXSanPrintf.hpp"
-#include "SGXInternal.hpp"
-#include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanLog.hpp"
-#include "SGXSanManifest.h"
+#include "SGXSanRTCom.h"
 #include "SGXSanRTTBridge.hpp"
 #include <mbusafecrt.h>
 #include <stdarg.h>

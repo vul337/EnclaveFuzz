@@ -41,7 +41,6 @@ public:
   SensitiveLeakSan(Module &M, CFLSteensAAResult &AAResult);
   ~SensitiveLeakSan();
   void includeThreadFuncArgShadow();
-  void includeElrange();
   void includeSGXSanCheck();
   void initSVF();
   bool runOnModule();
@@ -147,9 +146,6 @@ private:
   std::unordered_set<CallInst *> processedMemTransferInst;
   std::unordered_map<CallInst *, std::unordered_set<int>> poisonedCI;
   std::unordered_map<Value *, Value *> poisonCheckedValues;
-  GlobalVariable *SGXSanEnclaveBaseAddr = nullptr,
-                 *SGXSanEnclaveSizeAddr = nullptr,
-                 *ThreadFuncArgShadow = nullptr;
   FunctionCallee poison_thread_func_arg_shadow_stack,
       unpoison_thread_func_arg_shadow_stack,
       onetime_query_thread_func_arg_shadow_stack,
@@ -157,7 +153,8 @@ private:
       push_thread_func_arg_shadow_stack, pop_thread_func_arg_shadow_stack,
       sgx_is_within_enclave, sgxsan_region_is_in_elrange_and_poisoned,
       PoisonSensitiveGlobal, Abort, SGXSanLog, print_ptr, print_arg,
-      sgxsan_shallow_poison_object, sgxsan_check_shadow_bytes_match_obj,
+      ShallowPoisonShadow, ShallowUnPoisonShadow,
+      sgxsan_check_shadow_bytes_match_obj,
       sgxsan_shallow_shadow_copy_on_mem_transfer, func_malloc_usable_size;
 
   Module *M = nullptr;

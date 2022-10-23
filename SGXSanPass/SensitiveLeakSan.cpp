@@ -24,14 +24,6 @@ static cl::opt<int> ClHeapAllocatorsMaxCollectionTimes(
 ShadowMapping Mapping;
 
 Value *SensitiveLeakSan::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
-  // as shadow memory only map elrange, let Shadow - EnclaveBase
-  // EnclaveBase have to be initialied before here
-  // check instrumentation is before poison operation
-  LoadInst *SGXSanEnclaveBase = IRB.CreateLoad(IntptrTy, SGXSanEnclaveBaseAddr);
-  setNoSanitizeMetadata(SGXSanEnclaveBase);
-
-  Shadow = IRB.CreateSub(Shadow, SGXSanEnclaveBase);
-
   // Shadow >> scale
   Shadow = IRB.CreateLShr(Shadow, Mapping.Scale);
   if (Mapping.Offset == 0)
@@ -194,10 +186,9 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(
     if (shadowBytesPair) {
       ShallowPoisonAlignedObject(obj, objSize, IRB, shadowBytesPair);
     } else {
-      IRB.CreateCall(sgxsan_shallow_poison_object,
-                     {objAddrInt, objSize,
-                      IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG),
-                      IRB.getInt1(false)});
+      IRB.CreateCall(
+          ShallowPoisonShadow,
+          {objAddrInt, objSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
     }
   }
   cleanStackObjectSensitiveShadow(objPN);
@@ -703,18 +694,6 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj() {
   }
 }
 
-void SensitiveLeakSan::includeElrange() {
-  IRBuilder<> IRB(*C);
-
-  SGXSanEnclaveBaseAddr = cast<GlobalVariable>(
-      M->getOrInsertGlobal("g_enclave_base", IRB.getInt64Ty()));
-  SGXSanEnclaveBaseAddr->setLinkage(GlobalValue::ExternalLinkage);
-
-  SGXSanEnclaveSizeAddr = cast<GlobalVariable>(
-      M->getOrInsertGlobal("g_enclave_size", IRB.getInt64Ty()));
-  SGXSanEnclaveSizeAddr->setLinkage(GlobalValue::ExternalLinkage);
-}
-
 void dump(ordered_json js) { dbgs() << js.dump(4) << "\n"; }
 
 void SensitiveLeakSan::initSVF() {
@@ -803,9 +782,12 @@ void SensitiveLeakSan::initializeCallbacks() {
   print_arg = M->getOrInsertFunction(
       "print_arg", Type::getVoidTy(*C), Type::getInt8PtrTy(*C),
       Type::getInt64Ty(*C), Type::getInt64Ty(*C));
-  sgxsan_shallow_poison_object = M->getOrInsertFunction(
-      "sgxsan_shallow_poison_object", IRB.getVoidTy(), IRB.getInt64Ty(),
-      IRB.getInt64Ty(), IRB.getInt8Ty(), IRB.getInt1Ty());
+  ShallowPoisonShadow = M->getOrInsertFunction(
+      "ShallowPoisonShadow", IRB.getVoidTy(), IRB.getInt64Ty(),
+      IRB.getInt64Ty(), IRB.getInt8Ty());
+  ShallowUnPoisonShadow =
+      M->getOrInsertFunction("ShallowUnPoisonShadow", IRB.getVoidTy(),
+                             IRB.getInt64Ty(), IRB.getInt64Ty());
   sgxsan_check_shadow_bytes_match_obj =
       M->getOrInsertFunction("sgxsan_check_shadow_bytes_match_obj",
                              IRB.getVoidTy(), IntptrTy, IntptrTy, IntptrTy);
@@ -959,7 +941,6 @@ SensitiveLeakSan::SensitiveLeakSan(Module &ArgM, CFLSteensAAResult &AAResult) {
   auto TargetTriple = Triple(ArgM.getTargetTriple());
   Mapping = ASanGetShadowMapping(TargetTriple, LongSize, false);
   includeThreadFuncArgShadow();
-  includeElrange();
   includeSGXSanCheck();
   initializeCallbacks();
   initSVF();
@@ -1219,10 +1200,9 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI) {
     IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(SI)),
                                dstPtrInt, dstMemSizeVal});
 #endif
-    IRB.CreateCall(sgxsan_shallow_poison_object,
-                   {dstPtrInt, dstMemSizeVal,
-                    IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG),
-                    IRB.getInt1(false)});
+    IRB.CreateCall(
+        ShallowPoisonShadow,
+        {dstPtrInt, dstMemSizeVal, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
     cleanStackObjectSensitiveShadow(dstPtr);
     poisonedInst.emplace(SI);
   }
@@ -1276,10 +1256,9 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjVar *objPN) {
         assert(AI->getAllocatedType()->isSized() && !AI->isSwiftError());
         auto _objSize = getAllocaSizeInBytes(*AI);
         assert(_objSize > 0);
-        IRB.CreateCall(sgxsan_shallow_poison_object,
-                       {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()),
-                        IRB.getInt64(_objSize), IRB.getInt8(0x0),
-                        IRB.getInt1(true)});
+        IRB.CreateCall(
+            ShallowUnPoisonShadow,
+            {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()), IRB.getInt64(_objSize)});
       }
       cleanedStackObjs.emplace(AI);
     }
@@ -1417,9 +1396,9 @@ void SensitiveLeakSan::PoisonMemsetDst(Value *src, Value *isSrcPoisoned,
     IRB.CreateCall(print_ptr, {IRB.CreateGlobalStringPtr(toString(MSI)),
                                dstPtrInt, setSize});
 #endif
-    IRB.CreateCall(sgxsan_shallow_poison_object,
-                   {dstPtrInt, setSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG),
-                    IRB.getInt1(false)});
+    IRB.CreateCall(
+        ShallowPoisonShadow,
+        {dstPtrInt, setSize, IRB.getInt8(SGXSAN_SENSITIVE_OBJ_FLAG)});
     cleanStackObjectSensitiveShadow(dstPtr);
     poisonedInst.emplace(MSI);
   }

@@ -1,8 +1,5 @@
 #include "Quarantine.hpp"
-#include "SGXInternal.hpp"
-#include "SGXSanDefs.h"
-#include "SGXSanLog.hpp"
-#include "SGXSanManifest.h"
+#include "trts_util.h"
 #include <pthread.h>
 #include <stdlib.h>
 

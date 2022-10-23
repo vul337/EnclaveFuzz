@@ -1,6 +1,5 @@
 #include "ThreadFuncArgShadowStack.hpp"
-#include "SGXSanAssert.h"
-#include "SGXSanLog.hpp"
+#include "SGXSanRTCom.h"
 #include <algorithm>
 #include <assert.h>
 #include <stack>

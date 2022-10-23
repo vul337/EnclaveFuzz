@@ -1,8 +1,7 @@
 #include "StackTrace.hpp"
-#include "PoisonCheck.hpp"
-#include "SGXInternal.hpp"
-#include "SGXSanLog.hpp"
+#include "SGXSanRTCom.h"
 #include "SGXSanRTTBridge.hpp"
+#include "trts_util.h"
 #define UNW_LOCAL_ONLY
 #include "libunwind_i.h"
 #include <cstdlib>

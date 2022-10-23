@@ -1,5 +1,5 @@
 #pragma once
-#include "SGXSanInt.h"
+#include "SGXSanRTCom.h"
 #include <cstddef>
 #include <cstdint>
 

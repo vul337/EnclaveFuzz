@@ -2,11 +2,9 @@
 #include "Malloc.hpp"
 #include "ErrorReport.hpp"
 #include "InternalDlmalloc.hpp"
+#include "Poison.hpp"
 #include "PoisonCheck.hpp"
 #include "Quarantine.hpp"
-#include "SGXSanCommonPoison.hpp"
-#include "SGXSanLog.hpp"
-#include "SGXSanManifest.h"
 #include "SGXSanRTEnclave.hpp"
 #include "StackTrace.hpp"
 #include <pthread.h>
@@ -110,7 +108,7 @@ void *MALLOC(size_t size) {
   PoisonShadow(user_beg, size, 0x0); // user_beg is already aligned to alignment
   uptr right_redzone_beg = RoundUpTo(user_end, alignment);
   /* Fast */ PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg,
-                          kAsanHeapRightRedzoneMagic);
+                          kAsanHeapLeftRedzoneMagic);
 
   return reinterpret_cast<void *>(user_beg);
 }

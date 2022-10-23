@@ -1,7 +1,5 @@
 #include "CiphertextDetect.hpp"
-#include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanDefs.h"
-#include "SGXSanLog.hpp"
+#include "SGXSanRTCom.h"
 #include "SGXSanRTTBridge.hpp"
 #include "StackTrace.hpp"
 #include <mbusafecrt.h>

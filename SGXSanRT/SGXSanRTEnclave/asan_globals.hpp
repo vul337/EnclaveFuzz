@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanInt.h"
+#include "SGXSanRTCom.h"
 
 // This structure is used to describe the source location of a place where
 // global was defined.

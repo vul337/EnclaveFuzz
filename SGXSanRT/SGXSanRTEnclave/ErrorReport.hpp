@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanInt.h"
+#include "SGXSanRTCom.h"
 #include <stdint.h>
 
 #define SGXSAN_WARNING_DETAIL(cond, message, addr, size)                       \

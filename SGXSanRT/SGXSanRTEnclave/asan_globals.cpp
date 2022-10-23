@@ -1,9 +1,5 @@
 #include "asan_globals.hpp"
-#include "SGXSanAlignment.h"
-#include "SGXSanCheck.h"
-#include "SGXSanCommonPoison.hpp"
-#include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanLog.hpp"
+#include "Poison.hpp"
 #include "SGXSanRTEnclave.hpp"
 
 typedef __asan_global Global;
@@ -76,5 +72,5 @@ void __asan_unregister_globals(__asan_global *globals, uptr n) {
   }
 
   // Unpoison the metadata.
-  PoisonShadow(reinterpret_cast<uptr>(globals), n * sizeof(__asan_global), 0);
+  UnPoisonShadow(reinterpret_cast<uptr>(globals), n * sizeof(__asan_global));
 }

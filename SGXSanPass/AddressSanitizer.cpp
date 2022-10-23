@@ -138,6 +138,7 @@ static const uint64_t kAsanEmscriptenCtorAndDtorPriority = 50;
 const char kAsanReportErrorTemplate[] = "__asan_report_";
 const char kAsanRegisterGlobalsName[] = "__asan_register_globals";
 const char kAsanUnregisterGlobalsName[] = "__asan_unregister_globals";
+#if 0
 const char kAsanRegisterImageGlobalsName[] = "__asan_register_image_globals";
 const char kAsanUnregisterImageGlobalsName[] =
     "__asan_unregister_image_globals";
@@ -145,11 +146,14 @@ const char kAsanRegisterElfGlobalsName[] = "__asan_register_elf_globals";
 const char kAsanUnregisterElfGlobalsName[] = "__asan_unregister_elf_globals";
 const char kAsanPoisonGlobalsName[] = "__asan_before_dynamic_init";
 const char kAsanUnpoisonGlobalsName[] = "__asan_after_dynamic_init";
+#endif
 const char kAsanInitName[] = "__asan_init";
 const char kAsanVersionCheckNamePrefix[] = "__asan_version_mismatch_check_v";
+#if 0
 const char kAsanPtrCmp[] = "__sanitizer_ptr_cmp";
 const char kAsanPtrSub[] = "__sanitizer_ptr_sub";
 const char kAsanHandleNoReturnName[] = "__asan_handle_no_return";
+#endif
 static const int kMaxAsanStackMallocSizeClass = 10;
 const char kAsanStackMallocNameTemplate[] = "__asan_stack_malloc_";
 const char kAsanStackMallocAlwaysNameTemplate[] = "__asan_stack_malloc_always_";
@@ -174,8 +178,10 @@ const char kAsanShadowMemoryDynamicAddress[] =
 const char kAsanAllocaPoison[] = "__asan_alloca_poison";
 const char kAsanAllocasUnpoison[] = "__asan_allocas_unpoison";
 
+#if 0
 const char kAMDGPUAddressSharedName[] = "llvm.amdgcn.is.shared";
 const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
+#endif
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 // static const size_t kNumberOfAccessSizes = 5;
@@ -1435,8 +1441,6 @@ static bool isUnsupportedAMDGPUAddrspace(Value *Addr) {
 }
 
 Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
-  // as shadow memory only map elrange, let Shadow - EnclaveBase
-  Shadow = IRB.CreateSub(Shadow, SGXSanEnclaveBase);
   // Shadow >> scale
   Shadow = IRB.CreateLShr(Shadow, Mapping.Scale);
   if (Mapping.Offset == 0)
@@ -1538,14 +1542,6 @@ void AddressSanitizer::getInterestingMemoryOperands(
   } else if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
     if (!ClInstrumentWrites || ignoreAccess(SI->getPointerOperand()))
       return;
-    if (isa<GlobalVariable>(SI->getPointerOperand())) {
-      GlobalVariableStoreInsts.emplace_back(SI);
-    } else if (auto CE = dyn_cast<ConstantExpr>(SI->getPointerOperand())) {
-      if (CE->getOpcode() == Instruction::GetElementPtr and
-          isa<GlobalVariable>(CE->getOperand(0))) {
-        GlobalVariableStoreInsts.emplace_back(SI);
-      }
-    }
     Interesting.emplace_back(I, SI->getPointerOperandIndex(), true,
                              SI->getValueOperand()->getType(), SI->getAlign());
   } else if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(I)) {
@@ -1853,83 +1849,6 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                       ConstantInt::get(IRB.getInt32Ty(), Exp)});
     return;
   }
-  // <Use elrange guard page to detect cross boundary, below is pseudo-code>
-  // Cmp1_BB:
-  // cmp (Start < EnclaveBase)
-  // branch Cmp3_BB(or Access_BB, TBridge), Cmp2_BB;
-  //
-  // Cmp2_BB:
-  // cmp (Start > EnclaveEnd)
-  // branch Cmp3_BB(or Access_BB, TBridge), ShadowByteCheck_BB;
-  //
-  // ShadowByteCheck_BB: // totally in elrange(, or trigger shadow map guard
-  // #PF before enclave guard #PF only if operation is not aligned)
-  // get ShadowByte;
-  // cmp (ShadowByte != 0)
-  // branch SlowPath1_BB, Access_BB
-  //
-  // SlowPath1_BB:
-  // ShadowByte = and ShadowByte, 0x8F
-  // cmp (ShadowByte != 0)
-  // branch SlowPath2_BB(or Crash_BB, if don't need), Access_BB
-  //
-  // <BEGIN: if need>
-  // SlowPath2_BB:
-  // cmp (LastAccessByte > ShadowByte)
-  // branch Crash_BB, Access_BB
-  // <END: if need>
-  //
-  // Crash_BB:
-  // Report Error;
-  // Unreachable Inst;
-  //
-  // <BEGIN: only not at TBridge>
-  // Cmp3_BB:
-  // cmp (end < EnclaveBase /* | start > EnclaveEnd */)
-  // branch TotallyOutELRANGE_BB, Access_BB;
-  //
-  // TotallyOutELRANGE_BB:
-  // Out-Enclave-Addr Whitelist Check;
-  // branch Access_BB;
-  // <END: only not at TBridge>
-  //
-  // Access_BB:
-  BasicBlock *Cmp1_BB = nullptr, *Cmp2_BB = nullptr,
-             *ShadowByteCheck_BB = nullptr, *SlowPath1_BB = nullptr,
-             *Crash_BB = nullptr, *Cmp3_BB = nullptr,
-             *TotallyOutELRANGE_BB = nullptr, *Access_BB = nullptr;
-  Cmp1_BB = InsertBefore->getParent();
-  Access_BB = SplitBlock(Cmp1_BB, InsertBefore);
-  Function *curFunc = Cmp1_BB->getParent();
-  if (not isFuncAtEnclaveTBridge) {
-    TotallyOutELRANGE_BB =
-        BasicBlock::Create(*C, "TotallyOutELRANGE_BB", curFunc, Access_BB);
-    Cmp3_BB = BasicBlock::Create(*C, "Cmp3_BB", curFunc, TotallyOutELRANGE_BB);
-  }
-  Crash_BB = BasicBlock::Create(*C, "Crash_BB", curFunc,
-                                Cmp3_BB ? Cmp3_BB : Access_BB);
-  SlowPath1_BB = BasicBlock::Create(*C, "SlowPath1_BB", curFunc, Crash_BB);
-  ShadowByteCheck_BB =
-      BasicBlock::Create(*C, "ShadowByteCheck_BB", curFunc, SlowPath1_BB);
-  Cmp2_BB = BasicBlock::Create(*C, "Cmp2_BB", curFunc, ShadowByteCheck_BB);
-
-  Instruction *Cmp1_BBTerm = Cmp1_BB->getTerminator();
-  IRB.SetInsertPoint(Cmp1_BBTerm);
-  Value *StartAddrULTEnclaveBase =
-      IRB.CreateICmpULT(AddrLong, SGXSanEnclaveBase);
-  IRB.CreateCondBr(StartAddrULTEnclaveBase, Cmp3_BB ? Cmp3_BB : Access_BB,
-                   Cmp2_BB, MDBuilder(*C).createBranchWeights(1, 100000));
-  Cmp1_BBTerm->eraseFromParent();
-
-  IRB.SetInsertPoint(Cmp2_BB);
-  Value *StartAddrUGTEnclaveEnd =
-      IRB.CreateICmpUGE(AddrLong, SGXSanEnclaveEndPlus1);
-  IRB.CreateCondBr(StartAddrUGTEnclaveEnd, Cmp3_BB ? Cmp3_BB : Access_BB,
-                   ShadowByteCheck_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-
-  IRB.SetInsertPoint(ShadowByteCheck_BB);
-  IRB.CreateCall(WhitelistAddInEnclaveAccessCnt);
 
   Type *ShadowTy =
       IntegerType::get(*C, std::max(8U, TypeSize >> Mapping.Scale));
@@ -1943,56 +1862,31 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   size_t Granularity = 1ULL << Mapping.Scale;
   Instruction *CrashTerm = nullptr;
 
-  IRB.CreateCondBr(Cmp, SlowPath1_BB, Access_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-
-  IRB.SetInsertPoint(SlowPath1_BB);
-  // filte out sensitive poison value, then sensitive partial valid object oob
-  // access can be detected
-  ShadowValue = IRB.CreateAnd(ShadowValue, ShadowTy == Type::getInt16Ty(*C)
-                                               ? IRB.getInt16(0x8F8F)
-                                               : IRB.getInt8(0x8F));
-  Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
-
   if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
     // We use branch weights for the slow path check, to indicate that the slow
     // path is rarely taken. This seems to be the case for SPEC benchmarks.
-    BasicBlock *SlowPath2_BB =
-        BasicBlock::Create(*C, "SlowPath2_BB", curFunc, Crash_BB);
-    IRB.CreateCondBr(Cmp, SlowPath2_BB, Access_BB,
-                     MDBuilder(*C).createBranchWeights(1, 100000));
-
-    IRB.SetInsertPoint(SlowPath2_BB);
-    Cmp = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    Instruction *CheckTerm = SplitBlockAndInsertIfThen(
+        Cmp, InsertBefore, false, MDBuilder(*C).createBranchWeights(1, 100000));
+    assert(cast<BranchInst>(CheckTerm)->isUnconditional());
+    BasicBlock *NextBB = CheckTerm->getSuccessor(0);
+    IRB.SetInsertPoint(CheckTerm);
+    Value *Cmp2 = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    if (Recover) {
+      CrashTerm = SplitBlockAndInsertIfThen(Cmp2, CheckTerm, false);
+    } else {
+      BasicBlock *CrashBlock =
+          BasicBlock::Create(*C, "", NextBB->getParent(), NextBB);
+      CrashTerm = new UnreachableInst(*C, CrashBlock);
+      BranchInst *NewTerm = BranchInst::Create(CrashBlock, NextBB, Cmp2);
+      ReplaceInstWithInst(CheckTerm, NewTerm);
+    }
+  } else {
+    CrashTerm = SplitBlockAndInsertIfThen(Cmp, InsertBefore, !Recover);
   }
-  IRB.CreateCondBr(Cmp, Crash_BB, Access_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-
-  IRB.SetInsertPoint(Crash_BB);
-  CrashTerm = IRB.CreateUnreachable();
 
   Instruction *Crash = generateCrashCode(CrashTerm, AddrLong, IsWrite,
                                          AccessSizeIndex, SizeArgument, Exp);
   Crash->setDebugLoc(OrigIns->getDebugLoc());
-
-  if (not isFuncAtEnclaveTBridge) {
-    assert(Cmp3_BB);
-    IRB.SetInsertPoint(Cmp3_BB);
-    Value *EndAddrULTEnclaveBase = IRB.CreateICmpULT(
-        IRB.CreateAdd(AddrLong,
-                      ConstantInt::get(IntptrTy, (TypeSize >> 3) - 1)),
-        SGXSanEnclaveBase);
-    IRB.CreateCondBr(EndAddrULTEnclaveBase, TotallyOutELRANGE_BB, Access_BB,
-                     MDBuilder(*C).createBranchWeights(100000, 1));
-
-    IRB.SetInsertPoint(TotallyOutELRANGE_BB);
-    IRB.CreateCall(WhitelistQuery,
-                   {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
-                    ConstantInt::get(IntptrTy, (TypeSize >> 3)),
-                    IRB.getInt1(IsWrite), IRB.getInt1(hasCmpUser(OrigIns)),
-                    curFuncGlobalNameStrPtr});
-    IRB.CreateBr(Access_BB);
-  }
 }
 
 // Instrument unusual size or unusual alignment.
@@ -3055,11 +2949,9 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   SmallVector<BasicBlock *, 16> AllBlocks;
   SmallVector<Instruction *, 16> PointerComparisonsOrSubtracts;
   SmallVector<CallInst *, 16> SecIntrinToInstrument;
-  SmallVector<CallInst *, 16> HeapCIToInstrument;
   // there may be several `tail call` RealEcall when compiling with `-O2`
   SmallVector<CallInst *, 16> RealEcallInsts;
   SmallVector<CallInst *, 16> SGXOcallInsts;
-  GlobalVariableStoreInsts.clear();
   int NumAllocas = 0;
 
   // Fill the set of memory operations to instrument.
@@ -3125,9 +3017,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
         } else if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
                    callee_name == "memmove_s") {
           SecIntrinToInstrument.push_back(CI);
-        } else if (callee_name == "malloc" || callee_name == "free" ||
-                   callee_name == "calloc" || callee_name == "realloc") {
-          HeapCIToInstrument.push_back(CI);
         }
       }
       if (NumInsnsPerBB >= ClMaxInsnsToInstrumentPerBB)
@@ -3138,21 +3027,16 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   bool UseCalls = (ClInstrumentationWithCallsThreshold >= 0 &&
                    OperandsToInstrument.size() + IntrinToInstrument.size() >
                        (unsigned)ClInstrumentationWithCallsThreshold);
+  UseCalls = true;
   const DataLayout &DL = F.getParent()->getDataLayout();
   ObjectSizeOpts ObjSizeOpts;
   ObjSizeOpts.RoundToAlign = true;
   ObjectSizeOffsetVisitor ObjSizeVis(DL, TLI, F.getContext(), ObjSizeOpts);
 
   // Instrument.
-  // sgxsdk should ensure EnclaveSize > 0 and EnclaveEnd do not overflow
-  IRBuilder<> IRB(&F.front().front());
-  SGXSanEnclaveBase =
-      IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveBaseAddr, "enclave_base");
-  SGXSanEnclaveEndPlus1 = IRB.CreateAdd(
-      SGXSanEnclaveBase,
-      IRB.CreateLoad(IntptrTy, ExternSGXSanEnclaveSizeAddr, "enclave_size"),
-      "enclave_end_plus1");
-  curFuncGlobalNameStrPtr = IRB.CreateGlobalStringPtr(F.getName());
+  IRBuilder<> IRB(*C);
+  curFuncGlobalNameStrPtr =
+      IRB.CreateGlobalStringPtr(F.getName(), F.getName(), 0, F.getParent());
 
   int NumInstrumented = 0;
   for (auto &Operand : OperandsToInstrument) {
@@ -3170,13 +3054,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
     if (!suppressInstrumentationSiteForDebug(NumInstrumented))
       instrumentSecMemIntrinsic(CI);
     FunctionModified = true;
-  }
-  if (!isFuncAtEnclaveTBridge) {
-    for (auto Inst : GlobalVariableStoreInsts) {
-      if (!suppressInstrumentationSiteForDebug(NumInstrumented))
-        instrumentGlobalPropageteWhitelist(Inst);
-      FunctionModified = true;
-    }
   }
 
   FunctionStackPoisoner FSP(F, *this);
@@ -3900,142 +3777,6 @@ bool AddressSanitizer::isSafeAccess(ObjectSizeOffsetVisitor &ObjSizeVis,
          Size - uint64_t(Offset) >= TypeSize / 8;
 }
 
-Value *getEDLInPrefixedValue(Value *val) {
-  // directly first level
-  if (SGXSanGetName(val).startswith("_in_"))
-    return val;
-  else {
-    val = stripCast(val);
-    if (Instruction *I = dyn_cast<Instruction>(val)) {
-      val = I->getOperand(0);
-      // second level
-      if (SGXSanGetName(val).startswith("_in_"))
-        return val;
-    }
-    return nullptr;
-  }
-}
-
-std::pair<int64_t, Value *>
-getLenAndValueByNameInEDL(Function *F, std::string lenPrefixedValueName) {
-  int64_t length = -1;
-  Value *lenValue = nullptr;
-  SmallVector<Value *> values =
-      getValuesByStrInFunction(F, isValueNameEqualWith, lenPrefixedValueName);
-  assert(values.size() <= 1);
-  if (values.size() == 0) {
-    goto exit;
-  }
-  // now values.size()==1
-  lenValue = values.front();
-  assert(lenValue != nullptr);
-  // find lenValue
-  for (auto user : lenValue->users()) {
-    if (StoreInst *SI = dyn_cast<StoreInst>(user)) {
-      if (ConstantInt *cInt = dyn_cast<ConstantInt>(SI->getOperand(0))) {
-        length = cInt->getSExtValue();
-        assert(length > 0);
-        if (length <= 0) {
-          length = -1;
-        }
-        goto exit;
-      }
-    }
-  }
-exit:
-  return std::pair<int64_t, Value *>(length, lenValue);
-}
-
-// fix-me: implementation is tricky
-// if (int64_t) length is not -1, then (Value *) lenValue must not be nullptr
-std::pair<int64_t, Value *> getLenAndValueByParamInEDL(Function *F,
-                                                       Value *param) {
-  int64_t length = -1;
-  Value *lenValue = nullptr;
-
-  std::pair<int64_t, llvm::Value *> lenAndValue;
-  param = getEDLInPrefixedValue(param);
-  if (param) {
-    // now param prefixed with _in_
-    // then find _len_ prefixed value
-    lenAndValue = getLenAndValueByNameInEDL(
-        F, "_len_" + SGXSanGetName(param).substr(4).str());
-    length = lenAndValue.first;
-    lenValue = lenAndValue.second;
-  }
-
-  return std::pair<int64_t, Value *>(length, lenValue);
-}
-
-// param means passed parameter at real ecall (not ecall wrapper) instruction
-// Return:
-// ElementCnt   ElementSize LenValue
-//|-1           -1          nullptr             /* not a pointer or a function
-// pointer */
-//|-1           >=1         nullptr             /* [user_check] pointer */
-//|-1           >=1         (Value *) _len_xxx  /* [in]/[out] pointer, but
-// length is not a ConstantInt */
-//|>=1          >=1         (Value *) _len_xxx  /* [in]/[out] pointer, and
-// length is a ConstantInt */
-std::tuple<int, int, Value *>
-convertParamLenAndValue2Tuple(Value *param, Function *F,
-                              std::pair<int64_t, Value *> lenAndValue) {
-  int elementCnt = -1;
-  int elementSize = -1;
-
-  if (PointerType *pointerType = dyn_cast<PointerType>(param->getType())) {
-    if (pointerType->getElementType()->isSized()) {
-      elementSize = F->getParent()->getDataLayout().getTypeAllocSize(
-          pointerType->getElementType());
-      assert(elementSize >= 1);
-    }
-  }
-  if (elementSize != -1 && lenAndValue.first > 0 &&
-      lenAndValue.second != nullptr) {
-    // this param is a (array-)pointer and has length, means [in]/[out]
-    assert(param->getType()->isPointerTy() && (elementSize != -1));
-    elementCnt = lenAndValue.first / elementSize;
-    assert(elementCnt >= 1);
-  }
-  // else: it's a user_check (array-)ptr/string/primitive variable
-  return std::tuple<int, int, Value *>(elementCnt, elementSize,
-                                       lenAndValue.second);
-}
-
-Value *
-convertPointerLenAndValue2CountValue(Value *ptr, Instruction *insertPoint,
-                                     std::pair<int64_t, Value *> lenAndValue) {
-  int elementCnt = -1, elementSz = -1;
-  Value *lenValue = nullptr;
-  Function *F = insertPoint->getFunction();
-  std::tie(elementCnt, elementSz, lenValue) =
-      convertParamLenAndValue2Tuple(ptr, F, lenAndValue);
-  IRBuilder<> IRB(insertPoint);
-  if (elementCnt >= 1) {
-    return IRB.getInt32(elementCnt);
-  } else if (lenValue != nullptr) {
-    return IRB.CreateIntCast(
-        IRB.CreateExactSDiv(
-            IRB.CreateLoad(
-                lenValue->getType()->getScalarType()->getPointerElementType(),
-                lenValue),
-            IRB.getInt64(elementSz)),
-        IRB.getInt32Ty(), true);
-  } else {
-    return IRB.getInt32(-1);
-  }
-}
-
-void AddressSanitizer::instrumentGlobalPropageteWhitelist(StoreInst *SI) {
-  IRBuilder<> IRB(SI);
-  Value *val = SI->getValueOperand();
-
-  IRB.CreateCall(WhitelistGlobalPropagate,
-                 {val->getType()->isPointerTy()
-                      ? IRB.CreatePointerCast(val, IRB.getInt8PtrTy())
-                      : IRB.CreateIntToPtr(val, IRB.getInt8PtrTy())});
-}
-
 // Instrument memset_s/memmove_s/memcpy_s
 void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI) {
   StringRef callee_name = getDirectCalleeName(CI);
@@ -4053,27 +3794,6 @@ void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI) {
     tempCI =
         IRB.CreateCall(SGXSanMemmoveS, {CI->getOperand(0), CI->getOperand(1),
                                         CI->getOperand(2), CI->getOperand(3)});
-  } else
-    abort();
-  CI->replaceAllUsesWith(tempCI);
-  CI->eraseFromParent();
-}
-
-// Instrument malloc/free/calloc/realloc
-void AddressSanitizer::instrumentHeapCall(CallInst *CI) {
-  StringRef callee_name = getDirectCalleeName(CI);
-  IRBuilder<> IRB(CI);
-  CallInst *tempCI = nullptr;
-  if (callee_name == "malloc") {
-    tempCI = IRB.CreateCall(SGXSanMalloc, CI->getOperand(0));
-  } else if (callee_name == "free") {
-    tempCI = IRB.CreateCall(SGXSanFree, CI->getOperand(0));
-  } else if (callee_name == "calloc") {
-    tempCI =
-        IRB.CreateCall(SGXSanCalloc, {CI->getOperand(0), CI->getOperand(1)});
-  } else if (callee_name == "realloc") {
-    tempCI =
-        IRB.CreateCall(SGXSanRealloc, {CI->getOperand(0), CI->getOperand(1)});
   } else
     abort();
   CI->replaceAllUsesWith(tempCI);
@@ -4105,271 +3825,40 @@ bool AddressSanitizer::instrumentRealEcall(CallInst *CI) {
 
   __instrumentTLSMgr(CI->getFunction());
 
+  // instrument `MemAccessMgrActive` before RealEcall
   IRBuilder<> IRB(CI);
-  const DataLayout &DL = CI->getModule()->getDataLayout();
-  // instrument `sgxsan_edge_check` for each actual parameter of RealEcall
-  // before RealEcall
-  for (unsigned int i = 0; i < (CI->getNumOperands() - 1); i++) {
-    IRB.SetInsertPoint(CI);
-    Value *operand = CI->getOperand(i);
-    // fix-me: currently find array is also passed as pointer
-    if (isa<PointerType>(operand->getType())) {
-      // Instruction *PointerCheckTerm =
-      // SplitBlockAndInsertIfThen(IRB.CreateNot(IRB.CreateIsNull(operand)),
-      // CI, false); maybe operand is a (array-)pointer and it has more then
-      // 1 element accroding to EDL Sementics
-      auto lenAndValue = getLenAndValueByParamInEDL(CI->getFunction(), operand);
-      Value *ptrEleCnt =
-          convertPointerLenAndValue2CountValue(operand, CI, lenAndValue);
-      // if it is [in]/[out] (array-)pointer, sub-element still need to be
-      // filled into whitelist
-      instrumentParameterCheck(
-          operand, IRB, DL, 0, ptrEleCnt, nullptr,
-          lenAndValue.second == nullptr /* _in_ prefixed ptr, needn't check */);
-    } else if (ArrayType *arrType = dyn_cast<ArrayType>(operand->getType())) {
-      // seems never trigger(hopefully)
-      assert(false);
-      Value *tempOp = operand;
-      while (isa<CastInst>(tempOp)) {
-        tempOp = cast<CastInst>(tempOp)->getOperand(0);
-      }
-      if (Instruction *I = dyn_cast<Instruction>(tempOp)) {
-        Value *addr = I->getOperand(0);
-        assert(addr->getType()->getPointerElementType() == arrType);
-        instrumentParameterCheck(addr, IRB, DL, 0, IRB.getInt32(1), nullptr,
-                                 false);
-      } else {
-        instrumentParameterCheck(operand, IRB, DL, 0);
-      }
-    } else {
-      instrumentParameterCheck(operand, IRB, DL, 0);
-    }
-  }
-  // instrument `WhitelistActive` before RealEcall
-  IRB.SetInsertPoint(CI);
-  IRB.CreateCall(WhitelistActive);
-  // instrument `WhitelistDeactive` after RealEcall
+  IRB.CreateCall(MemAccessMgrActive);
+  // instrument `MemAccessMgrDeactive` after RealEcall
   IRB.SetInsertPoint(CI->getNextNode());
-  IRB.CreateCall(WhitelistDeactive);
+  IRB.CreateCall(MemAccessMgrDeactive);
 
   return true;
 }
 
 bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
   IRBuilder<> IRB(&OcallWrapper.front().front());
-  IRB.CreateCall(WhitelistDeactive);
+  IRB.CreateCall(MemAccessMgrDeactive);
 
   for (auto RetInst :
        SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec) {
-    const DataLayout &DL = RetInst->getModule()->getDataLayout();
-    for (Argument &arg : OcallWrapper.args()) {
-      // treat ocall-wrapper argument as _in_ prefixed parameter in
-      // real-ecall
-      IRB.SetInsertPoint(RetInst);
-      Type *argType = arg.getType();
-      if (argType->isPointerTy()) {
-        std::string argName = SGXSanGetName(&arg).str();
-        Value *ptrEleCnt = nullptr;
-        if (argName != "") {
-          // make sure parameter is passed in enclave
-          // '__tmp_xxx' exist, then means there is routine that use xxx at
-          // untrusted side, and copy xxx back to trusted side fix-me:
-          // implementation is tricky
-          if (getValuesByStrInFunction(&OcallWrapper, isValueNameEqualWith,
-                                       "__tmp_" + argName)
-                  .size() == 0)
-            continue;
-
-          auto lenAndValue = getLenAndValueByNameInEDL(RetInst->getFunction(),
-                                                       "_len_" + argName);
-          ptrEleCnt =
-              convertPointerLenAndValue2CountValue(&arg, RetInst, lenAndValue);
-        }
-        instrumentParameterCheck(&arg, IRB, DL, 0, ptrEleCnt, nullptr, false);
-      }
-      // it seem func arg will never be an array or a struct
-      else {
-        instrumentParameterCheck(&arg, IRB, DL, 0);
-      }
-    }
     IRB.SetInsertPoint(RetInst);
-    IRB.CreateCall(WhitelistActive);
+    IRB.CreateCall(MemAccessMgrActive);
   }
   return true;
 }
 
-Type *AddressSanitizer::unpackArrayType(Type *type) {
-  Type *elementType = nullptr;
-  if (type->isPointerTy()) {
-    elementType = type->getPointerElementType();
-  } else if (type->isArrayTy()) {
-    elementType = type->getArrayElementType();
-  } else {
-    return type;
-  }
-  while (elementType->isArrayTy()) {
-    elementType = elementType->getArrayElementType();
-  }
-  return elementType;
-}
-
-#define FOR_LOOP_BEG(insert_point, count)                                      \
-  Instruction *forBodyTerm = SplitBlockAndInsertIfThen(                        \
-      IRB.CreateICmpSGT(count, IRB.getInt32(0), ""), insert_point, false);     \
-  IRB.SetInsertPoint(forBodyTerm);                                             \
-  PHINode *phi = IRB.CreatePHI(IRB.getInt32Ty(), 2, "");                       \
-  phi->addIncoming(IRB.getInt32(0), forBodyTerm->getParent()->getPrevNode());  \
-  BasicBlock *forBodyEntry = phi->getParent();
-
-#define FOR_LOOP_END(count)                                                    \
-  /*  instrumentParameterCheck may insert new bb, so forBodyTerm may not       \
-   * belong to forBodyEntry BB */                                              \
-  IRB.SetInsertPoint(forBodyTerm);                                             \
-  Value *inc = IRB.CreateAdd(phi, IRB.getInt32(1), "", true, true);            \
-  phi->addIncoming(inc, forBodyTerm->getParent());                             \
-  ReplaceInstWithInst(                                                         \
-      forBodyTerm, BranchInst::Create(forBodyEntry,                            \
-                                      forBodyTerm->getParent()->getNextNode(), \
-                                      IRB.CreateICmpSLT(inc, count)));
-
-// Must already set insert point properly in IRB
-bool AddressSanitizer::instrumentParameterCheck(
-    Value *operand, IRBuilder<> &IRB, const DataLayout &DL, int depth,
-    Value *eleCnt, Value *operandAddr, bool checkCurrentLevelPtr) {
-  if (depth++ > 10)
-    return false;
-
-  Type *operandType = operand->getType();
-  // fix-me: how about FunctionType
-  if (PointerType *pointerType = dyn_cast<PointerType>(operandType)) {
-    if (!pointerType->getElementType()->isSized())
-      return false; // ignore unsized, e.g. function pointer
-    auto _eleSize = DL.getTypeAllocSize(pointerType->getElementType());
-    if (_eleSize <= 0)
-      return false;
-    auto operandInt8ptr = IRB.CreatePointerCast(operand, IRB.getInt8PtrTy());
-    auto eleSize = IRB.getInt64(_eleSize);
-    if (eleCnt == nullptr)
-      eleCnt = IRB.getInt32(-1);
-    CallInst *isReadable =
-        IRB.CreateCall(is_pointer_readable, {operandInt8ptr, eleSize, eleCnt});
-    Instruction *PointerCheckTerm =
-        SplitBlockAndInsertIfThen(isReadable, &(*IRB.GetInsertPoint()), false);
-    IRB.SetInsertPoint(PointerCheckTerm);
-
-    // now pointer is loadable
-    if (checkCurrentLevelPtr)
-      IRB.CreateCall(sgxsan_edge_check, {operandInt8ptr, eleSize, eleCnt});
-
-    if (eleCnt == IRB.getInt32(0))
-      abort();
-    else if (eleCnt != IRB.getInt32(-1) && eleCnt != IRB.getInt32(1)) {
-      // multi element
-      FOR_LOOP_BEG(PointerCheckTerm, eleCnt)
-      Value *eleAddr =
-          IRB.CreateGEP(pointerType->getElementType(), operand, phi);
-      auto ele = IRB.CreateLoad(
-          eleAddr->getType()->getScalarType()->getPointerElementType(),
-          eleAddr);
-      /* if element is pointer then nullptr means no idea about element's
-       * sub-element count */
-      instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
-      FOR_LOOP_END(eleCnt)
-    } else {
-      // one element
-      auto ele = IRB.CreateLoad(pointerType->getElementType(), operand);
-      bool result =
-          instrumentParameterCheck(ele, IRB, DL, depth, nullptr, operand);
-      if (not result)
-        ele->eraseFromParent();
-    }
-
-    return true;
-  } else if (StructType *structType = dyn_cast<StructType>(operandType)) {
-    Instruction *insertPoint = &(*IRB.GetInsertPoint());
-    bool has_modified = false;
-    // struct type cannot GEP with phi, since elements of struct may be
-    // different from each other
-    for (size_t index = 0; index < structType->elements().size(); index++) {
-      IRB.SetInsertPoint(insertPoint);
-      Value *element = IRB.CreateExtractValue(operand, index);
-      bool result = instrumentParameterCheck(element, IRB, DL, depth);
-      if (result)
-        has_modified = true;
-      else {
-        if (auto I = dyn_cast<Instruction>(element))
-          I->eraseFromParent();
-      }
-    }
-    return has_modified;
-  } else if (ArrayType *arrayType = dyn_cast<ArrayType>(operandType)) {
-    Type *unpackedType = unpackArrayType(arrayType);
-    if (!unpackedType->isPointerTy() && !unpackedType->isStructTy())
-      // do not need instrument
-      return false;
-    Instruction *insertPoint = &(*IRB.GetInsertPoint());
-    bool has_modified = false;
-    if (operandAddr) {
-      // lvalue case, that has memobj
-      auto cnt = IRB.getInt32(arrayType->getNumElements());
-      FOR_LOOP_BEG(insertPoint, cnt)
-      Value *eleAddr = IRB.CreateGEP(
-          operandAddr->getType()->getScalarType()->getPointerElementType(),
-          operandAddr, {IRB.getInt32(0), phi});
-      auto ele = IRB.CreateLoad(
-          eleAddr->getType()->getScalarType()->getPointerElementType(),
-          eleAddr);
-      instrumentParameterCheck(ele, IRB, DL, depth, nullptr, eleAddr);
-      FOR_LOOP_END(cnt)
-      has_modified = true;
-    } else {
-      // rvalue case, that only in register
-      for (uint64_t index = 0; index < arrayType->getNumElements(); index++) {
-        IRB.SetInsertPoint(insertPoint);
-        Value *element = IRB.CreateExtractValue(operand, index);
-        bool result = instrumentParameterCheck(element, IRB, DL, depth);
-        if (result)
-          has_modified = true;
-        else {
-          if (auto I = dyn_cast<Instruction>(element))
-            I->eraseFromParent();
-        }
-      }
-    }
-    return has_modified;
-  }
-  return false;
-}
-
 void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   IRBuilder<> IRB(*C);
-
-  ExternSGXSanEnclaveBaseAddr =
-      cast<GlobalVariable>(M.getOrInsertGlobal("g_enclave_base", IntptrTy));
-  ExternSGXSanEnclaveBaseAddr->setLinkage(GlobalValue::ExternalLinkage);
-  ExternSGXSanEnclaveSizeAddr =
-      cast<GlobalVariable>(M.getOrInsertGlobal("g_enclave_size", IntptrTy));
-  ExternSGXSanEnclaveSizeAddr->setLinkage(GlobalValue::ExternalLinkage);
 
   EnclaveTLSConstructorAtTBridgeBegin = M.getOrInsertFunction(
       "EnclaveTLSConstructorAtTBridgeBegin", IRB.getVoidTy());
   EnclaveTLSDestructorAtTBridgeEnd = M.getOrInsertFunction(
       "EnclaveTLSDestructorAtTBridgeEnd", IRB.getVoidTy());
 
-  WhitelistActive = M.getOrInsertFunction("WhitelistActive", IRB.getVoidTy());
-  WhitelistDeactive =
-      M.getOrInsertFunction("WhitelistDeactive", IRB.getVoidTy());
-  WhitelistQuery = M.getOrInsertFunction(
-      "WhitelistQuery", IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy,
-      IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
-  WhitelistAddInEnclaveAccessCnt =
-      M.getOrInsertFunction("WhitelistAddInEnclaveAccessCnt", IRB.getVoidTy());
-  WhitelistGlobalPropagate = M.getOrInsertFunction(
-      "WhitelistGlobalPropagate", IRB.getVoidTy(), IRB.getInt8PtrTy());
-
-  sgxsan_edge_check = M.getOrInsertFunction("sgxsan_edge_check",
-                                            IRB.getVoidTy(), IRB.getInt8PtrTy(),
-                                            IRB.getInt64Ty(), IRB.getInt32Ty());
+  MemAccessMgrActive =
+      M.getOrInsertFunction("MemAccessMgrActive", IRB.getVoidTy());
+  MemAccessMgrDeactive =
+      M.getOrInsertFunction("MemAccessMgrDeactive", IRB.getVoidTy());
 
   SGXSanMemcpyS = M.getOrInsertFunction("sgxsan_memcpy_s", IRB.getInt32Ty(),
                                         IRB.getInt8PtrTy(), IRB.getInt64Ty(),
@@ -4380,10 +3869,6 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   SGXSanMemmoveS = M.getOrInsertFunction("sgxsan_memmove_s", IRB.getInt32Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty());
-
-  is_pointer_readable =
-      M.getOrInsertFunction("is_pointer_readable", IRB.getInt1Ty(),
-                            IRB.getInt8PtrTy(), IntptrTy, IRB.getInt32Ty());
 }
 
 ShadowMapping ASanGetShadowMapping(Triple &TargetTriple, int LongSize,

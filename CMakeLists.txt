@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
+set(CMAKE_C_COMPILER "clang-13")
+set(CMAKE_CXX_COMPILER "clang++-13")
+
 add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
 add_subdirectory(SGXFuzzerPass)

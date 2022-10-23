@@ -73,17 +73,9 @@ struct AddressSanitizer {
   void markEscapedLocalAllocas(Function &F);
   void declareAdditionalSymbol(Module &M);
   void instrumentSecMemIntrinsic(CallInst *CI);
-  void instrumentHeapCall(CallInst *CI);
-  static Type *unpackArrayType(Type *type);
   void __instrumentTLSMgr(Function *ecallWrapper);
-  void instrumentGlobalPropageteWhitelist(StoreInst *SI);
   bool instrumentRealEcall(CallInst *CI);
   bool instrumentOcallWrapper(Function &OcallWrapper);
-  bool instrumentParameterCheck(Value *operand, IRBuilder<> &IRB,
-                                const DataLayout &DL, int depth,
-                                Value *eleCnt = nullptr,
-                                Value *operandAddr = nullptr,
-                                bool checkCurrentLevelPtr = true);
 
 private:
   friend struct FunctionStackPoisoner;
@@ -140,18 +132,12 @@ private:
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
 
-  GlobalVariable *ExternSGXSanEnclaveBaseAddr, *ExternSGXSanEnclaveSizeAddr;
-  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQuery,
-      WhitelistGlobalPropagate, WhitelistAddInEnclaveAccessCnt,
-      sgxsan_edge_check, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
-      EnclaveTLSConstructorAtTBridgeBegin, EnclaveTLSDestructorAtTBridgeEnd,
-      is_pointer_readable, SGXSanMalloc, SGXSanFree, SGXSanCalloc,
-      SGXSanRealloc;
+  FunctionCallee MemAccessMgrActive, MemAccessMgrDeactive, SGXSanMemcpyS,
+      SGXSanMemsetS, SGXSanMemmoveS, EnclaveTLSConstructorAtTBridgeBegin,
+      EnclaveTLSDestructorAtTBridgeEnd;
   std::unordered_set<Function *> TLSMgrInstrumentedEcall;
-  Value *SGXSanEnclaveBase = nullptr, *SGXSanEnclaveEndPlus1 = nullptr;
   bool isFuncAtEnclaveTBridge = false;
   Constant *curFuncGlobalNameStrPtr = nullptr;
-  SmallVector<StoreInst *> GlobalVariableStoreInsts;
 };
 
 class ModuleAddressSanitizer {

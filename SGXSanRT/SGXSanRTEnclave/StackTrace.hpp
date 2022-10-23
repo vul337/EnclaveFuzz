@@ -1,6 +1,5 @@
 #pragma once
 
-#include "SGXSanManifest.h"
 #include <stdint.h>
 #include <vector>
 

@@ -1,17 +1,17 @@
 #include "ErrorReport.hpp"
+#include "MemAccessMgr.hpp"
+#include "Poison.hpp"
 #include "PoisonCheck.hpp"
-#include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanDefs.h"
-#include "WhitelistCheck.hpp"
+#include "SGXSanRTCom.h"
 
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                      \
   extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(            \
       uptr addr, bool used_to_cmp, char *parent_func) {                        \
-    SGXSAN_ELRANGE_CHECK_BEG(addr, size)                                       \
     uptr smp = MEM_TO_SHADOW(addr);                                            \
     uptr s = size <= SHADOW_GRANULARITY                                        \
-                 ? ((*reinterpret_cast<u8 *>(smp)) & (0x8F))                   \
-                 : ((*reinterpret_cast<u16 *>(smp)) & (0x8F8F));               \
+                 ? ((*reinterpret_cast<u8 *>(smp)) & (kL1Filter))              \
+                 : ((*reinterpret_cast<u16 *>(smp)) &                          \
+                    ((kL1Filter << 8) | kL1Filter));                           \
     if (UNLIKELY(s)) {                                                         \
       if (UNLIKELY(size >= SHADOW_GRANULARITY ||                               \
                    ((s8)((addr & (SHADOW_GRANULARITY - 1)) + size - 1)) >=     \
@@ -20,8 +20,11 @@
         ReportGenericError(pc, bp, sp, addr, is_write, size, true);            \
       }                                                                        \
     }                                                                          \
+    SGXSAN_ELRANGE_CHECK_BEG(addr, size)                                       \
+    MemAccessMgrInEnclaveAccess();                                             \
     SGXSAN_ELRANGE_CHECK_MID                                                   \
-    WhitelistQuery((void *)addr, size, is_write, used_to_cmp, parent_func);    \
+    MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, used_to_cmp,    \
+                                 parent_func);                                 \
     SGXSAN_ELRANGE_CHECK_END;                                                  \
   }
 
@@ -36,26 +39,20 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 4)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 8)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 
-extern "C" NOINLINE INTERFACE_ATTRIBUTE void
-__asan_loadN(uptr addr, uptr size, bool used_to_cmp, char *parent_func) {
-  SGXSAN_ELRANGE_CHECK_BEG(addr, size)
-  if (sgxsan_region_is_poisoned(addr, size)) {
-    GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, addr, false, size, true);
+#define ASAN_MEMORY_ACCESS_CALLBACK_N(type, is_write)                          \
+  extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##N(               \
+      uptr addr, uptr size, bool used_to_cmp, char *parent_func) {             \
+    if (sgxsan_region_is_poisoned(addr, size)) {                               \
+      GET_CALLER_PC_BP_SP;                                                     \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, true);              \
+    }                                                                          \
+    SGXSAN_ELRANGE_CHECK_BEG(addr, size)                                       \
+    MemAccessMgrInEnclaveAccess();                                             \
+    SGXSAN_ELRANGE_CHECK_MID                                                   \
+    MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, used_to_cmp,    \
+                                 parent_func);                                 \
+    SGXSAN_ELRANGE_CHECK_END;                                                  \
   }
-  SGXSAN_ELRANGE_CHECK_MID
-  WhitelistQuery((void *)addr, size, false, used_to_cmp, parent_func);
-  SGXSAN_ELRANGE_CHECK_END;
-}
 
-extern "C" NOINLINE INTERFACE_ATTRIBUTE void
-__asan_storeN(uptr addr, uptr size, bool used_to_cmp, char *parent_func) {
-  SGXSAN_ELRANGE_CHECK_BEG(addr, size)
-  if (sgxsan_region_is_poisoned(addr, size)) {
-    GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, addr, true, size, true);
-  }
-  SGXSAN_ELRANGE_CHECK_MID
-  WhitelistQuery((void *)addr, size, true, used_to_cmp, parent_func);
-  SGXSAN_ELRANGE_CHECK_END;
-}
+ASAN_MEMORY_ACCESS_CALLBACK_N(load, false)
+ASAN_MEMORY_ACCESS_CALLBACK_N(store, true)

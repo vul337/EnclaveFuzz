@@ -1,8 +1,8 @@
 #pragma once
 
 #include "ContainerAllocator.hpp"
-#include "SGXSanCommonPoison.hpp"
-#include "SGXSanInt.h"
+#include "Poison.hpp"
+#include "SGXSanRTCom.h"
 #include <cstddef>
 #include <queue>
 

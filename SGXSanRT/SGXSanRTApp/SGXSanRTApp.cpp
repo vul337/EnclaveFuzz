@@ -8,6 +8,7 @@
 #include <regex>
 #include <signal.h>
 #include <sstream>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,13 +16,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "SGXSanCommonPoison.hpp"
-#include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanDefs.h"
-#include "SGXSanLog.hpp"
-#include "SGXSanManifest.h"
+#include "SGXSanRTCom.h"
 #include "SGXSanRTUBridge.hpp"
-#include "config.h"
 
 struct SGXSanMMapInfo {
   uint64_t start = 0;
@@ -36,17 +32,10 @@ struct SGXSanMMapInfo {
 std::string enclave_name(ENCLAVE_FILENAME);
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
-uint64_t kEnclaveMemBeg = 0, kEnclaveMemEnd = 0, kEnclaveShadowBeg = 0,
-         kEnclaveShadowEnd = 0;
-static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0,
-                g_shadow_low_guard_start = 0, g_shadow_high_guard_end = 0;
-static struct sigaction g_old_sigact[_NSIG];
-// don't touch it at app side, since there is a rwlock applied at enclave side
-std::vector<SGXSanMMapInfo> g_mmap_infos;
-const bool only_record_readable_mmap_info = true;
-
+static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
 std::string sgxsan_exec(const char *cmd);
 
+/* Log util */
 static const char *log_level_to_prefix[] = {
     "",
     "[SGXSan error] ",
@@ -79,17 +68,36 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
 }
 
 void PrintAddressSpaceLayout() {
-  log_debug("|| `[%16p, %16p]` || Shadow    ||\n", (void *)kEnclaveShadowBeg,
-            (void *)kEnclaveShadowEnd);
-  log_debug("|| `[%16p, %16p]` || LowGuard  ||\n",
+  log_debug("|| `[%16p, %16p]` || LowMem           ||\n", (void *)kLowMemBeg,
+            (void *)kLowMemEnd);
+  log_debug("|| `[%16p, %16p]` || LowShadowGuard   ||\n",
+            (void *)kLowShadowGuardBeg, (void *)(kLowShadowBeg - 1));
+  log_debug("|| `[%16p, %16p]` || LowShadow        ||\n", (void *)kLowShadowBeg,
+            (void *)kLowShadowEnd);
+  log_debug("|| `[%16p, %16p]` || ShadowGap        ||\n", (void *)kShadowGapBeg,
+            (void *)kShadowGapEnd);
+  log_debug("|| `[%16p, %16p]` || HighShadow       ||\n",
+            (void *)kHighShadowBeg, (void *)kHighShadowEnd);
+  log_debug("|| `[%16p, %16p]` || HighShadowGuard  ||\n",
+            (void *)(kHighShadowEnd + 1), (void *)kHighShadowGuardEnd);
+  log_debug("|| `[%16p, %16p]` || HighMem          ||\n", (void *)kHighMemBeg,
+            (void *)kHighMemEnd);
+  log_debug("|| `[%16p, %16p]` || LowElrangeGuard  ||\n",
             (void *)g_enclave_low_guard_start, (void *)(g_enclave_base - 1));
-  log_debug("|| `[%16p, %16p]` || Elrange   ||\n", (void *)g_enclave_base,
+  log_debug("|| `[%16p, %16p]` || Elrange          ||\n",
+            (void *)g_enclave_base,
             (void *)(g_enclave_base + g_enclave_size - 1));
-  log_debug("|| `[%16p, %16p]` || HighGuard ||\n\n",
+  log_debug("|| `[%16p, %16p]` || HighElrangeGuard ||\n",
             (void *)(g_enclave_base + g_enclave_size),
             (void *)g_enclave_high_guard_end);
+  log_debug("\n");
 }
 
+/* Stack trace */
+void sgxsan_print_stack_trace(log_level ll) { (void)ll; }
+
+/* Signal */
+static struct sigaction g_old_sigact[_NSIG];
 void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   if (signum == SIGSEGV) {
     // process siginfo
@@ -109,14 +117,14 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
       log_error("Infer pointer dereference overflows enclave boundray, as "
                 "mprotect's effort is page-granularity and si_addr only give "
                 "page-granularity address\n");
-    } else if ((g_shadow_low_guard_start <= page_fault_addr &&
-                page_fault_addr < kEnclaveShadowBeg) ||
-               (kEnclaveShadowEnd < page_fault_addr &&
-                page_fault_addr <= g_shadow_high_guard_end)) {
+    } else if ((kLowShadowGuardBeg <= page_fault_addr &&
+                page_fault_addr < kLowShadowBeg) ||
+               (kHighShadowEnd < page_fault_addr &&
+                page_fault_addr <= kHighShadowGuardEnd)) {
       log_error("Pointer dereference overflows shadow map boundray "
                 "(Overlapping memory access)\n");
-    } else if ((kEnclaveShadowEnd + 1 - 0x1000) <= page_fault_addr &&
-               page_fault_addr <= kEnclaveShadowEnd) {
+    } else if ((kHighShadowEnd + 1 - 0x1000) <= page_fault_addr &&
+               page_fault_addr <= kHighShadowEnd) {
       log_error("Infer pointer dereference overflows shadow map boundray, as "
                 "mprotect's effort is page-granularity and si_addr only give "
                 "page-granularity address\n");
@@ -169,76 +177,60 @@ void reg_sgxsan_sigaction() {
                "Fail to regist SIGSEGV action\n");
 }
 
+/* CovMap */
+/* Set by pass, get by runtime */
 static uint8_t *__SGXSanCovMap = (uint8_t *)0x1234567890;
 extern "C" void setCovMapAddr(uint8_t *addr) { __SGXSanCovMap = addr; }
 extern "C" uint8_t *getCovMapAddr() { return __SGXSanCovMap; }
 
-// create shadow memory outside enclave for elrange
-// because shadow is independent of elrange, we just need one block of memory
-// for shadow, and don't need consider shadow gap.
+// Memory layout
 void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size,
-                                     uptr *shadow_beg_ptr, uptr *shadow_end_ptr,
                                      uint8_t **cov_map_beg_ptr) {
-  *cov_map_beg_ptr = getCovMapAddr();
-
+  // Init Enclave info outside Enclave
   g_enclave_base = enclave_base;
   g_enclave_size = enclave_size;
 
-  // only use LowMem and LowShadow as ELRANGE and EnclaveShadow
-  kEnclaveShadowBeg = SGXSAN_SHADOW_MAP_BASE;
-  kEnclaveShadowEnd = (enclave_size >> 3) + kEnclaveShadowBeg - 1;
-  kEnclaveMemBeg = g_enclave_base;
-  kEnclaveMemEnd = g_enclave_base + enclave_size - 1;
+  sgxsan_assert(((g_enclave_base & 0xfff) == 0) &&
+                (((g_enclave_base + g_enclave_size) & 0xfff) == 0));
 
-  uptr page_size = getpagesize();
-  sgxsan_error(page_size != 0x1000, "Currently only support 4k page size\n");
-
-  g_shadow_low_guard_start = kEnclaveShadowBeg - page_size;
-  g_shadow_high_guard_end = kEnclaveShadowEnd + page_size;
-
-  // fix-me: may need unmap at destructor
-  // mmap the shadow plus at least one page at the left.
-  sgxsan_error(
-      (MAP_FAILED ==
-       mmap((void *)g_shadow_low_guard_start,
-            g_shadow_high_guard_end - g_shadow_low_guard_start + 1,
-            PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1, 0)) ||
-          (-1 == madvise((void *)g_shadow_low_guard_start,
-                         g_shadow_high_guard_end - g_shadow_low_guard_start + 1,
-                         MADV_NOHUGEPAGE)),
-      "Shadow Memory unavailable\n");
-  sgxsan_error(
-      mprotect((void *)g_shadow_low_guard_start, page_size, PROT_NONE) ||
-          mprotect((void *)(kEnclaveShadowEnd + 1), page_size, PROT_NONE),
-      "Failed to make guard page for shadow map");
-  sgxsan_error(((kEnclaveMemBeg & 0xfff) != 0) ||
-                   (((kEnclaveMemEnd + 1) & 0xfff) != 0),
-               "Elrange is not aligned to page\n");
+  // Start to init shadow map
+  size_t page_size = getpagesize();
+  sgxsan_assert(page_size == PAGE_SIZE);
 
   // consistent with modification in
   // psw/enclave_common/sgx_enclave_common.cpp:enclave_create_ex
-  g_enclave_low_guard_start = kEnclaveMemBeg - page_size;
-  g_enclave_high_guard_end = kEnclaveMemEnd + page_size;
+  g_enclave_low_guard_start = g_enclave_base - page_size;
+  g_enclave_high_guard_end = g_enclave_base + g_enclave_size - 1 + page_size;
+
+  // get CovMap address if exist
+  *cov_map_beg_ptr = getCovMapAddr();
+
+  // mmap the shadow plus it's guard pages
+  sgxsan_assert(mmap((void *)kLowShadowGuardBeg,
+                     kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
+                     PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1,
+                     0) != MAP_FAILED);
+  sgxsan_assert(madvise((void *)kLowShadowGuardBeg,
+                        kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
+                        MADV_NOHUGEPAGE) != -1);
+  sgxsan_assert(
+      mprotect((void *)kLowShadowGuardBeg, page_size, PROT_NONE) == 0 &&
+      mprotect((void *)(kHighShadowEnd + 1), page_size, PROT_NONE) == 0);
+  sgxsan_assert(mprotect((void *)kShadowGapBeg,
+                         kShadowGapEnd - kShadowGapBeg + 1, PROT_NONE) == 0);
 
   // make sure 0 address is not accessible
-  auto result = sgxsan_exec("sysctl vm.mmap_min_addr");
-  std::regex mmap_min_addr_patten("vm.mmap_min_addr = ([0-9a-fA-F]+)");
-  std::smatch match;
-  if (std::regex_search(result, match, mmap_min_addr_patten)) {
-    auto mmap_min_addr_str = match[1].str();
-    auto mmap_min_addr = std::stoull(mmap_min_addr_str, nullptr, 0);
-    if (mmap_min_addr == 0)
-      sgxsan_error(MAP_FAILED == mmap((void *)0, 0x10000, PROT_NONE,
-                                      MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
-                                      -1, 0),
-                   "Failed to make 0 address not accessible\n");
+  auto mmap_min_addr = std::stoull(
+      sgxsan_exec("sysctl vm.mmap_min_addr| tr -s ' '|cut -d \" \" -f3"),
+      nullptr, 0);
+  if (mmap_min_addr == 0) {
+    mmap((void *)0, page_size, PROT_NONE,
+         MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    sgxsan_assert(mprotect((void *)0, page_size, PROT_NONE) == 0);
   }
 
   PrintAddressSpaceLayout();
-
-  *shadow_beg_ptr = kEnclaveShadowBeg;
-  *shadow_end_ptr = kEnclaveShadowEnd;
 
   reg_sgxsan_sigaction();
 }
@@ -266,6 +258,7 @@ std::string sgxsan_exec(const char *cmd) {
   return result;
 }
 
+/* addr2line */
 std::string addr2line(uint64_t addr) {
   std::stringstream cmd;
   cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr;
@@ -325,6 +318,11 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr,
   return;
 }
 
+/* mmap infos */
+// don't touch it at app side, since there is a rwlock applied at enclave side
+// directly used by Enclave
+std::vector<SGXSanMMapInfo> g_mmap_infos;
+static const bool only_record_readable_mmap_info = true;
 // write lock is applied at enclave side
 void sgxsan_ocall_get_mmap_infos(void **mmap_infos, size_t *real_cnt) {
   g_mmap_infos.clear();

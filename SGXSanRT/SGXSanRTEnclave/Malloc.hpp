@@ -1,9 +1,6 @@
 #pragma once
 
-#include "SGXSanCheck.h"
-#include "SGXSanDefs.h"
-#include "SGXSanInt.h"
-#include "SGXSanManifest.h"
+#include "SGXSanRTCom.h"
 #include <stddef.h>
 
 // use our malloc series (which use dlmalloc as backend), and override original

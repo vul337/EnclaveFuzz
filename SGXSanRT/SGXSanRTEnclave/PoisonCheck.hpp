@@ -1,51 +1,32 @@
 #pragma once
 
-#include "SGXSanAlignment.h"
-#include "SGXSanCheck.h"
-#include "SGXSanCommonPoison.hpp"
-#include "SGXSanCommonShadowMap.hpp"
-#include "SGXSanInt.h"
+#include "ErrorReport.hpp"
+#include "Poison.hpp"
+#include "SGXSanRTCom.h"
+#include <stdint.h>
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
-uptr sgxsan_region_is_poisoned(uptr beg, uptr size, bool ret_adddr = false);
-uptr sgxsan_region_is_poisoned_filtered(uptr beg, uptr size,
-                                        uint8_t filter = 0x8F,
-                                        bool ret_adddr = false);
+uptr sgxsan_region_is_poisoned(uptr beg, uptr size, uint8_t filter = kL1Filter,
+                               bool ret_adddr = false);
 bool sgxsan_region_is_in_elrange_and_poisoned(uint64_t beg, uint64_t size,
                                               uint8_t filter);
 #if defined(__cplusplus)
 }
 #endif
 
-// this func can't detect shallow poison, but faster
-static inline bool AddressIsPoisoned(uptr a) {
-  const uptr kAccessSize = 1;
-  u8 *shadow_address = (u8 *)MEM_TO_SHADOW(a);
-  // situation of shadow_value >= SHADOW_GRANULARITY (max positive integer for
-  // shadow byte is 0x7f) is that sgxsan's shallow poison usage
-  s8 shadow_value = *shadow_address;
-  if (shadow_value) {
-    // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
-    u8 last_accessed_byte = (a & (SHADOW_GRANULARITY - 1)) + kAccessSize - 1;
-    return last_accessed_byte >= shadow_value;
-  }
-  return false;
-}
-
-// this func can detect shallow poison, but slower
-static inline bool AddressIsPoisonedFiltered(uptr a, uint8_t filter = 0x8F) {
+static inline bool AddressIsPoisoned(uptr a, uint8_t filter = kL1Filter) {
   const uptr kAccessSize = 1;
   u8 *shadow_address = (u8 *)MEM_TO_SHADOW(a);
   // situation of shadow_value >= SHADOW_GRANULARITY (max positive integer for
   // shadow byte is 0x7f) is that sgxsan's shallow poison usage
   s8 shadow_value = (*shadow_address) & filter;
   if (shadow_value) {
-    // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
+    // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (e.g. 0x7)
     u8 last_accessed_byte = (a & (SHADOW_GRANULARITY - 1)) + kAccessSize - 1;
-    return shadow_value >= 0x8 ||
-           last_accessed_byte >=
+    return shadow_value >= (s8)SHADOW_GRANULARITY ||
+           ((s8)last_accessed_byte) >=
                shadow_value /* shadow_value is 0x1-0x7 or < 0x0 */;
   }
   return false;
@@ -67,7 +48,8 @@ static inline bool QuickCheckForUnpoisonedRegion(uptr beg, uptr size) {
   return false;
 }
 
-static inline bool mem_is_zero(uint8_t *beg, uptr size, uint8_t filter = 0x8F) {
+static inline bool mem_is_zero(uint8_t *beg, uptr size,
+                               uint8_t filter = kL1Filter) {
   if (size == 0)
     return true;
   CHECK_LE(size, 1ULL << 40); // Sanity check.
@@ -87,10 +69,7 @@ static inline bool mem_is_zero(uint8_t *beg, uptr size, uint8_t filter = 0x8F) {
     for (uint8_t *mem = (uint8_t *)aligned_end; mem < end; mem++)
       all |= *mem;
   }
-  uptr actual_filter = 0;
-  for (size_t i = 0; i < (sizeof(uptr) / 8); i++) {
-    actual_filter = (actual_filter << 8) + filter;
-  }
+  uptr actual_filter = ExtendInt8(filter);
   return (all & actual_filter) == 0;
 }
 
@@ -133,7 +112,8 @@ static inline bool RangesOverlap(const char *offset1, uptr length1,
                  "[%s:%d] 0x%lx:%lu size overflow\n", __FILE__, __LINE__,      \
                  __offset, __size);                                            \
     if (!QuickCheckForUnpoisonedRegion(__offset, __size) &&                    \
-        (__bad = sgxsan_region_is_poisoned(__offset, __size, true))) {         \
+        (__bad =                                                               \
+             sgxsan_region_is_poisoned(__offset, __size, kL1Filter, true))) {  \
       GET_CALLER_PC_BP_SP;                                                     \
       ReportGenericError(pc, bp, sp, __bad, isWrite, __size, true);            \
     }                                                                          \
