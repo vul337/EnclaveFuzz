@@ -3924,7 +3924,7 @@ void AddressSanitizer::instrumentTDECallMgr(Function *ecallWrapper) {
 
 Value *AddressSanitizer::getEDLPtCount(Instruction *insertPt, Value *obj,
                                        int argPos,
-                                       ordered_json::json_pointer jsonPtr) {
+                                       ordered_json::json_pointer jsonPtr, size_t idx) {
   // prepare
   auto argOp = getArg(obj, argPos); // must be a pointer
   auto eleTy = argOp->getType()->getPointerElementType();
@@ -3961,7 +3961,7 @@ Value *AddressSanitizer::getEDLPtCount(Instruction *insertPt, Value *obj,
       count = ConstantInt::get(IntptrTy, edlJson[jsonPtr / "count"]);
     } else {
       count = IRB.CreateIntCast(
-          getArg(obj, (size_t)edlJson[jsonPtr / "count" / "co_param_pos"]),
+          getArg(obj, (size_t)edlJson[jsonPtr / "count" / "co_param_pos"] + idx),
           IntptrTy, false);
     }
     if (edlJson[jsonPtr / "size"].is_null()) {
@@ -3971,7 +3971,7 @@ Value *AddressSanitizer::getEDLPtCount(Instruction *insertPt, Value *obj,
       size = ConstantInt::get(IntptrTy, _size);
     } else {
       size = IRB.CreateIntCast(
-          getArg(obj, (size_t)edlJson[jsonPtr / "size" / "co_param_pos"]),
+          getArg(obj, (size_t)edlJson[jsonPtr / "size" / "co_param_pos"] + idx),
           IntptrTy, false);
     }
     ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
@@ -4162,7 +4162,7 @@ bool AddressSanitizer::instrumentRealECall(CallInst *RealECall) {
       ordered_json::json_pointer jsonPtr("/trusted");
       jsonPtr =
           jsonPtr / getDirectCalleeName(RealECall).str() / "parameter" / i;
-      Value *argPtCnt = getEDLPtCount(RealECall, RealECall, i, jsonPtr);
+      Value *argPtCnt = getEDLPtCount(RealECall, RealECall, i, jsonPtr, 0);
       /// EDL: \c [in/out/user_check] all are possible to contain OutAddr
       instrumentPtrBridgeCheck(
           arg, RealECall, 0, argPtCnt, nullptr,
@@ -4195,13 +4195,19 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
     for (Argument &arg : OcallWrapper.args()) {
       if (arg.getType()->isPointerTy()) {
         ordered_json::json_pointer jsonPtr("/untrusted");
-        jsonPtr = jsonPtr / OcallWrapper.getName().str() / "parameter" /
-                  arg.getArgNo();
-        if (edlJson[jsonPtr / "out"] == true ||
-            edlJson[jsonPtr / "user_check"] == true) {
-          Value *argPtCnt =
-              getEDLPtCount(RetInst, &OcallWrapper, arg.getArgNo(), jsonPtr);
-          instrumentPtrBridgeCheck(&arg, RetInst, 0, argPtCnt, nullptr, false);
+        jsonPtr = jsonPtr / OcallWrapper.getName().str();
+        if (edlJson[jsonPtr / "return" / "type"].get<std::string>() == "void") {
+          jsonPtr = jsonPtr / "parameter" / arg.getArgNo();
+          if (edlJson[jsonPtr / "out"] == true || edlJson[jsonPtr / "user_check"] == true) {
+            Value *argPtCnt = getEDLPtCount(RetInst, &OcallWrapper, arg.getArgNo(), jsonPtr, 0);
+            instrumentPtrBridgeCheck(&arg, RetInst, 0, argPtCnt, nullptr, false);
+          }
+        } else { // non-void return parameter pos should +1
+          jsonPtr = jsonPtr / "parameter" / arg.getArgNo();
+          if (edlJson[jsonPtr / "out"] == true || edlJson[jsonPtr / "user_check"] == true) {
+            Value *argPtCnt = getEDLPtCount(RetInst, &OcallWrapper, arg.getArgNo(), jsonPtr, 1);
+            instrumentPtrBridgeCheck(&arg, RetInst, 0, argPtCnt, nullptr, false);
+          }
         }
       }
     }

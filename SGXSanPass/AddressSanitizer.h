@@ -95,7 +95,7 @@ struct AddressSanitizer {
   /// \retval 1) \c nullptr if unknown
   /// \retval 2) Otherwise, Value's type is \c IntptrTy
   Value *getEDLPtCount(Instruction *insertPt, Value *obj, int argPos,
-                       nlohmann::ordered_json::json_pointer jsonPtr);
+                       nlohmann::ordered_json::json_pointer jsonPtr, size_t idx);
   /// \param obj must be Function or CallInst
   Value *getArg(Value *obj, size_t pos);
 
