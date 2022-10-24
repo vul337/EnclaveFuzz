@@ -88,7 +88,7 @@ void PoisonShadow(uptr addr, uptr size, uint8_t value,
   if (remained) {
     uint8_t *shadowEnd = (uint8_t *)MEM_TO_SHADOW(addr + size - remained);
     int8_t origValue = L1F(*shadowEnd);
-    if (value < 0) {
+    if (value >= 0x80) {
       if (0 <= origValue && origValue <= (int8_t)remained)
         *shadowEnd = L0P(value);
     } else if (value == kAsanNotPoisonedMagic) {
