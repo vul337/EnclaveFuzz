@@ -94,15 +94,12 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
     prefix += std::string(log_level_to_prefix[level]) + "[" +
               time_in_HH_MM_SS_MMM() + "] ";
   }
+  std::cerr << prefix;
 
-  // get buf from format
-  char buf[BUFSIZ] = {'\0'};
   va_list ap;
   va_start(ap, format);
-  vsnprintf(buf, BUFSIZ, format, ap);
+  vfprintf(stderr, format, ap);
   va_end(ap);
-  // output
-  std::cerr << prefix << std::string(buf);
 }
 
 // DataFactory Util
