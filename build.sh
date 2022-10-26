@@ -16,6 +16,6 @@ then
     cp edger8r/_build/default/linux/Edger8r.bc Tool/sgx_edger8r
 fi
 # build
-cmake -DCMAKE_BUILD_TYPE=${BUILD_MOD} -B ${BUILD_MOD}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/install
+cmake -DCMAKE_BUILD_TYPE=${BUILD_MOD} -B ${BUILD_MOD}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/install -DHOST_ASAN=0
 cmake --build ${BUILD_MOD}-build -j$(nproc)
 cmake --install ${BUILD_MOD}-build
