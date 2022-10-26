@@ -11,6 +11,6 @@
 #define SHOW_TID 0
 
 // after modification, need rebuild both rt and pass
-#define SHADOW_OFFSET 0x18000000000ULL
+#define SHADOW_OFFSET 0x7FFF8000ULL
 
 #define ENCLAVE_FILENAME "enclave.signed.so"
