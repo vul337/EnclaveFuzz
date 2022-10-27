@@ -17,7 +17,7 @@ add_library(
     PoisonCheck.cpp
     SGXSanRT.cpp
     ArgShadow.cpp
-    OutAddrWhitelist.cpp
+    MemAccessMgr.cpp
     Sticker.cpp 
     ${LINUX_SGX_MINI}/sdk/tlibc/spinlock.c 
     ${LINUX_SGX_MINI}/sdk/tlibc/string/consttime_memequal.c 

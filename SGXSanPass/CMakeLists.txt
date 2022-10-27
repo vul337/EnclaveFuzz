@@ -1,7 +1,7 @@
 # Locate LLVM
 set(LLVM_DIR "$ENV{LLVM_DIR}")
 if(NOT LLVM_DIR)
-    message(FATAL_ERROR "Please specify LLVM Path, e.g. \"export LLVM_DIR=/usr/lib/llvm\"")
+    set(LLVM_DIR "/usr/lib/llvm-13")
 endif()
 
 message(STATUS "LLVM_DIR: ${LLVM_DIR}")

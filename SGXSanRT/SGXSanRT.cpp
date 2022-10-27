@@ -1,6 +1,6 @@
 #include "SGXSanRT.h"
 #include "ArgShadow.h"
-#include "OutAddrWhitelist.h"
+#include "MemAccessMgr.h"
 #include "plthook.h"
 #include <execinfo.h>
 #include <fstream>
@@ -16,15 +16,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_map>
-
-struct SGXSanMMapInfo {
-  uptr start = 0;
-  uptr end = 0;
-  bool is_readable = false;
-  bool is_writable = false;
-  bool is_executable = false;
-  bool is_shared = false;
-};
 
 enum EncryptStatus { Unknown, Plaintext, Ciphertext };
 
@@ -42,7 +33,6 @@ std::unordered_map<void * /* callsite addr */,
                    std::vector<EncryptStatus> /* output type history */>
     output_history;
 static pthread_rwlock_t output_history_rwlock = PTHREAD_RWLOCK_INITIALIZER;
-static uint64_t g_shadow_low_guard_start = 0, g_shadow_high_guard_end = 0;
 static struct sigaction g_old_sigact[_NSIG];
 
 static std::string sgxsan_exec(const char *cmd) {
@@ -62,7 +52,7 @@ static void PrintAddressSpaceLayout() {
   log_debug("|| `[%16p, %16p]` || LowMem          ||\n", (void *)kLowMemBeg,
             (void *)kLowMemEnd);
   log_debug("|| `[%16p, %16p]` || LowShadowGuard  ||\n",
-            (void *)g_shadow_low_guard_start, (void *)(kLowShadowBeg - 1));
+            (void *)kLowShadowGuardBeg, (void *)(kLowShadowBeg - 1));
   log_debug("|| `[%16p, %16p]` || LowShadow       ||\n", (void *)kLowShadowBeg,
             (void *)kLowShadowEnd);
   log_debug("|| `[%16p, %16p]` || ShadowGap       ||\n", (void *)kShadowGapBeg,
@@ -70,7 +60,7 @@ static void PrintAddressSpaceLayout() {
   log_debug("|| `[%16p, %16p]` || HighShadow      ||\n", (void *)kHighShadowBeg,
             (void *)kHighShadowEnd);
   log_debug("|| `[%16p, %16p]` || HighShadowGuard ||\n",
-            (void *)(kHighShadowEnd + 1), (void *)g_shadow_high_guard_end);
+            (void *)(kHighShadowEnd + 1), (void *)kHighShadowGuardEnd);
   log_debug("|| `[%16p, %16p]` || HighMem         ||\n", (void *)kHighMemBeg,
             (void *)kHighMemEnd);
 }
@@ -84,10 +74,10 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
   if (page_fault_addr == 0) {
     log_error("Null-Pointer Dereference\n");
-  } else if ((g_shadow_low_guard_start <= page_fault_addr &&
+  } else if ((kLowShadowGuardBeg <= page_fault_addr &&
               page_fault_addr < kLowShadowBeg) ||
              (kHighShadowEnd < page_fault_addr &&
-              page_fault_addr <= g_shadow_high_guard_end)) {
+              page_fault_addr <= kHighShadowGuardEnd)) {
     log_error("ShadowMap's Guard Dereference\n");
   } else if ((kHighShadowEnd + 1 - page_size) <= page_fault_addr &&
              page_fault_addr <= kHighShadowEnd) {
@@ -146,25 +136,22 @@ static void register_sgxsan_sigaction() {
 /// \brief Initialize shadow memory
 static void sgxsan_init_shadow_memory() {
   size_t page_size = getpagesize();
-
-  g_shadow_low_guard_start = kLowShadowBeg - page_size;
-  g_shadow_high_guard_end = kHighShadowEnd + page_size;
+  sgxsan_assert(page_size == PAGE_SIZE);
 
   // mmap the shadow plus it's guard pages
-  sgxsan_error(mmap((void *)g_shadow_low_guard_start,
-                    g_shadow_high_guard_end - g_shadow_low_guard_start + 1,
+  sgxsan_error(mmap((void *)kLowShadowGuardBeg,
+                    kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
                     PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1,
                     0) == MAP_FAILED,
                "Shadow Memory is not available\n");
-  sgxsan_error(madvise((void *)g_shadow_low_guard_start,
-                       g_shadow_high_guard_end - g_shadow_low_guard_start + 1,
+  sgxsan_error(madvise((void *)kLowShadowGuardBeg,
+                       kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
                        MADV_NOHUGEPAGE) == -1,
                "Fail to madvise MADV_NOHUGEPAGE\n");
-  sgxsan_error(
-      mprotect((void *)g_shadow_low_guard_start, page_size, PROT_NONE) ||
-          mprotect((void *)(kHighShadowEnd + 1), page_size, PROT_NONE),
-      "Failed to make guard page for shadow map\n");
+  sgxsan_error(mprotect((void *)kLowShadowGuardBeg, page_size, PROT_NONE) ||
+                   mprotect((void *)(kHighShadowEnd + 1), page_size, PROT_NONE),
+               "Failed to make guard page for shadow map\n");
   sgxsan_error(mprotect((void *)kShadowGapBeg,
                         kShadowGapEnd - kShadowGapBeg + 1, PROT_NONE),
                "Failed to make gap in shadow not accessible\n");
@@ -178,107 +165,6 @@ static void sgxsan_init_shadow_memory() {
          MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     sgxsan_error(mprotect((void *)0, page_size, PROT_NONE),
                  "Failed to make 0 address not accessible\n");
-  }
-}
-
-class MmapInfo {
-public:
-  MmapInfo() {
-    sgxsan_assert(m_mmap_infos.size() == 0);
-    update();
-  }
-
-  void update() {
-    pthread_rwlock_wrlock(&m_rwlock);
-    m_mmap_infos.clear();
-    std::fstream f("/proc/self/maps", std::ios::in);
-    std::string line;
-    std::regex map_pattern(
-        "([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
-    std::smatch match;
-    while (std::getline(f, line)) {
-      if (std::regex_search(line, match, map_pattern)) {
-        bool is_readable = match[3] == "r";
-        if (!is_readable) {
-          continue;
-        }
-        SGXSanMMapInfo info;
-        info.start = std::stoull(match[1].str(), nullptr, 16);
-        info.end = std::stoull(match[2].str(), nullptr, 16) - 1;
-        info.is_readable = is_readable;
-        info.is_writable = match[4] == "w";
-        info.is_executable = match[5] == "x";
-        std::string sharedOrPrivate = match[6];
-        if (sharedOrPrivate == "s")
-          info.is_shared = true;
-        else if (sharedOrPrivate == "p")
-          info.is_shared = false;
-        else
-          abort();
-        m_mmap_infos.push_back(info);
-      }
-    }
-    pthread_rwlock_unlock(&m_rwlock);
-  }
-
-  bool is_readable(void *ptr, size_t element_size, int count) {
-    if (ptr == nullptr) {
-      return false;
-    } else if (element_size == 0) {
-      return true;
-    } else {
-      bool ret = false;
-      size_t len = element_size * std::max(1, count);
-      pthread_rwlock_rdlock(&m_rwlock);
-      int idx = search_idx((uptr)ptr, 0, m_mmap_infos.size() - 1);
-      if (idx != -1) {
-        sgxsan_error(m_mmap_infos[idx].end < ((uptr)ptr + len - 1),
-                     "Region cross multiple segment\n");
-        ret = true;
-      } else {
-        ret = false;
-      }
-      pthread_rwlock_unlock(&m_rwlock);
-      return ret;
-    }
-  }
-
-private:
-  /// assume \c m_mmap_infos is sorted, and info range is [info.start,
-  /// info.end]
-  int search_idx(uptr addr, int start_idx, int end_idx) {
-    if (start_idx < 0 || start_idx > end_idx)
-      return -1;
-    int mid_idx = (start_idx + end_idx) / 2;
-    auto &info = m_mmap_infos[mid_idx];
-    if (info.start <= addr and addr <= info.end) {
-      return mid_idx;
-    } else if (addr < info.start) {
-      return search_idx(addr, start_idx, mid_idx - 1);
-    } else /* addr > info.end */
-    {
-      return search_idx(addr, mid_idx + 1, end_idx);
-    }
-  }
-  pthread_rwlock_t m_rwlock = PTHREAD_RWLOCK_INITIALIZER;
-  std::vector<SGXSanMMapInfo> m_mmap_infos;
-};
-MmapInfo g_mmap_infos;
-
-extern "C" bool is_region_readable(void *ptr, size_t element_size, int count) {
-  if (ptr == nullptr)
-    return false;
-  bool result = g_mmap_infos.is_readable(ptr, element_size, count);
-  if (result == false) {
-    g_mmap_infos.update();
-    // twice check
-    result = g_mmap_infos.is_readable(ptr, element_size, count);
-    if (result == false) {
-      sgxsan_warning(true, "Pass non-null unreadable pointer parameter\n");
-    }
-    return result;
-  } else {
-    return true;
   }
 }
 
@@ -431,7 +317,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   log_level ll = fatal ? LOG_LEVEL_ERROR : LOG_LEVEL_WARNING;
   sgxsan_log(ll, false,
              "================ Error Report ================\n"
-             "[ERROR MESSAGE] %s\n"
+             "%s\n"
              "  pc = 0x%lx\tbp   = 0x%lx\n"
              "  sp = 0x%lx\taddr = 0x%lx\n"
              "  is_write = %d\t\taccess_size = 0x%lx\n",
@@ -575,7 +461,7 @@ static __thread int TD_init_count = 0;
 extern "C" void TDECallConstructor() {
   if (TD_init_count == 0) {
     // root ecall
-    OutAddrWhitelist::init();
+    MemAccessMgr::init();
     ArgShadowStack::init();
   }
   TD_init_count++;
@@ -585,7 +471,7 @@ extern "C" void TDECallConstructor() {
 extern "C" void TDECallDestructor() {
   if (TD_init_count == 1) {
     // root ecall
-    OutAddrWhitelist::destroy();
+    MemAccessMgr::destroy();
     ArgShadowStack::destroy();
   }
   TD_init_count--;

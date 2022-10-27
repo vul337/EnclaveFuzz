@@ -76,28 +76,11 @@ struct AddressSanitizer {
   void declareAdditionalSymbol(Module &M);
   /// \brief Instrument \c memset_s/memmove_s/memcpy_s
   void instrumentSecMemIntrinsic(CallInst *CI);
-  bool hasPointerElement(Type *type);
-  bool _hasPointerElement(Type *type, size_t level);
   /// \brief Instrument \c TDECallConstructor and \c TDECallDestructor at begin
   /// and end of ecall wrapper respectively
   void instrumentTDECallMgr(Function *ecallWrapper);
-  bool instrumentGlobalPropageteWhitelist(StoreInst *SI);
   bool instrumentRealECall(CallInst *CI);
   bool instrumentOcallWrapper(Function &OcallWrapper);
-  /*! \param eleCnt if \p operand is pointer then \c nullptr means no idea about
-   * element count */
-  bool instrumentPtrBridgeCheck(Value *operand, Instruction *insertPt,
-                                int depth, Value *eleCnt = nullptr,
-                                Value *operandAddr = nullptr,
-                                bool checkCurLvPtr = true);
-  /// \brief get \p obj \p argPos 'th argument point-to count
-  /// \param obj must be Function or CallInst
-  /// \retval 1) \c nullptr if unknown
-  /// \retval 2) Otherwise, Value's type is \c IntptrTy
-  Value *getEDLPtCount(Instruction *insertPt, Value *obj, int argPos,
-                       nlohmann::ordered_json::json_pointer jsonPtr, size_t idx);
-  /// \param obj must be Function or CallInst
-  Value *getArg(Value *obj, size_t pos);
 
 private:
   friend struct FunctionStackPoisoner;
@@ -154,16 +137,13 @@ private:
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
 
-  FunctionCallee WhitelistActive, WhitelistDeactive, WhitelistQuery,
-      WhitelistGlobalPropagate, WhitelistAddInEnclaveAccessCnt,
-      SGXSanBridgeCheck, SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS,
-      TDECallConstructor, TDECallDestructor, is_region_readable, StrLen, WCSLen,
+  FunctionCallee MemAccessMgrActive, MemAccessMgrDeactive,
+      MemAccessMgrOutEnclaveAccess, MemAccessMgrInEnclaveAccess, SGXSanMemcpyS,
+      SGXSanMemsetS, SGXSanMemmoveS, TDECallConstructor, TDECallDestructor,
       PushOCAllocStack, PopOCAllocStack;
   std::unordered_set<Function *> TDMgrInstrumentedEcall;
-  bool isFuncAtTBridge = false, hasEdlJson = false;
+  bool isFuncAtTBridge = false;
   Constant *globalFuncName = nullptr;
-  SmallVector<StoreInst *> GVStoreInsts;
-  nlohmann::ordered_json edlJson;
   std::map<Type *, bool> typeHasPointerMap;
 };
 

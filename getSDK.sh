@@ -23,8 +23,8 @@ OBJCOPY=objcopy
 AR=ar
 RM=rm
 MKDIR=mkdir
-CC=clang
-CXX=clang++
+CC=clang-13
+CXX=clang++-13
 Jobs=$(nproc)
 ADD_LLVM_FLAGS="-Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -fno-discard-value-names -flegacy-pass-manager -Xclang -load -Xclang ${PREFIX}/lib64/libSGXSanPass.so"
 ADD_MAKE_FLAGS=
@@ -90,3 +90,5 @@ cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/uae_service_sim/linux
 ${MAKE} clean -s
 ${MAKE} -j${Jobs} ${ADD_MAKE_FLAGS}
 ${CP} libsgx_uae_service_sim.so ${PREFIX}/lib64
+
+echo "== Successfully get SGXSDK =="

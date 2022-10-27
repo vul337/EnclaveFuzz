@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Page assumption */
+#define PAGE_SIZE 0x1000
+#define PAGE_SIZE_SHIFT 12
+
 /// Shadow basic settings
 #ifndef SHADOW_OFFSET
 #define SHADOW_OFFSET 0x7fff8000
@@ -44,6 +48,11 @@ typedef signed long sptr;
 #define kShadowGapBeg (kLowShadowEnd + 1)
 #define kShadowGapEnd (kHighShadowBeg - 1)
 
+#define kLowShadowGuardBeg (kLowShadowBeg - PAGE_SIZE)
+#define kLowShadowGuardEnd (kLowShadowBeg - 1)
+
+#define kHighShadowGuardBeg (kHighShadowEnd + 1)
+#define kHighShadowGuardEnd (kHighShadowEnd + PAGE_SIZE)
 /// Init util
 extern bool asan_inited;
 

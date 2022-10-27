@@ -1,5 +1,5 @@
 #include "PoisonCheck.h"
-#include "OutAddrWhitelist.h"
+#include "MemAccessMgr.h"
 #include "Poison.h"
 #include <algorithm>
 #include <assert.h>
@@ -40,7 +40,7 @@ ASAN_REPORT_ERROR_N(store, true)
 // memory access callback
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                      \
   extern "C" __attribute__((noinline)) void __asan_##type##size(               \
-      uptr addr, bool toCmp, char *funcName, bool atBridge) {                  \
+      uptr addr, bool toCmp, char *funcName) {                                 \
     uptr shadowMapPtr = MEM_TO_SHADOW(addr), shadowByte, inEnclaveFlag;        \
     if (size <= SHADOW_GRANULARITY) {                                          \
       shadowByte = *(uint8_t *)shadowMapPtr;                                   \
@@ -51,6 +51,7 @@ ASAN_REPORT_ERROR_N(store, true)
     }                                                                          \
     if (UNLIKELY(shadowByte != inEnclaveFlag)) {                               \
       if (LIKELY(shadowByte & inEnclaveFlag)) {                                \
+        MemAccessMgrInEnclaveAccess();                                         \
         uptr filter = size <= SHADOW_GRANULARITY                               \
                           ? kL1Filter                                          \
                           : ((kL1Filter << 8) + kL1Filter);                    \
@@ -63,9 +64,12 @@ ASAN_REPORT_ERROR_N(store, true)
             ReportGenericError(pc, bp, sp, addr, is_write, size, true);        \
           }                                                                    \
         }                                                                      \
-      } else if (not atBridge) {                                               \
-        WhitelistQuery((void *)addr, size, is_write, toCmp, funcName);         \
+      } else {                                                                 \
+        MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp,      \
+                                     funcName);                                \
       }                                                                        \
+    } else {                                                                   \
+      MemAccessMgrInEnclaveAccess();                                           \
     }                                                                          \
   }
 
@@ -82,20 +86,20 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 
 #define ASAN_MEMORY_ACCESS_CALLBACK_N(type, is_write)                          \
   extern "C" __attribute__((noinline)) void __asan_##type##N(                  \
-      uptr addr, uptr size, bool toCmp, char *funcName, bool atBridge) {       \
+      uptr addr, uptr size, bool toCmp, char *funcName) {                      \
     InOutEnclaveStatus addrInOutEnclaveStatus;                                 \
     PoisonStatus addrPoisonStatus;                                             \
     RegionInOutEnclaveStatusAndPoisonStatus(                                   \
         addr, size, addrInOutEnclaveStatus, addrPoisonStatus);                 \
     if (addrInOutEnclaveStatus == InEnclave) {                                 \
+      MemAccessMgrInEnclaveAccess();                                           \
       if (addrPoisonStatus != NotPoisoned) {                                   \
         GET_CALLER_PC_BP_SP;                                                   \
         ReportGenericError(pc, bp, sp, addr, is_write, size, true);            \
       }                                                                        \
     } else if (addrInOutEnclaveStatus == OutEnclave) {                         \
-      if (not atBridge) {                                                      \
-        WhitelistQuery((void *)addr, size, is_write, toCmp, funcName);         \
-      }                                                                        \
+      MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp,        \
+                                   funcName);                                  \
     } else {                                                                   \
       sgxsan_error(true, "Invalid addrInOutEnclaveStatus\n");                  \
     }                                                                          \
@@ -607,12 +611,13 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
     RegionInOutEnclaveStatusAndPoisonedAddr(                                   \
         (uptr)beg, size, regionInOutEnclaveStatus, PoisonedAddr, kL1Filter);   \
     if (regionInOutEnclaveStatus == InEnclave) {                               \
+      MemAccessMgrInEnclaveAccess();                                           \
       if (PoisonedAddr) {                                                      \
         GET_CALLER_PC_BP_SP;                                                   \
         ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
       }                                                                        \
     } else if (regionInOutEnclaveStatus == OutEnclave) {                       \
-      WhitelistQuery(beg, size, IsWrite);                                      \
+      MemAccessMgrOutEnclaveAccess(beg, size, IsWrite);                        \
     } else {                                                                   \
       sgxsan_error(true, "Invalid regionInOutEnclaveStatus\n");                \
     }                                                                          \
@@ -631,7 +636,7 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
       if (_srcPoisonedStatus != NotPoisoned) {                                 \
         GET_CALLER_PC_BP_SP;                                                   \
         ReportGenericError(pc, bp, sp, (uptr)srcAddr, 0, srcSize, false,       \
-                           "Plaintext Transfer");                              \
+                           "[WARNING] Plaintext Transfer");                    \
       }                                                                        \
       check_output_hybrid((uptr)srcAddr, srcSize);                             \
     }                                                                          \
@@ -732,27 +737,5 @@ errno_t __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
     LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, count);
   }
   return memmove_s(dst, dstSize, src, count);
-}
-
-/// Bridge Check
-void SGXSanBridgeCheck(void *ptr, uint64_t size, int cnt) {
-  sgxsan_assert(size > 0 && cnt != 0);
-  uint64_t min_size = size * std::max(1, cnt);
-  sgxsan_assert(min_size >= size);
-  InOutEnclaveStatus ptrInOutEnclaveStatus;
-  PoisonStatus ptrPoisonStatus;
-  RegionInOutEnclaveStatusAndPoisonStatus(
-      (uptr)ptr, min_size, ptrInOutEnclaveStatus, ptrPoisonStatus,
-      kSGXSanSensitiveLayout);
-  if (ptrInOutEnclaveStatus == InEnclave) {
-    if (ptrPoisonStatus != NotPoisoned) {
-      GET_CALLER_PC_BP_SP;
-      ReportGenericError(pc, bp, sp, (uptr)ptr, 0, min_size, false);
-    }
-  } else if (ptrInOutEnclaveStatus == OutEnclave) {
-    WhitelistAdd(ptr, (cnt == -1) ? (1 << 10) : (size * cnt));
-  } else {
-    sgxsan_error(true, "Invalid ptrInOutEnclaveStatus\n");
-  }
 }
 }
