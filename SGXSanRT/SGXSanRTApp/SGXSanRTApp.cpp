@@ -184,6 +184,10 @@ extern "C" void setCovMapAddr(uint8_t *addr) { __SGXSanCovMap = addr; }
 extern "C" uint8_t *getCovMapAddr() { return __SGXSanCovMap; }
 
 // Memory layout
+// ASAN's __asan_init -> __sanitizer_cov_8bit_counters_init ->
+// setCovMapAddr -> sgx_create_enclave -> enclave_create_ex -> reg_sig_handler
+// -> sgx_ecall -> SGXSan's __asan_init
+bool gSignalRegistered = false;
 void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size,
                                      uint8_t **cov_map_beg_ptr) {
   // Init Enclave info outside Enclave
@@ -232,7 +236,11 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size,
 
   PrintAddressSpaceLayout();
 
-  reg_sgxsan_sigaction();
+  // Register sgxsan_sigaction only once
+  if (gSignalRegistered == false) {
+    reg_sgxsan_sigaction();
+    gSignalRegistered = true;
+  }
 }
 
 /* OCall functions */
