@@ -30,10 +30,6 @@ enum log_level {
   LOG_LEVEL_TRACE,
 };
 
-#ifndef USED_LOG_LEVEL
-#define USED_LOG_LEVEL LOG_LEVEL_DEBUG
-#endif
-
 void sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt, ...);
 
 /// have prefix in output

@@ -31,6 +31,8 @@ std::string ClEnclaveFileName;
 size_t ClMaxStringLength;
 size_t ClMaxCount;
 size_t ClMaxSize;
+int ClUsedLogLevel;
+bool ClProvideNullPointer;
 
 // Fuzz sequence
 enum FuzzerTestModeTy { TEST_ONE, TEST_RANDOM, TEST_USER };
@@ -85,7 +87,7 @@ std::string time_in_HH_MM_SS_MMM() {
 }
 
 void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
-  if (level > USED_LOG_LEVEL)
+  if (level > ClUsedLogLevel)
     return;
 
   // get prefix
@@ -403,7 +405,7 @@ public:
         sgxfuzz_assert(mutatorData.json.empty());
       }
       mutatorData.dataID = getSha1Str(mutatorData.bjdata);
-      log_debug("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
+      log_trace("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
       dumpJson(mutatorData.json);
 
       /// Arbitrarily mutate on \c mutatorJson
@@ -423,7 +425,7 @@ public:
           sgxfuzz_assert(mutatorData.json.empty());
         }
         mutatorData.dataID = getSha1Str(mutatorData.bjdata);
-        log_debug("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
+        log_trace("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
         dumpJson(mutatorData.json);
 
         // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
@@ -431,7 +433,7 @@ public:
         /// process \c reqQueue
         auto paramReqs = it->second;
         it = reqQueue.erase(it);
-        // log_debug("reqQueue remove %s\n", mutatorData.bjdataBase64.c_str());
+        log_trace("reqQueue remove %s\n", mutatorData.bjdataBase64.c_str());
         sgxfuzz_assert(reqQueue.empty());
         for (auto paramReq : paramReqs) {
           auto req = paramReq.second;
@@ -463,7 +465,7 @@ public:
     sgxfuzz_assert(mutatorData.bjdata.size() <= MaxSize);
 
     memcpy(Data, mutatorData.bjdata.data(), mutatorData.bjdata.size());
-    log_debug("[After Mutate, ID: %s]\n", mutatorData.dataID.c_str());
+    log_trace("[After Mutate, ID: %s]\n", mutatorData.dataID.c_str());
     dumpJson(mutatorData.json);
     size_t newSize = mutatorData.bjdata.size();
     mutatorData.clear();
@@ -487,8 +489,7 @@ public:
     } else if (reqQueue.size() > 1) {
       abort();
     }
-    // log_debug("reqQueue add %s %s\n", DataID.c_str(),
-    // req.StrAsParamID.c_str());
+    log_trace("reqQueue add %s %s\n", DataID.c_str(), req.StrAsParamID.c_str());
     reqQueue[DataID][req.StrAsParamID] = req;
   }
 
@@ -539,8 +540,8 @@ public:
     } else {
       // Already prepared data for current ID
       FuzzDataTy dataTy = consumerJson[consumerJsonPtr / "DataType"];
-      log_debug("Get JSON item [%s]\n", strAsParamID.c_str());
-      // dumpJson(consumerJson[consumerJsonPtr]);
+      log_trace("Get JSON item [%s]\n", strAsParamID.c_str());
+      dumpJson(consumerJson[consumerJsonPtr]);
       switch (dataTy) {
       case FUZZ_ARRAY:
       case FUZZ_DATA:
@@ -764,11 +765,11 @@ private:
 FuzzDataFactory data_factory;
 
 void FuzzDataFactory::dumpJson(ordered_json json) {
-  log_debug_np("%s\n", json.dump(4).c_str());
+  log_trace_np("%s\n", json.dump(4).c_str());
 }
 
 void FuzzDataFactory::dumpJsonPtr(ordered_json::json_pointer ptr) {
-  log_debug("%s\n", ptr.to_string().c_str());
+  log_trace("%s\n", ptr.to_string().c_str());
 }
 
 void ShowAllECalls() {
@@ -813,7 +814,12 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       "sgxfuzz_print_ecalls", "show all ecalls valid in this Enclave")(
       "sgxfuzz_test_one", po::value<int>(), "test only one API user specified")(
       "sgxfuzz_test_user", po::value<std::vector<std::string>>()->multitoken(),
-      "test a number of APIs user specified");
+      "test a number of APIs user specified")(
+      "cb_log_level", po::value<int>(&ClUsedLogLevel)->default_value(2),
+      "0-Always, 1-Error, 2-Warning(Default), 3-Debug, 4-Trace")(
+      "cb_provide_nullptr",
+      po::value<bool>(&ClProvideNullPointer)->default_value(true),
+      "Provide NULL for fuzzed pointer parameter");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -883,6 +889,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
     }
     log_debug_np("\n");
   }
+  sgxfuzz_assert(ClUsedLogLevel <= 4);
   ShowAllECalls();
   return 0;
 }
@@ -942,7 +949,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
       continue;
     }
 
-    log_debug("[TEST] ECall-%d: %s\n", i,
+    log_trace("[TEST] ECall-%d: %s\n", i,
               sgx_fuzzer_ecall_wrapper_name_array[i]);
     data_factory.updateCurrentCalledECallIndex(i);
     ret = sgx_fuzzer_ecall_array[i]();
@@ -964,7 +971,7 @@ exit:
   data_factory.destroyECallCalledTimesMap();
   if (hasTest)
     succeedTimes++;
-  log_debug("fullSucceedTimes/succeedTimes/emitTimes=%ld/%ld/%ld\n",
+  log_debug("FullSucceedTimes/SucceedTimes/EmitTimes=%ld/%ld/%ld\n",
             fullSucceedTimes, succeedTimes, emitTimes);
   return 0;
 }
@@ -980,8 +987,7 @@ extern "C" uint8_t *get_bytes(size_t byteArrLen, char *cStrAsParamID,
 }
 
 extern "C" bool is_null_pointer(char *cStrAsParamID) {
-  return data_factory.hintSetNull(cStrAsParamID);
-  // return false;
+  return ClProvideNullPointer ? data_factory.hintSetNull(cStrAsParamID) : false;
 }
 
 extern "C" char *DFJoinID(char *parentID, char *currentID, char *appendID) {
