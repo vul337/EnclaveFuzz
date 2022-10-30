@@ -477,3 +477,11 @@ extern "C" void TDECallDestructor() {
   TD_init_count--;
   sgxsan_assert(TD_init_count >= 0);
 }
+
+extern "C" void SGXSanTDECallEmergencyDestructor() {
+  if (TD_init_count > 0) {
+    MemAccessMgr::destroy();
+    ArgShadowStack::destroy();
+    TD_init_count = 0;
+  }
+}

@@ -899,6 +899,7 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
+extern "C" void SGXSanTDECallEmergencyDestructor();
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   static int test_round = 0;
   if (test_round == 0 && Size == 0) {
@@ -925,6 +926,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
   if (setjmp(sgx_fuzzer_jmp_buf) != 0) {
     /// jump from \c leaveLLVMFuzzerTestOneInput , and we leave current function
+    SGXSanTDECallEmergencyDestructor(); // Avoid jump from ocall
     goto exit;
   }
 
