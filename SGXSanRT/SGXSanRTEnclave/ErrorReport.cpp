@@ -93,10 +93,12 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   sgxsan_log(ll, false,
              "================ Error Report ================\n"
              "[ERROR MESSAGE] %s\n"
-             "  pc = 0x%lx\tbp   = 0x%lx\n"
-             "  sp = 0x%lx\taddr = 0x%lx\n"
-             "  is_write = %d\t\taccess_size = 0x%lx\n",
-             msg, pc, bp, sp, addr, is_write, access_size);
+             "\tpc = 0x%lx\tbp   = 0x%lx\n"
+             "\tsp = 0x%lx\taddr = 0x%lx\n"
+             "\tshadow = 0x%lx\toffset = 0x%lx\n"
+             "\tis_write = %d\t\taccess_size = 0x%lx\n",
+             msg, pc, bp, sp, addr, MEM_TO_SHADOW(addr),
+             addr & (SHADOW_GRANULARITY - 1), is_write, access_size);
   sgxsan_print_stack_trace(ll);
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");

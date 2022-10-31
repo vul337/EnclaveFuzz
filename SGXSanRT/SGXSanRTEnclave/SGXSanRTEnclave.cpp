@@ -2,11 +2,13 @@
 #include "SGXLayoutPoisoner.hpp"
 #include "SGXSanRTTBridge.hpp"
 #include "StackTrace.hpp"
+#include "trts_util.h"
 #include <assert.h>
 #include <pthread.h>
 #include <sgx_trts_exception.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 // Used by SanCov Pass for Enclave
 uint8_t *__SGXSanCovMap;
@@ -45,6 +47,12 @@ static void init_shadow_memory_out_enclave() {
                                                               g_enclave_size,
                                                               &__SGXSanCovMap),
                "sgxsan_ocall_init_shadow_memory failed");
+  // Poison shadow map of Enclave heap
+  uptr enclaveHeapBase = (uptr)get_heap_base();
+  size_t enclaveHeapSize = get_heap_size();
+  sgxsan_assert(enclaveHeapSize % SHADOW_GRANULARITY == 0);
+  memset((void *)MEM_TO_SHADOW(enclaveHeapBase), kAsanHeapLeftRedzoneMagic,
+         enclaveHeapSize / SHADOW_GRANULARITY);
   sgxsan_error(sgx_register_exception_handler(1, sgxsan_exception_handler) ==
                    nullptr,
                "sgx_register_exception_handler failed");
