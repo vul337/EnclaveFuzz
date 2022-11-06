@@ -53,11 +53,6 @@ static void init_shadow_memory_out_enclave() {
   sgxsan_assert(enclaveHeapSize % SHADOW_GRANULARITY == 0);
   memset((void *)MEM_TO_SHADOW(enclaveHeapBase), kAsanHeapLeftRedzoneMagic,
          enclaveHeapSize / SHADOW_GRANULARITY);
-  sgxsan_error(sgx_register_exception_handler(1, sgxsan_exception_handler) ==
-                   nullptr,
-               "sgx_register_exception_handler failed");
-  gSGXLayoutPoisoner = SGXLayoutPoisoner();
-  gSGXLayoutPoisoner.poison_senitive_layout();
 }
 
 static void AsanInitInternal() {
@@ -67,6 +62,12 @@ static void AsanInitInternal() {
   init_shadow_memory_out_enclave();
 
   asan_inited = 1;
+
+  sgxsan_error(sgx_register_exception_handler(1, sgxsan_exception_handler) ==
+                   nullptr,
+               "sgx_register_exception_handler failed");
+  gSGXLayoutPoisoner = SGXLayoutPoisoner();
+  gSGXLayoutPoisoner.poison_senitive_layout();
 }
 
 void AsanInitFromRtl() {
