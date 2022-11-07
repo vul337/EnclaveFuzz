@@ -752,6 +752,9 @@ void SensitiveLeakSanitizer::initializeCallbacks() {
   MoveShallowShadow =
       M->getOrInsertFunction("MoveShallowShadow", IRB.getVoidTy(), IntptrTy,
                              IntptrTy, IntptrTy, IntptrTy);
+  ReportSensitiveDataLeak = M->getOrInsertFunction(
+      "ReportSensitiveDataLeak", IRB.getVoidTy(), IRB.getInt32Ty(), IntptrTy,
+      IntptrTy, IntptrTy, IntptrTy);
 
   initSVF();
   analyseModuleMetadata();
@@ -1038,23 +1041,14 @@ Value *SensitiveLeakSanitizer::instrumentPoisonCheck(Value *val) {
 }
 
 void SensitiveLeakSanitizer::RTPrintSrc(IRBuilder<> &IRB, Value *src) {
-  if (LoadInst *LI = dyn_cast<LoadInst>(src)) {
-    IRB.CreateCall(
-        PrintPtr,
-        {IRB.CreateGlobalStringPtr(toString(LI)),
-         IRB.CreatePointerCast(LI->getPointerOperand(), IRB.getInt8PtrTy()),
-         ConstantInt::get(IntptrTy,
-                          M->getDataLayout().getTypeAllocSize(LI->getType()))});
-  } else if (Argument *arg = dyn_cast<Argument>(src)) {
-    IRB.CreateCall(PrintArg,
-                   {IRB.CreateGlobalStringPtr(toString(arg)),
-                    IRB.CreatePointerCast(arg->getParent(), IRB.getInt8PtrTy()),
-                    IRB.getInt32(arg->getArgNo())});
-  } else if (CallInst *CI = dyn_cast<CallInst>(src)) {
-    IRB.CreateCall(PrintArg, {IRB.CreateGlobalStringPtr(toString(CI)),
-                              IRB.CreatePointerCast(CI->getCalledOperand(),
-                                                    IRB.getInt8PtrTy()),
-                              IRB.getInt32(-1)});
+  SensitiveDataType dataType;
+  Value *info1, *info2;
+  getSensitiveDataInfo(IRB, src, dataType, info1, info2);
+  Constant *srcMsgStr = IRB.CreateGlobalStringPtr("\n" + toString(src));
+  if (dataType == LoadedData) {
+    IRB.CreateCall(PrintPtr, {srcMsgStr, info1, info2});
+  } else if (dataType == ArgData or dataType == ReturnedData) {
+    IRB.CreateCall(PrintArg, {srcMsgStr, info1, info2});
   } else {
     abort();
   }
@@ -1120,8 +1114,18 @@ void SensitiveLeakSanitizer::PoisonSI(Value *src, Value *isPoisoned,
   auto isDstInEnclave = CheckIsPtrInEnclave(
       dstPtr, dstPtrEleSize, srcIsPoisonedTerm, &SI->getDebugLoc());
 
-  Instruction *dstIsInEnclaveTerm =
-      SplitBlockAndInsertIfThen(isDstInEnclave, srcIsPoisonedTerm, false);
+  Instruction *dstIsInEnclaveTerm, *dstIsOutEnclaveTerm;
+  SplitBlockAndInsertIfThenElse(isDstInEnclave, srcIsPoisonedTerm,
+                                &dstIsInEnclaveTerm, &dstIsOutEnclaveTerm);
+
+  IRB.SetInsertPoint(dstIsOutEnclaveTerm);
+  SensitiveDataType srcDataType;
+  Value *srcInfo1, *srcInfo2;
+  getSensitiveDataInfo(IRB, src, srcDataType, srcInfo1, srcInfo2);
+  IRB.CreateCall(ReportSensitiveDataLeak,
+                 {IRB.getInt32(srcDataType), srcInfo1, srcInfo2,
+                  IRB.CreatePtrToInt(dstPtr, IntptrTy), dstPtrEleSize});
+
   IRB.SetInsertPoint(dstIsInEnclaveTerm);
 #ifdef DUMP_VALUE_FLOW
   RTPrintSrc(IRB, src);

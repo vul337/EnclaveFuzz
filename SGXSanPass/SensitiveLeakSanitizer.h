@@ -35,6 +35,7 @@
 
 namespace llvm {
 enum SensitiveLevel { NOT_SENSITIVE = 0, MAY_BE_SENSITIVE, IS_SENSITIVE };
+enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };
 
 class SensitiveLeakSanitizer {
 public:
@@ -134,6 +135,31 @@ public:
   Value *CheckIsPtrInEnclave(Value *ptr, Value *size, Instruction *insertPt,
                              const DebugLoc *dbgLoc);
 
+  void getSensitiveDataInfo(IRBuilder<> &IRB, Value *data,
+                            SensitiveDataType &type, Value *&info1,
+                            Value *&info2) {
+    if (LoadInst *LI = dyn_cast<LoadInst>(data)) {
+      type = LoadedData;
+      info1 = IRB.CreatePtrToInt(LI->getPointerOperand(), IntptrTy);
+      info2 = ConstantInt::get(
+          IntptrTy, M->getDataLayout().getTypeAllocSize(LI->getType()));
+    } else if (Argument *arg = dyn_cast<Argument>(data)) {
+      type = ArgData;
+      Value *funcAddrInt = IRB.CreatePtrToInt(arg->getParent(), IntptrTy);
+      auto pos = arg->getArgNo();
+      info1 = funcAddrInt;
+      info2 = ConstantInt::get(IntptrTy, pos);
+    } else if (CallInst *CI = dyn_cast<CallInst>(data)) {
+      type = ReturnedData;
+      Value *funcAddrInt = IRB.CreatePtrToInt(CI->getCalledOperand(), IntptrTy);
+      auto pos = -1;
+      info1 = funcAddrInt;
+      info2 = ConstantInt::get(IntptrTy, pos);
+    } else {
+      abort();
+    }
+  }
+
 private:
   std::unordered_set<SVF::ObjVar *> SensitiveObjs, WorkList, ProcessedList;
   std::unordered_set<Value *> poisonedInst;
@@ -147,7 +173,7 @@ private:
   FunctionCallee PoisonArg, ArgIsPoisoned, PushArgShadowStack,
       PopArgShadowStack, IsWithinEnclave, RegionIsInEnclaveAndPoisoned,
       SGXSanLog, PrintPtr, PrintArg, MallocUsableSize, PoisonSensitiveGlobal,
-      ShallowPoisonShadow, MoveShallowShadow;
+      ShallowPoisonShadow, MoveShallowShadow, ReportSensitiveDataLeak;
 
   Module *M = nullptr;
   LLVMContext *C = nullptr;

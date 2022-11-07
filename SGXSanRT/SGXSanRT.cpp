@@ -485,3 +485,25 @@ extern "C" void SGXSanTDECallEmergencyDestructor() {
     TD_init_count = 0;
   }
 }
+
+enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };
+extern "C" void ReportSensitiveDataLeak(SensitiveDataType srcType,
+                                        uptr srcInfo1, uptr srcInfo2,
+                                        uptr dstAddr, uptr dstSize) {
+  log_warning("Possible leak of sensitive data\n");
+  if (srcType == LoadedData) {
+    uptr srcAddr = srcInfo1;
+    size_t srcSize = srcInfo2;
+    GET_CALLER_PC_BP_SP;
+    ReportGenericError(pc, bp, sp, srcAddr, false, srcSize, false,
+                       "[WARNING] Leak of Sensitive Data");
+
+  } else if (srcType == ArgData or srcType == ReturnedData) {
+    sptr argPos = (sptr)srcInfo2;
+    uptr funcAddr = srcInfo1;
+    log_warning("Src info: Arg %ld of func at 0x%lx\n", argPos, funcAddr);
+  } else {
+    abort();
+  }
+  log_warning("Dst info: 0x%lx(0x%lx)\n", dstAddr, dstSize);
+}
