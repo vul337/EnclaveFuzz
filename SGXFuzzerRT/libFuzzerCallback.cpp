@@ -33,6 +33,7 @@ size_t ClMaxCount;
 size_t ClMaxSize;
 int ClUsedLogLevel;
 bool ClProvideNullPointer;
+double ClProvideNullPointerProbability;
 
 // Fuzz sequence
 enum FuzzerTestModeTy { TEST_ONE, TEST_RANDOM, TEST_USER };
@@ -221,7 +222,9 @@ public:
       break;
     }
     case FUZZ_BOOL: {
-      mutatorJson[JSonPtr / "Data"] = (bool)(rand() % 100 < 20);
+      int randValue = rand() % 100;
+      bool result = randValue < (ClProvideNullPointerProbability * 100);
+      mutatorJson[JSonPtr / "Data"] = result;
       break;
     }
     case FUZZ_SEQ: {
@@ -352,7 +355,9 @@ public:
         break;
       }
       case FUZZ_BOOL: {
-        mutatorJson[ptr / "Data"] = (bool)(rand() % 100 < 20);
+        int randValue = rand() % 100;
+        bool result = randValue < (ClProvideNullPointerProbability * 100);
+        mutatorJson[ptr / "Data"] = result;
         break;
       }
       case FUZZ_SEQ: {
@@ -819,7 +824,10 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       "0-Always, 1-Error, 2-Warning(Default), 3-Debug, 4-Trace")(
       "cb_provide_nullptr",
       po::value<bool>(&ClProvideNullPointer)->default_value(true),
-      "Provide NULL for fuzzed pointer parameter");
+      "Provide NULL for fuzzed pointer parameter")(
+      "cb_provide_nullptr_probability",
+      po::value<double>(&ClProvideNullPointerProbability)->default_value(0.01),
+      "The minimum granularity is 0.01");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
