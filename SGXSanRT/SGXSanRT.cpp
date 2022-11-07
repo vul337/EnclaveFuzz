@@ -20,11 +20,11 @@
 enum EncryptStatus { Unknown, Plaintext, Ciphertext };
 
 static const char *log_level_to_prefix[] = {
-    [LOG_LEVEL_ALWAYS] = "",
-    [LOG_LEVEL_ERROR] = "[SGXSan error] ",
-    [LOG_LEVEL_WARNING] = "[SGXSan warning] ",
-    [LOG_LEVEL_DEBUG] = "[SGXSan debug] ",
-    [LOG_LEVEL_TRACE] = "[SGXSan trace] ",
+    "",
+    "[SGXSan] ERROR: ",
+    "[SGXSan] WARNING: ",
+    "[SGXSan] DEBUG: ",
+    "[SGXSan] TRACE: ",
 };
 
 bool asan_inited = false;
