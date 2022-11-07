@@ -92,7 +92,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   log_level ll = fatal ? LOG_LEVEL_ERROR : LOG_LEVEL_WARNING;
   sgxsan_log(ll, false,
              "================ Error Report ================\n"
-             "[ERROR MESSAGE] %s\n"
+             "%s\n"
              "\tpc = 0x%lx\tbp   = 0x%lx\n"
              "\tsp = 0x%lx\taddr = 0x%lx\n"
              "\tshadow = 0x%lx\toffset = 0x%lx\n"
@@ -105,4 +105,26 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   if (fatal)
     abort();
   return;
+}
+
+enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };
+extern "C" void ReportSensitiveDataLeak(SensitiveDataType srcType,
+                                        uptr srcInfo1, uptr srcInfo2,
+                                        uptr dstAddr, uptr dstSize) {
+  log_warning("Possible leak of sensitive data\n");
+  if (srcType == LoadedData) {
+    uptr srcAddr = srcInfo1;
+    size_t srcSize = srcInfo2;
+    GET_CALLER_PC_BP_SP;
+    ReportGenericError(pc, bp, sp, srcAddr, false, srcSize, false,
+                       "[WARNING] Leak of Sensitive Data");
+
+  } else if (srcType == ArgData or srcType == ReturnedData) {
+    sptr argPos = (sptr)srcInfo2;
+    uptr funcAddr = srcInfo1;
+    log_warning("Src info: Arg %ld of func at 0x%lx\n", argPos, funcAddr);
+  } else {
+    abort();
+  }
+  log_warning("Dst info: 0x%lx(0x%lx)\n", dstAddr, dstSize);
 }

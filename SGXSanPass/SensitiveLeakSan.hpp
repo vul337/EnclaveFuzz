@@ -35,6 +35,7 @@
 
 namespace llvm {
 enum SensitiveLevel { NOT_SENSITIVE = 0, MAY_BE_SENSITIVE, IS_SENSITIVE };
+enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };
 
 class SensitiveLeakSan {
 public:
@@ -138,6 +139,30 @@ public:
   SensitiveLevel getSensitiveLevel(StringRef str);
   StringRef getObjMeaningfulName(SVF::ObjVar *objPN);
   static bool isTBridgeFunc(Function &F);
+  void getSensitiveDataInfo(IRBuilder<> &IRB, Value *data,
+                            SensitiveDataType &type, Value *&info1,
+                            Value *&info2) {
+    if (LoadInst *LI = dyn_cast<LoadInst>(data)) {
+      type = LoadedData;
+      info1 = IRB.CreatePtrToInt(LI->getPointerOperand(), IntptrTy);
+      info2 = ConstantInt::get(
+          IntptrTy, M->getDataLayout().getTypeAllocSize(LI->getType()));
+    } else if (Argument *arg = dyn_cast<Argument>(data)) {
+      type = ArgData;
+      Value *funcAddrInt = IRB.CreatePtrToInt(arg->getParent(), IntptrTy);
+      auto pos = arg->getArgNo();
+      info1 = funcAddrInt;
+      info2 = ConstantInt::get(IntptrTy, pos);
+    } else if (CallInst *CI = dyn_cast<CallInst>(data)) {
+      type = ReturnedData;
+      Value *funcAddrInt = IRB.CreatePtrToInt(CI->getCalledOperand(), IntptrTy);
+      auto pos = -1;
+      info1 = funcAddrInt;
+      info2 = ConstantInt::get(IntptrTy, pos);
+    } else {
+      abort();
+    }
+  }
 
 private:
   std::unordered_set<SVF::ObjVar *> SensitiveObjs, WorkList, ProcessedList;
@@ -155,7 +180,8 @@ private:
       PoisonSensitiveGlobal, Abort, SGXSanLog, print_ptr, print_arg,
       ShallowPoisonShadow, ShallowUnPoisonShadow,
       sgxsan_check_shadow_bytes_match_obj,
-      sgxsan_shallow_shadow_copy_on_mem_transfer, func_malloc_usable_size;
+      sgxsan_shallow_shadow_copy_on_mem_transfer, func_malloc_usable_size,
+      ReportSensitiveDataLeak;
 
   Module *M = nullptr;
   LLVMContext *C = nullptr;

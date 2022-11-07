@@ -796,6 +796,9 @@ void SensitiveLeakSan::initializeCallbacks() {
       IntptrTy, IntptrTy, IntptrTy);
   func_malloc_usable_size = M->getOrInsertFunction(
       MALLOC_USABLE_SZIE_STR, IRB.getInt64Ty(), IRB.getInt8PtrTy());
+  ReportSensitiveDataLeak = M->getOrInsertFunction(
+      "ReportSensitiveDataLeak", IRB.getVoidTy(), IRB.getInt32Ty(), IntptrTy,
+      IntptrTy, IntptrTy, IntptrTy);
 }
 
 void SensitiveLeakSan::collectHeapAllocatorGlobalPtrs() {
@@ -1110,23 +1113,14 @@ Value *SensitiveLeakSan::instrumentPoisonCheck(Value *val) {
 }
 
 void SensitiveLeakSan::printSrcAtRT(IRBuilder<> &IRB, Value *src) {
-  if (LoadInst *LI = dyn_cast<LoadInst>(src)) {
-    IRB.CreateCall(
-        print_ptr,
-        {IRB.CreateGlobalStringPtr("\n" + toString(LI)),
-         IRB.CreatePtrToInt(LI->getPointerOperand(), IRB.getInt64Ty()),
-         IRB.getInt64(M->getDataLayout().getTypeAllocSize(LI->getType()))});
-  } else if (Argument *arg = dyn_cast<Argument>(src)) {
-    Value *funcAddrInt = IRB.CreatePtrToInt(arg->getParent(), IRB.getInt64Ty());
-    auto pos = arg->getArgNo();
-    IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr("\n" + toString(arg)),
-                               funcAddrInt, IRB.getInt64(pos)});
-  } else if (CallInst *CI = dyn_cast<CallInst>(src)) {
-    Value *funcAddrInt =
-        IRB.CreatePtrToInt(CI->getCalledOperand(), IRB.getInt64Ty());
-    auto pos = -1;
-    IRB.CreateCall(print_arg, {IRB.CreateGlobalStringPtr("\n" + toString(CI)),
-                               funcAddrInt, IRB.getInt64(pos)});
+  SensitiveDataType dataType;
+  Value *info1, *info2;
+  getSensitiveDataInfo(IRB, src, dataType, info1, info2);
+  Constant *srcMsgStr = IRB.CreateGlobalStringPtr("\n" + toString(src));
+  if (dataType == LoadedData) {
+    IRB.CreateCall(print_ptr, {srcMsgStr, info1, info2});
+  } else if (dataType == ArgData or dataType == ReturnedData) {
+    IRB.CreateCall(print_arg, {srcMsgStr, info1, info2});
   } else {
     abort();
   }
@@ -1185,8 +1179,18 @@ void SensitiveLeakSan::PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI) {
                         IRB.getInt64(dstPtrEleSize)}),
         IRB.getInt32(1));
 
-    Instruction *destIsInElrangeTerm =
-        SplitBlockAndInsertIfThen(isDestInElrange, srcIsPoisonedTerm, false);
+    Instruction *destIsInElrangeTerm, *destIsOutElrangeTerm;
+    SplitBlockAndInsertIfThenElse(isDestInElrange, srcIsPoisonedTerm,
+                                  &destIsInElrangeTerm, &destIsOutElrangeTerm);
+
+    IRB.SetInsertPoint(destIsOutElrangeTerm);
+    SensitiveDataType srcDataType;
+    Value *srcInfo1, *srcInfo2;
+    getSensitiveDataInfo(IRB, src, srcDataType, srcInfo1, srcInfo2);
+    IRB.CreateCall(ReportSensitiveDataLeak,
+                   {IRB.getInt32(srcDataType), srcInfo1, srcInfo2,
+                    IRB.CreatePtrToInt(dstPtr, IntptrTy),
+                    ConstantInt::get(IntptrTy, dstPtrEleSize, false)});
 
     IRB.SetInsertPoint(destIsInElrangeTerm);
     uint64_t dstMemSize =
