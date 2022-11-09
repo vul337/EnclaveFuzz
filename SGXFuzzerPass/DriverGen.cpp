@@ -649,7 +649,11 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
                                        Type::getInt64Ty(*C), false);
             }
             ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
+            // Maybe size*count < eleSize
+            ptCnt = IRB.CreateSelect(IRB.CreateICmpSGT(ptCnt, IRB.getInt64(1)),
+                                     ptCnt, IRB.getInt64(1), "ptCnt");
           }
+
           if (ptCnt == IRB.getInt64(1)) {
             Value *elePtr = createParamContent(
                 {eleTy}, jsonPtr / "field" / 0,
