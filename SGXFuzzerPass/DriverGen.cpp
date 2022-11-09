@@ -578,6 +578,15 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
         // dump(edlJson, jsonPtr);
         inheritDirectionAttr(jsonPtr, 0);
         IRBuilder<> IRB(insertPt);
+
+        // Avoid ocall parameter is a null pointer
+        auto ptrIsNotNull = SplitBlockAndInsertIfThen(
+            IRB.CreateICmpNE(IRB.CreatePtrToInt(&arg, IRB.getInt64Ty()),
+                             ConstantInt::getNullValue(IRB.getInt64Ty())),
+            insertPt, false);
+        insertPt = ptrIsNotNull;
+        IRB.SetInsertPoint(insertPt);
+
         auto jsonPtrAsID =
             IRB.CreateCall(DFJoinID, {parentID, currentID, GNullInt8Ptr});
         auto eleTy = pointerTy->getElementType();
