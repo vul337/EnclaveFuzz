@@ -578,6 +578,15 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
         // dump(edlJson, jsonPtr);
         inheritDirectionAttr(jsonPtr, 0);
         IRBuilder<> IRB(insertPt);
+
+        // Avoid ocall parameter is a null pointer
+        auto ptrIsNotNull = SplitBlockAndInsertIfThen(
+            IRB.CreateICmpNE(IRB.CreatePtrToInt(&arg, IRB.getInt64Ty()),
+                             ConstantInt::getNullValue(IRB.getInt64Ty())),
+            insertPt, false);
+        insertPt = ptrIsNotNull;
+        IRB.SetInsertPoint(insertPt);
+
         auto jsonPtrAsID =
             IRB.CreateCall(DFJoinID, {parentID, currentID, GNullInt8Ptr});
         auto eleTy = pointerTy->getElementType();
@@ -640,7 +649,11 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
                                        Type::getInt64Ty(*C), false);
             }
             ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
+            // Maybe size*count < eleSize
+            ptCnt = IRB.CreateSelect(IRB.CreateICmpSGT(ptCnt, IRB.getInt64(1)),
+                                     ptCnt, IRB.getInt64(1), "ptCnt");
           }
+
           if (ptCnt == IRB.getInt64(1)) {
             Value *elePtr = createParamContent(
                 {eleTy}, jsonPtr / "field" / 0,
@@ -717,7 +730,7 @@ void DriverGenerator::passStaticAnalysisResultToRuntime(
   IRBuilder<> IRB(*C);
 
   // create a global int to store number of ecall
-  auto _ecallNum = edlJson["trusted"].size();
+  auto _ecallNum = ecallFuzzWrapperFuncs.size();
   auto ecallNum = cast<GlobalVariable>(
       M->getOrInsertGlobal("sgx_fuzzer_ecall_num", Type::getInt32Ty(*C)));
   ecallNum->setInitializer(ConstantInt::get(IRB.getInt32Ty(), _ecallNum));
@@ -763,13 +776,18 @@ bool DriverGenerator::runOnModule(Module &M) {
   // create wrapper functions used to fuzz ecall
   SmallVector<Constant *> ecallFuzzWrapperFuncs;
   for (auto &ecallInfo : edlJson["trusted"].items()) {
-    ecallFuzzWrapperFuncs.push_back(
-        createEcallFuzzWrapperFunc(ecallInfo.key()));
+    std::string ecallName = ecallInfo.key();
+    if (StringRef(ecallName).startswith("sgxsan_ecall_"))
+      continue;
+    ecallFuzzWrapperFuncs.push_back(createEcallFuzzWrapperFunc(ecallName));
   }
 
   // create ocalls
   for (auto &ocallInfo : edlJson["untrusted"].items()) {
-    createOcallFunc(ocallInfo.key());
+    std::string ocallName = ocallInfo.key();
+    if (StringRef(ocallName).startswith("sgxsan_ocall_"))
+      continue;
+    createOcallFunc(ocallName);
   }
   // at the end
   passStaticAnalysisResultToRuntime(ecallFuzzWrapperFuncs);

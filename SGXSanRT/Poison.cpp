@@ -73,7 +73,7 @@ void FastPoisonShadowPartialRightRedzone(uptr aligned_addr, uptr size,
 }
 
 void PoisonShadow(uptr addr, uptr size, uint8_t value,
-                  bool returnBackToNormal) {
+                   bool returnBackToNormal) {
   // If addr do not aligned at granularity, start posioning from
   // RoundUpTo(addr, granularity)
   if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY))) {

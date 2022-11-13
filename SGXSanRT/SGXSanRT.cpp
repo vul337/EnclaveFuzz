@@ -1,7 +1,9 @@
 #include "SGXSanRT.h"
 #include "ArgShadow.h"
+#include "Malloc.h"
 #include "MemAccessMgr.h"
 #include "plthook.h"
+#include <boost/program_options.hpp>
 #include <execinfo.h>
 #include <fstream>
 #include <iostream>
@@ -17,7 +19,10 @@
 #include <unistd.h>
 #include <unordered_map>
 
+namespace po = boost::program_options;
 enum EncryptStatus { Unknown, Plaintext, Ciphertext };
+
+std::string ClSGXSanEnclaveFileName(ENCLAVE_FILENAME);
 
 static const char *log_level_to_prefix[] = {
     "",
@@ -168,13 +173,8 @@ static void sgxsan_init_shadow_memory() {
   }
 }
 
-DEFINE_FUNC_PTR(malloc);
-DEFINE_FUNC_PTR(free);
-DEFINE_FUNC_PTR(calloc);
-DEFINE_FUNC_PTR(realloc);
-DEFINE_FUNC_PTR(malloc_usable_size);
-
 int hook_libstdcxx_heap_mgr() {
+  // Should avoid to use C++, since malloc etc. in stdc++ library will be hooked
   plthook_t *plthook;
 
   if (plthook_open(&plthook, "libstdc++.so.6") != 0) {
@@ -183,9 +183,9 @@ int hook_libstdcxx_heap_mgr() {
   }
   /// \c calloc and \c malloc_usable_size is not used by
   /// \file /lib/x86_64-linux-gnu/libstdc++.so.6
-  if (plthook_replace(plthook, "malloc", (void *)malloc, NULL) != 0 ||
-      plthook_replace(plthook, "free", (void *)free, NULL) != 0 ||
-      plthook_replace(plthook, "realloc", (void *)realloc, NULL) != 0) {
+  if (plthook_replace(plthook, "malloc", (void *)SGXSAN(malloc), NULL) != 0 ||
+      plthook_replace(plthook, "free", (void *)SGXSAN(free), NULL) != 0 ||
+      plthook_replace(plthook, "realloc", (void *)SGXSAN(realloc), NULL) != 0) {
     log_error("plthook_replace error: %s\n", plthook_error());
     plthook_close(plthook);
     return -1;
@@ -194,15 +194,34 @@ int hook_libstdcxx_heap_mgr() {
   return 0;
 }
 
-static void get_real_heap_allocator() {
-  GET_REAL_FUNC(malloc);
-  GET_REAL_FUNC(free);
-  GET_REAL_FUNC(calloc);
-  GET_REAL_FUNC(realloc);
-  GET_REAL_FUNC(malloc_usable_size);
+extern "C" int hook_enclave_heap_mgr() {
+  plthook_t *plthook;
+
+  if (plthook_open(&plthook, (std::string("./") + ENCLAVE_FILENAME).c_str()) !=
+      0) {
+    log_error("plthook_open error: %s\n", plthook_error());
+    return -1;
+  }
+
+#define HOOK_SYM(res, plthookStuct, sym)                                       \
+  res = plthook_replace(plthookStuct, #sym, (void *)SGXSAN(sym), NULL);        \
+  if (res != 0 and res != PLTHOOK_FUNCTION_NOT_FOUND) {                        \
+    log_error("plthook_replace error: %s\n", plthook_error());                 \
+    plthook_close(plthookStuct);                                               \
+    return -1;                                                                 \
+  }
+  int result;
+  HOOK_SYM(result, plthook, malloc)
+  HOOK_SYM(result, plthook, free)
+  HOOK_SYM(result, plthook, malloc_usable_size)
+  HOOK_SYM(result, plthook, calloc)
+  HOOK_SYM(result, plthook, realloc)
+#undef HOOK_SYM
+  plthook_close(plthook);
+  return 0;
 }
 
-static void AsanInitInternal() {
+__attribute__((constructor)) void SGXSanInit() {
   if (LIKELY(asan_inited))
     return;
   // make sure c++ stream is initialized
@@ -210,14 +229,15 @@ static void AsanInitInternal() {
   sgxsan_init_shadow_memory();
   PrintAddressSpaceLayout();
   register_sgxsan_sigaction();
-  get_real_heap_allocator();
-  if (hook_libstdcxx_heap_mgr() != 0) {
-    abort();
-  }
+  sgxsan_assert(hook_libstdcxx_heap_mgr() == 0);
   asan_inited = true;
 }
 
-extern "C" void __asan_init() { AsanInitInternal(); }
+/* CovMap */
+/* Set by pass, get by runtime */
+static uint8_t *__SGXSanCovMap = (uint8_t *)0x1234567890;
+extern "C" void setCovMapAddr(uint8_t *addr) { __SGXSanCovMap = addr; }
+extern "C" uint8_t *getCovMapAddr() { return __SGXSanCovMap; }
 
 /// SLSan Callbacks to show dynamic value flow
 extern "C" void PrintPtr(char *info, void *addr, size_t size) {
@@ -476,14 +496,6 @@ extern "C" void TDECallDestructor() {
   }
   TD_init_count--;
   sgxsan_assert(TD_init_count >= 0);
-}
-
-extern "C" void SGXSanTDECallEmergencyDestructor() {
-  if (TD_init_count > 0) {
-    MemAccessMgr::destroy();
-    ArgShadowStack::destroy();
-    TD_init_count = 0;
-  }
 }
 
 enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };

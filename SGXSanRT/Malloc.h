@@ -6,16 +6,28 @@
 #include <pthread.h>
 #include <stddef.h>
 
-#define MALLOC malloc
-#define BACKEND_MALLOC REAL(malloc)
-#define FREE free
-#define BACKEND_FREE REAL(free)
-#define CALLOC calloc
-#define BACKEND_CALLOC REAL(calloc)
-#define REALLOC realloc
-#define BACKEND_REALLOC REAL(realloc)
-#define MALLOC_USABLE_SIZE malloc_usable_size
-#define BACKEND_MALLOC_USABLE_SIZE REAL(malloc_usable_size)
+#define MALLOC SGXSAN(malloc)
+#define BACKEND_MALLOC malloc
+#define FREE SGXSAN(free)
+#define BACKEND_FREE free
+#define CALLOC SGXSAN(calloc)
+#define BACKEND_CALLOC calloc
+#define REALLOC SGXSAN(realloc)
+#define BACKEND_REALLOC realloc
+#define MALLOC_USABLE_SIZE SGXSAN(malloc_usable_size)
+#define BACKEND_MALLOC_USABLE_SIZE malloc_usable_size
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+void *MALLOC(size_t size);
+void FREE(void *ptr);
+void *CALLOC(size_t n_elements, size_t elem_size);
+void *REALLOC(void *oldmem, size_t bytes);
+size_t MALLOC_USABLE_SIZE(void *mem);
+#if defined(__cplusplus)
+}
+#endif
 
 // rz_log represent 2^(rz_log+4)
 static inline uptr ComputeRZLog(uptr user_requested_size) {
@@ -120,7 +132,7 @@ struct QuarantineElement {
   uptr user_size;
 };
 
-// Use SGXSan::ContainerAllocator(REAL(malloc) series as backend) avoid
+// Use SGXSan::ContainerAllocator(BACKEND_MALLOC series as backend) avoid
 // malloc-new-malloc's like infinitive loop
 typedef std::deque<QuarantineElement, ContainerAllocator<QuarantineElement>>
     QuarantineQueueTy;

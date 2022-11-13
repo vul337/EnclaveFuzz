@@ -38,7 +38,7 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
       global_heap_usage -= allocated_size;
     }
     pthread_mutex_unlock(&heap_usage_mutex);
-  }
+  } 
 #else
   (void)ptr;
   (void)true_add_false_minus;

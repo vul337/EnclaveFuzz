@@ -1,7 +1,10 @@
+#include "Malloc.h"
 #include "Poison.h"
 #include "SGXSanRT.h"
 #include "arch.h"
 #include "cpuid.h"
+#include "plthook.h"
+#include "rts_cmd.h"
 #include "sgx_edger8r.h"
 #include "sgx_key.h"
 #include "sgx_report.h"
@@ -16,18 +19,6 @@
 #include <thread_data.h>
 #include <unistd.h>
 #include <vector>
-
-/// Global Data
-
-/*SECS data structure*/
-typedef struct _global_data_sim_t {
-  secs_t *secs_ptr;
-  sgx_cpu_svn_t cpusvn_sim;
-  uint64_t seed; /* to initialize the PRNG */
-} global_data_sim_t;
-
-extern global_data_sim_t g_global_data_sim;
-secs_t g_secs;
 
 /// TCS Manager
 
@@ -53,39 +44,35 @@ typedef struct _ocall_table_t {
 
 typedef sgx_status_t (*ecall_func_t)(void *ms);
 typedef sgx_status_t (*bridge_fn_t)(const void *);
-extern const ecall_table_t g_ecall_table;
-
-static void SGXInitInternal() {
-  g_global_data_sim.secs_ptr = &g_secs;
-  PoisonShadow((uptr)&g_secs, sizeof(g_secs), kAsanNotPoisonedMagic);
-}
 
 __thread sgx_ocall_table_t *g_enclave_ocall_table = nullptr;
 __thread bool RunInEnclave = false;
-__thread bool FirstECall = true;
+__thread bool AlreadyFirstECall = false;
 __thread TrustThread *sgxsan_thread = nullptr;
 
 /// Thread Data
 extern "C" thread_data_t *get_thread_data() { return &sgxsan_thread->m_td; }
-
+sgx_status_t (*tsticker_ecall)(const sgx_enclave_id_t eid, const int index,
+                               const void *ocall_table, void *ms);
 extern "C" sgx_status_t sgx_ecall(const sgx_enclave_id_t eid, const int index,
                                   const void *ocall_table, void *ms) {
   (void)eid;
   RunInEnclave = true;
   bool curIsFirstECall = false;
-  if (FirstECall) {
-    FirstECall = false;
+  if (AlreadyFirstECall == false) {
+    AlreadyFirstECall = true;
     curIsFirstECall = true;
     sgxsan_thread = g_thread_pool->alloc(gettid());
   }
-  sgxsan_assert(index < (int)g_ecall_table.nr_ecall);
+
   g_enclave_ocall_table = (sgx_ocall_table_t *)ocall_table;
   get_thread_data()->last_error = errno;
-  auto result = ((ecall_func_t)g_ecall_table.ecall_table[index].ecall_addr)(ms);
+  sgxsan_assert(tsticker_ecall);
+  auto result = tsticker_ecall(eid, index, nullptr, ms);
   if (curIsFirstECall) {
     g_thread_pool->free(sgxsan_thread);
     sgxsan_thread = nullptr;
-    FirstECall = true;
+    AlreadyFirstECall = false;
   }
   RunInEnclave = false;
   return result;
@@ -116,7 +103,7 @@ extern "C" void PopOCAllocStack() { OCAllocStack.pop(); }
 
 extern "C" void *sgx_ocalloc(size_t size) {
   auto &top = OCAllocStack.top();
-  void *ocallocAddr = REAL(malloc)(size);
+  void *ocallocAddr = BACKEND_MALLOC(size);
   top.push_back(ocallocAddr);
   return ocallocAddr;
 }
@@ -124,7 +111,7 @@ extern "C" void *sgx_ocalloc(size_t size) {
 extern "C" void sgx_ocfree() {
   auto &top = OCAllocStack.top();
   for (auto ocallocAddr : top) {
-    REAL(free)(ocallocAddr);
+    BACKEND_FREE(ocallocAddr);
   }
 }
 
@@ -135,9 +122,31 @@ int *__errno(void) { return &errno; }
 
 void *__memset(void *dst, int c, size_t n) { return memset(dst, c, n); }
 
-int memset_s(void *s, size_t smax, int c, size_t n) {
-  auto dst = memset(s, c, std::min(smax, n));
-  return dst == s ? 0 : errno;
+typedef error_t errno_t;
+extern "C" errno_t memcpy_s(void *dst, size_t sizeInBytes, const void *src,
+                            size_t count) {
+  auto res = memcpy(dst, src, std::min(sizeInBytes, count));
+  if (res != dst) {
+    return -1;
+  }
+  return 0;
+}
+
+extern "C" errno_t memmove_s(void *dst, size_t sizeInBytes, const void *src,
+                             size_t count) {
+  auto res = memmove(dst, src, std::min(sizeInBytes, count));
+  if (res != dst) {
+    return -1;
+  }
+  return 0;
+}
+
+extern "C" errno_t memset_s(void *s, size_t smax, int c, size_t n) {
+  auto res = memset(s, c, std::min(smax, n));
+  if (res != s) {
+    return -1;
+  }
+  return 0;
 }
 
 int heap_init(void *_heap_base, size_t _heap_size, size_t _heap_min_size,
@@ -171,15 +180,31 @@ sgx_status_t sgx_cpuid(int cpuinfo[4], int leaf) {
 }
 
 /// life time management
-sgx_status_t SGXAPI sgx_create_enclave(const char *file_name, const int debug,
-                                       sgx_launch_token_t *launch_token,
-                                       int *launch_token_updated,
-                                       sgx_enclave_id_t *enclave_id,
-                                       sgx_misc_attribute_t *misc_attr) {
-  RunInEnclave = true;
-  SGXInitInternal();
-  RunInEnclave = false;
+static void *gEnclaveHandler = nullptr;
+extern "C" sgx_status_t __sgx_create_enclave_ex(
+    const char *file_name, const int debug, sgx_launch_token_t *launch_token,
+    int *launch_token_updated, sgx_enclave_id_t *enclave_id,
+    sgx_misc_attribute_t *misc_attr, const uint32_t ex_features,
+    const void *ex_features_p[32]) {
+  gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_NOW);
+  sgxsan_assert(gEnclaveHandler != nullptr);
+
+  tsticker_ecall =
+      (decltype(tsticker_ecall))dlsym(gEnclaveHandler, "tsticker_ecall");
+  sgxsan_assert(tsticker_ecall != nullptr);
+  tsticker_ecall(0, ECMD_INIT_ENCLAVE, nullptr, nullptr);
   return SGX_SUCCESS;
+}
+
+extern "C" sgx_status_t sgx_create_enclave(const char *file_name,
+                                           const int debug,
+                                           sgx_launch_token_t *launch_token,
+                                           int *launch_token_updated,
+                                           sgx_enclave_id_t *enclave_id,
+                                           sgx_misc_attribute_t *misc_attr) {
+  return __sgx_create_enclave_ex(file_name, debug, launch_token,
+                                 launch_token_updated, enclave_id, misc_attr, 0,
+                                 NULL);
 }
 
 extern "C" sgx_status_t sgx_create_enclave_ex(
@@ -187,12 +212,13 @@ extern "C" sgx_status_t sgx_create_enclave_ex(
     int *launch_token_updated, sgx_enclave_id_t *enclave_id,
     sgx_misc_attribute_t *misc_attr, const uint32_t ex_features,
     const void *ex_features_p[32]) {
-  RunInEnclave = true;
-  SGXInitInternal();
-  RunInEnclave = false;
-  return SGX_SUCCESS;
+  return __sgx_create_enclave_ex(file_name, debug, launch_token,
+                                 launch_token_updated, enclave_id, misc_attr,
+                                 ex_features, ex_features_p);
 }
 
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
+  sgxsan_assert(dlclose(gEnclaveHandler) == 0);
+  gEnclaveHandler = nullptr;
   return SGX_SUCCESS;
 }

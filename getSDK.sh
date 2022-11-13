@@ -59,7 +59,15 @@ cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/trtssim
 ${MAKE} clean -s
 ${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} linux/libsgx_trts_sim.a ${PREFIX}/lib64
-${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr --redefine-sym __cxa_atexit=_deleted__cxa_atexit --redefine-sym sgx_ocall=_deleted_sgx_ocall -W get_thread_data -W sgx_is_within_enclave -W sgx_is_outside_enclave -W sgx_ocalloc -W sgx_ocfree ${PREFIX}/lib64/libsgx_trts_sim.a
+${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr \
+    --redefine-sym __cxa_atexit=_deleted__cxa_atexit \
+    --redefine-sym sgx_ocall=_deleted_sgx_ocall \
+    --redefine-sym get_thread_data=_deleted_get_thread_data \
+    --redefine-sym sgx_is_within_enclave=_deleted_sgx_is_within_enclave \
+    --redefine-sym sgx_is_outside_enclave=_deleted_sgx_is_outside_enclave \
+    --redefine-sym sgx_ocalloc=_deleted_sgx_ocalloc \
+    --redefine-sym sgx_ocfree=_deleted_sgx_ocfree \
+    ${PREFIX}/lib64/libsgx_trts_sim.a
 
 # get libsgx_tservice_sim.a
 cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/tservice_sim

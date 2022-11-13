@@ -111,18 +111,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   } while (0);
 
 /// Interceptor
-#define REAL(func) real_##func
-#define DEFINE_FUNC_PTR(func) decltype(&func) REAL(func)
-#define DECLARE_FUNC_PTR(func) extern decltype(&func) REAL(func)
-#define GET_REAL_FUNC(func)                                                    \
-  sgxsan_error(not(REAL(func) = (decltype(&func))dlsym(RTLD_NEXT, #func)),     \
-               "Fail to get real " #func "\n")
-
-DECLARE_FUNC_PTR(malloc);
-DECLARE_FUNC_PTR(free);
-DECLARE_FUNC_PTR(calloc);
-DECLARE_FUNC_PTR(realloc);
-DECLARE_FUNC_PTR(malloc_usable_size);
+#define SGXSAN(sym) sgxsan_##sym
 
 /// mem tools
 static inline bool AddrIsInLowMem(uptr a) {

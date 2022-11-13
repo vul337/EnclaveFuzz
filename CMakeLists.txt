@@ -11,6 +11,7 @@ add_subdirectory(SGXFuzzerRT)
 install(TARGETS
         SGXSanPass
         SGXSanRT
+        SGXSanRTEnclave
         SGXFuzzerPass
         SGXFuzzerRT
         LIBRARY DESTINATION lib64
