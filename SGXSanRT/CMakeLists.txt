@@ -14,7 +14,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(
-    SGXSanRT STATIC 
+    SGXSanRTApp STATIC 
     Malloc.cpp
     Poison.cpp
     PoisonCheck.cpp
@@ -32,4 +32,4 @@ add_library(
     ${LINUX_SGX_MINI}/common/src/se_event.c
     ${PLTHOOK_DIR}/plthook_elf.c)
 
-set_target_properties(SGXSanRT PROPERTIES POSITION_INDEPENDENT_CODE True)
+set_target_properties(SGXSanRTApp PROPERTIES POSITION_INDEPENDENT_CODE True)

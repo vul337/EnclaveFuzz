@@ -10,7 +10,7 @@ add_subdirectory(SGXFuzzerRT)
 
 install(TARGETS
         SGXSanPass
-        SGXSanRT
+        SGXSanRTApp
         SGXSanRTEnclave
         SGXFuzzerPass
         SGXFuzzerRT
