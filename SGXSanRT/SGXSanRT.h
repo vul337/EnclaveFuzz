@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanConfig.h"
+#include "SGXSanRTConfig.h"
 #include <dlfcn.h>
 #include <malloc.h>
 #include <stddef.h>

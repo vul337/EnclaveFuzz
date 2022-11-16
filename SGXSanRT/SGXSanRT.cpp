@@ -22,8 +22,6 @@
 namespace po = boost::program_options;
 enum EncryptStatus { Unknown, Plaintext, Ciphertext };
 
-std::string ClSGXSanEnclaveFileName(ENCLAVE_FILENAME);
-
 static const char *log_level_to_prefix[] = {
     "",
     "[SGXSan] ERROR: ",
@@ -194,11 +192,16 @@ int hook_libstdcxx_heap_mgr() {
   return 0;
 }
 
+/* Updated by sgx_create_enclave and used by hook_enclave_heap_mgr */
+static std::string __gEnclaveFileName = "";
+std::string getEnclaveFileName() { return __gEnclaveFileName; }
+void setEnclaveFileName(std::string fileName) { __gEnclaveFileName = fileName; }
+
 extern "C" int hook_enclave_heap_mgr() {
   plthook_t *plthook;
-
-  if (plthook_open(&plthook, (std::string("./") + ENCLAVE_FILENAME).c_str()) !=
-      0) {
+  std::string fileName = getEnclaveFileName();
+  sgxsan_assert(fileName != "");
+  if (plthook_open(&plthook, ("./" + fileName).c_str()) != 0) {
     log_error("plthook_open error: %s\n", plthook_error());
     return -1;
   }

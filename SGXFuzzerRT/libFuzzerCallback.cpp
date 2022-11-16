@@ -804,7 +804,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   // Declare the supported options.
   po::options_description desc("LibFuzzerCallback's inner options");
   desc.add_options()("inner_help", "produce help message")(
-      "enclave_file_name",
+      "cb_enclave_file_name",
       po::value<std::string>(&ClEnclaveFileName)
           ->default_value("enclave.signed.so"),
       "Name of target Enclave file")(

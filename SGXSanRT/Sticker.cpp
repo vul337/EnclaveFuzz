@@ -181,11 +181,13 @@ sgx_status_t sgx_cpuid(int cpuinfo[4], int leaf) {
 
 /// life time management
 static void *gEnclaveHandler = nullptr;
+void setEnclaveFileName(std::string fileName);
 extern "C" sgx_status_t __sgx_create_enclave_ex(
     const char *file_name, const int debug, sgx_launch_token_t *launch_token,
     int *launch_token_updated, sgx_enclave_id_t *enclave_id,
     sgx_misc_attribute_t *misc_attr, const uint32_t ex_features,
     const void *ex_features_p[32]) {
+  setEnclaveFileName(file_name);
   gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_NOW);
   sgxsan_assert(gEnclaveHandler != nullptr);
 

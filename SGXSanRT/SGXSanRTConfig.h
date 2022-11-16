@@ -9,4 +9,3 @@
 #define USED_LOG_LEVEL 2
 
 #define SHADOW_OFFSET 0x18000000000ULL /* 1.5 TB */
-#define ENCLAVE_FILENAME "enclave.signed.so"
