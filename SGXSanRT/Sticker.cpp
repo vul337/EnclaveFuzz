@@ -13,8 +13,11 @@
 #include "trts_internal.h"
 #include <algorithm>
 #include <errno.h>
+#include <fstream>
+#include <link.h>
 #include <map>
 #include <pthread.h>
+#include <regex>
 #include <stack>
 #include <thread_data.h>
 #include <unistd.h>
@@ -182,6 +185,97 @@ sgx_status_t sgx_cpuid(int cpuinfo[4], int leaf) {
 /// life time management
 static void *gEnclaveHandler = nullptr;
 void setEnclaveFileName(std::string fileName);
+std::string getEnclaveFileName();
+
+struct SGXSanMMapInfo {
+  uint64_t start = 0;
+  uint64_t end = 0;
+  bool is_readable = false;
+  bool is_writable = false;
+  bool is_executable = false;
+  bool is_shared = false;
+  bool is_private = false;
+  std::string desc;
+};
+
+std::vector<SGXSanMMapInfo> getMMapInfos() {
+  std::vector<SGXSanMMapInfo> mmapInfos;
+  std::fstream f("/proc/self/maps", std::ios::in);
+  std::string line;
+  std::regex map_pattern(
+      "([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
+  std::smatch match;
+  while (std::getline(f, line)) {
+    if (std::regex_search(line, match, map_pattern)) {
+      SGXSanMMapInfo info;
+      info.start = std::stoull(match[1].str(), nullptr, 16);
+      info.end = std::stoull(match[2].str(), nullptr, 16) - 1;
+      info.is_readable = match[3] == "r";
+      info.is_writable = match[4] == "w";
+      info.is_executable = match[5] == "x";
+      std::string sharedOrPrivate = match[6];
+      if (sharedOrPrivate == "s")
+        info.is_shared = true;
+      else if (sharedOrPrivate == "p")
+        info.is_shared = false;
+      else
+        abort();
+      std::string remained = match[7];
+      std::regex remained_pattern(
+          "([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*):([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*)[ "
+          "]+([\\S]*)");
+      std::smatch remained_match;
+      if (std::regex_search(remained, remained_match, remained_pattern)) {
+        info.desc = remained_match[5].str();
+      }
+      mmapInfos.push_back(info);
+    }
+  }
+  return mmapInfos;
+}
+
+extern "C" void PoisonEnclaveDSOCodeSegment() {
+  // Currently, called from __asan_init, we still in dlopen, so we can't get
+  // dlopen-ed handler, and we also have to call this func before poisoning
+  // global, since we directly write shadow byte of globals to map
+  std::string enclaveFileName = getEnclaveFileName();
+  sgxsan_assert(enclaveFileName != "");
+
+  // Current Enclave is in dlopen-ing, and should already have been mmap-ed
+  // We get start address of current Enclave
+  auto _handler =
+      dlopen(("./" + enclaveFileName).c_str(), RTLD_LAZY | RTLD_NOLOAD);
+  sgxsan_assert(_handler);
+  struct link_map *lmap = NULL;
+  sgxsan_error(0 != dlinfo(_handler, RTLD_DI_LINKMAP, &lmap),
+               "0 != dlinfo(_handler, RTLD_DI_LINKMAP, &lmap): %s\n",
+               dlerror());
+  uptr EnclaveStartAddr = lmap->l_addr;
+
+  // get Enclave's description, since desciption maybe different from
+  // enclaveFileName, due to soft link etc.
+  auto mmapInfos = getMMapInfos();
+  std::string EnclaveMmapDesc = "";
+  for (auto info : mmapInfos) {
+    if (info.start == EnclaveStartAddr) {
+      EnclaveMmapDesc = info.desc;
+      break;
+    }
+  }
+  sgxsan_assert(EnclaveMmapDesc != "");
+
+  // Get segment belong to Enclave
+  RunInEnclave = true;
+  for (auto info : mmapInfos) {
+    if (info.desc == EnclaveMmapDesc) {
+      PoisonShadow(info.start, info.end + 1 - info.start,
+                   kAsanNotPoisonedMagic);
+    }
+  }
+  RunInEnclave = false;
+  sgxsan_assert(dlclose(_handler) == 0);
+}
+
 extern "C" sgx_status_t __sgx_create_enclave_ex(
     const char *file_name, const int debug, sgx_launch_token_t *launch_token,
     int *launch_token_updated, sgx_enclave_id_t *enclave_id,

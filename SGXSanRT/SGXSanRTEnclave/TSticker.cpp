@@ -59,6 +59,7 @@ uint8_t *__SGXSanCovMap;
 
 extern "C" int hook_enclave_heap_mgr();
 extern "C" uint8_t *getCovMapAddr();
+extern "C" void PoisonEnclaveDSOCodeSegment();
 // gAlreadyAsanInited should reside in Enclave image, since we should set it to
 // false whenever we load Enclave image and call __asan_init
 bool gAlreadyAsanInited = false;
@@ -69,6 +70,7 @@ extern "C" void __asan_init() {
       abort();
     }
     __SGXSanCovMap = getCovMapAddr();
+    PoisonEnclaveDSOCodeSegment();
     gAlreadyAsanInited = true;
   }
 }
