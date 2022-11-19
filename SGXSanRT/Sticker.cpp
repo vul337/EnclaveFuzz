@@ -198,40 +198,29 @@ struct SGXSanMMapInfo {
   std::string desc;
 };
 
-std::vector<SGXSanMMapInfo> getMMapInfos() {
-  std::vector<SGXSanMMapInfo> mmapInfos;
-  std::fstream f("/proc/self/maps", std::ios::in);
-  std::string line;
-  std::regex map_pattern(
-      "([0-9a-fA-F]*)-([0-9a-fA-F]*) ([r-])([w-])([x-])([ps-])(.*)");
-  std::smatch match;
-  while (std::getline(f, line)) {
-    if (std::regex_search(line, match, map_pattern)) {
-      SGXSanMMapInfo info;
-      info.start = std::stoull(match[1].str(), nullptr, 16);
-      info.end = std::stoull(match[2].str(), nullptr, 16) - 1;
-      info.is_readable = match[3] == "r";
-      info.is_writable = match[4] == "w";
-      info.is_executable = match[5] == "x";
-      std::string sharedOrPrivate = match[6];
-      if (sharedOrPrivate == "s")
-        info.is_shared = true;
-      else if (sharedOrPrivate == "p")
-        info.is_shared = false;
-      else
-        abort();
-      std::string remained = match[7];
-      std::regex remained_pattern(
-          "([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*):([0-9a-fA-F]*)[ ]+([0-9a-fA-F]*)[ "
-          "]+([\\S]*)");
-      std::smatch remained_match;
-      if (std::regex_search(remained, remained_match, remained_pattern)) {
-        info.desc = remained_match[5].str();
+static int dlItCallbackPoisonEnclaveDSO(struct dl_phdr_info *info, size_t size,
+                                        void *data) {
+  auto EnclaveDSOStart = *(uptr *)data;
+  if (EnclaveDSOStart == info->dlpi_addr) {
+    // Found interesting DSO
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+      const ElfW(Phdr) *phdr = &info->dlpi_phdr[i];
+      if (phdr->p_type == PT_LOAD) {
+        // Found loadable segment
+        uptr beg = RoundDownTo(EnclaveDSOStart + phdr->p_vaddr, phdr->p_align);
+        uptr end = RoundUpTo(
+            EnclaveDSOStart + phdr->p_vaddr + phdr->p_memsz - 1, phdr->p_align);
+
+        // Poison Enclave DSO
+        RunInEnclave = true;
+        PoisonShadow(beg, end - beg, kAsanNotPoisonedMagic);
+        RunInEnclave = false;
       }
-      mmapInfos.push_back(info);
     }
+    return 1;
+  } else {
+    return 0;
   }
-  return mmapInfos;
 }
 
 extern "C" void PoisonEnclaveDSOCodeSegment() {
@@ -243,37 +232,14 @@ extern "C" void PoisonEnclaveDSOCodeSegment() {
 
   // Current Enclave is in dlopen-ing, and should already have been mmap-ed
   // We get start address of current Enclave
-  auto _handler =
-      dlopen(("./" + enclaveFileName).c_str(), RTLD_LAZY | RTLD_NOLOAD);
-  sgxsan_assert(_handler);
-  struct link_map *lmap = NULL;
-  sgxsan_error(0 != dlinfo(_handler, RTLD_DI_LINKMAP, &lmap),
-               "0 != dlinfo(_handler, RTLD_DI_LINKMAP, &lmap): %s\n",
-               dlerror());
-  uptr EnclaveStartAddr = lmap->l_addr;
+  auto handler = (struct link_map *)dlopen(("./" + enclaveFileName).c_str(),
+                                           RTLD_LAZY | RTLD_NOLOAD);
+  sgxsan_assert(handler);
+  uptr EnclaveStartAddr = handler->l_addr;
+  sgxsan_assert(dlclose(handler) == 0);
 
-  // get Enclave's description, since desciption maybe different from
-  // enclaveFileName, due to soft link etc.
-  auto mmapInfos = getMMapInfos();
-  std::string EnclaveMmapDesc = "";
-  for (auto info : mmapInfos) {
-    if (info.start == EnclaveStartAddr) {
-      EnclaveMmapDesc = info.desc;
-      break;
-    }
-  }
-  sgxsan_assert(EnclaveMmapDesc != "");
-
-  // Get segment belong to Enclave
-  RunInEnclave = true;
-  for (auto info : mmapInfos) {
-    if (info.desc == EnclaveMmapDesc) {
-      PoisonShadow(info.start, info.end + 1 - info.start,
-                   kAsanNotPoisonedMagic);
-    }
-  }
-  RunInEnclave = false;
-  sgxsan_assert(dlclose(_handler) == 0);
+  // To find Enclave DSO and poison it with InEnclave flag
+  dl_iterate_phdr(dlItCallbackPoisonEnclaveDSO, &EnclaveStartAddr);
 }
 
 extern "C" sgx_status_t __sgx_create_enclave_ex(
