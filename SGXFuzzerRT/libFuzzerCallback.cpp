@@ -907,6 +907,12 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
+extern "C" void LLVMFuzzerEarlyAfterRunOne() {
+  // Destroy Enclave
+  sgxfuzz_error(sgx_destroy_enclave(global_eid) != SGX_SUCCESS,
+                "[FAIL] Enclave destroy");
+}
+
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   static int test_round = 0;
   if (test_round == 0 && Size == 0) {
@@ -970,9 +976,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   fullSucceedTimes++;
 
 exit:
-  // Destroy Enclave
-  ret = sgx_destroy_enclave(global_eid);
-  sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave destroy");
   /// Clear \c FuzzDataFactory::ConsumerJSon and free temp buffer before leave
   /// current round
   data_factory.clearAtConsumerEnd();

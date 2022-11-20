@@ -57,7 +57,7 @@ extern "C" sgx_status_t tsticker_ecall(const sgx_enclave_id_t eid,
 // Used by SanCov Pass for Enclave
 uint8_t *__SGXSanCovMap;
 
-extern "C" int hook_enclave_heap_mgr();
+extern "C" int hook_enclave();
 extern "C" uint8_t *getCovMapAddr();
 extern "C" void PoisonEnclaveDSOCodeSegment();
 // gAlreadyAsanInited should reside in Enclave image, since we should set it to
@@ -66,7 +66,7 @@ bool gAlreadyAsanInited = false;
 extern "C" void __asan_init() {
   if (gAlreadyAsanInited == false) {
     // We already initialized shadow memory in host ctor
-    if (hook_enclave_heap_mgr() != 0) {
+    if (hook_enclave() != 0) {
       abort();
     }
     __SGXSanCovMap = getCovMapAddr();

@@ -10,3 +10,6 @@
 [submodule "json"]
 	path = json
 	url = git@github.com:nlohmann/json.git
+[submodule "SGXFuzzerRT/libFuzzer"]
+	path = SGXFuzzerRT/libFuzzer
+	url = git@github.com:LeoneChen/libFuzzer.git

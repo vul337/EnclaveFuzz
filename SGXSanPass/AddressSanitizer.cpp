@@ -133,7 +133,7 @@ static const uintptr_t kRetiredStackFrameMagic = 0x45E0360E;
 
 const char kAsanModuleCtorName[] = "asan.module_ctor";
 const char kAsanModuleDtorName[] = "asan.module_dtor";
-static const uint64_t kAsanCtorAndDtorPriority = 102;
+static const uint64_t kAsanCtorAndDtorPriority = 1;
 // On Emscripten, the system needs more than one priorities for constructors.
 static const uint64_t kAsanEmscriptenCtorAndDtorPriority = 50;
 const char kAsanReportErrorTemplate[] = "__asan_report_";

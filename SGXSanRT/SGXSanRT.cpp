@@ -192,12 +192,16 @@ int hook_libstdcxx_heap_mgr() {
   return 0;
 }
 
-/* Updated by sgx_create_enclave and used by hook_enclave_heap_mgr */
+/* Updated by sgx_create_enclave and used by hook_enclave */
 static std::string __gEnclaveFileName = "";
 std::string getEnclaveFileName() { return __gEnclaveFileName; }
 void setEnclaveFileName(std::string fileName) { __gEnclaveFileName = fileName; }
 
-extern "C" int hook_enclave_heap_mgr() {
+extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
+                                                           uint8_t *Stop);
+extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
+                                                 const uintptr_t *pcs_end);
+extern "C" int hook_enclave() {
   plthook_t *plthook;
   std::string fileName = getEnclaveFileName();
   sgxsan_assert(fileName != "");
@@ -219,6 +223,8 @@ extern "C" int hook_enclave_heap_mgr() {
   HOOK_SYM(result, plthook, malloc_usable_size)
   HOOK_SYM(result, plthook, calloc)
   HOOK_SYM(result, plthook, realloc)
+  HOOK_SYM(result, plthook, __sanitizer_cov_8bit_counters_init)
+  HOOK_SYM(result, plthook, __sanitizer_cov_pcs_init)
 #undef HOOK_SYM
   plthook_close(plthook);
   return 0;
