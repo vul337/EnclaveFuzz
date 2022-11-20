@@ -1,37 +1,18 @@
 #include "Poison.h"
 #include "arch.h"
 #include "rts_cmd.h"
+#include "rts_sim.h"
 #include "sgx_eid.h"
 #include "sgx_error.h"
 #include "sgx_key.h"
+#include "trts_internal_types.h"
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 
 /// Birdge Sticker
-typedef struct {
-  const void *ecall_addr;
-  uint8_t is_priv;
-  uint8_t is_switchless;
-} ecall_addr_t;
-
-typedef struct {
-  size_t nr_ecall;
-  ecall_addr_t ecall_table[1];
-} ecall_table_t;
-
 typedef sgx_status_t (*ecall_func_t)(void *ms);
 extern const ecall_table_t g_ecall_table;
-
-/// Global Data
-
-/*SECS data structure*/
-typedef struct _global_data_sim_t {
-  secs_t *secs_ptr;
-  sgx_cpu_svn_t cpusvn_sim;
-  uint64_t seed; /* to initialize the PRNG */
-} global_data_sim_t;
-extern global_data_sim_t g_global_data_sim;
 secs_t g_secs;
 
 static void SGXInitInternal() {

@@ -4,6 +4,7 @@
 #include "arch.h"
 #include "cpuid.h"
 #include "plthook.h"
+#include "routine.h"
 #include "rts_cmd.h"
 #include "sgx_edger8r.h"
 #include "sgx_key.h"
@@ -29,23 +30,6 @@ TrustThreadPool _g_thread_pool;
 TrustThreadPool *g_thread_pool = &_g_thread_pool;
 
 /// Birdge Sticker
-typedef struct {
-  const void *ecall_addr;
-  uint8_t is_priv;
-  uint8_t is_switchless;
-} ecall_addr_t;
-
-typedef struct {
-  size_t nr_ecall;
-  ecall_addr_t ecall_table[1];
-} ecall_table_t;
-
-typedef struct _ocall_table_t {
-  size_t count;
-  void *ocall[];
-} sgx_ocall_table_t;
-
-typedef sgx_status_t (*ecall_func_t)(void *ms);
 typedef sgx_status_t (*bridge_fn_t)(const void *);
 
 __thread sgx_ocall_table_t *g_enclave_ocall_table = nullptr;
