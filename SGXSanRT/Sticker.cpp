@@ -276,35 +276,55 @@ extern "C" void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
 extern "C" void __sanitizer_cov_pcs_unregister(const uintptr_t *pcs_beg);
 
 uptr gEnclaveDSOSanCovCntrsStart = 0, gEnclaveDSOSanCovCntrsStop = 0,
-     gEnclaveDSOSanCovPCsStart = 0, gEnclaveDSOSanCovPCsEnd = 0;
+     gEnclaveDSOSanCovPCsStart = 0, gEnclaveDSOSanCovPCsStop = 0;
 
 extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
                                                            uint8_t *Stop) {
-  uptr inline8bitCntrs = (uptr)Stop - (uptr)Start;
-  log_debug("[Important] SGXSan successfully hook "
-            "__sanitizer_cov_8bit_counters_init of "
-            "Enclave DSO, %ld inline 8-bit counts [%p, %p)\n",
-            inline8bitCntrs, Start, Stop);
+  if (gEnclaveDSOSanCovCntrsStart == (uptr)Start) {
+    return;
+  }
+  log_always("Hook __sanitizer_cov_8bit_counters_init of Enclave, %ld inline "
+             "8-bit counts [%p, %p)\n",
+             (uptr)Stop - (uptr)Start, Start, Stop);
   gEnclaveDSOSanCovCntrsStart = (uptr)Start;
   gEnclaveDSOSanCovCntrsStop = (uptr)Stop;
   __sanitizer_cov_8bit_counters_init(Start, Stop);
 }
 
+struct PCTableEntry {
+  uintptr_t PC, PCFlags;
+};
+
 extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
                                                  const uintptr_t *pcs_end) {
+  if (gEnclaveDSOSanCovPCsStart == (uptr)pcs_beg) {
+    return;
+  }
   gEnclaveDSOSanCovPCsStart = (uptr)pcs_beg;
-  gEnclaveDSOSanCovPCsEnd = (uptr)pcs_end;
-  log_debug("[Important] SGXSan successfully hook "
-            "__sanitizer_cov_pcs_init of "
-            "Enclave DSO, PCs [%p, %p)\n",
-            pcs_beg, pcs_end);
+  gEnclaveDSOSanCovPCsStop = (uptr)pcs_end;
+  log_always("Hook __sanitizer_cov_pcs_init of Enclave, %ld PCs [%p, %p)\n",
+             (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
+             pcs_end);
   __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
 }
 
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
+  // sgxsan_warning(
+  //     gEnclaveDSOSanCovCntrsStart == 0,
+  //     "Fail to hook Enclave's __sanitizer_cov_8bit_counters_init and "
+  //     "record section start address, or don't enable inline-8bit-counters");
   __sanitizer_cov_8bit_counters_unregister(
       (uint8_t *)gEnclaveDSOSanCovCntrsStart);
+  gEnclaveDSOSanCovCntrsStart = 0;
+  gEnclaveDSOSanCovCntrsStop = 0;
+
+  // sgxsan_warning(gEnclaveDSOSanCovPCsStart == 0,
+  //                "Fail to hook Enclave's __sanitizer_cov_pcs_init and "
+  //                "record section start address, or don't enable pc-table");
   __sanitizer_cov_pcs_unregister((uintptr_t *)gEnclaveDSOSanCovPCsStart);
+  gEnclaveDSOSanCovPCsStart = 0;
+  gEnclaveDSOSanCovPCsStop = 0;
+
   sgxsan_assert(dlclose(gEnclaveHandler) == 0);
   gEnclaveHandler = nullptr;
   return SGX_SUCCESS;

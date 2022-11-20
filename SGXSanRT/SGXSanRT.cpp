@@ -23,11 +23,8 @@ namespace po = boost::program_options;
 enum EncryptStatus { Unknown, Plaintext, Ciphertext };
 
 static const char *log_level_to_prefix[] = {
-    "",
-    "[SGXSan] ERROR: ",
-    "[SGXSan] WARNING: ",
-    "[SGXSan] DEBUG: ",
-    "[SGXSan] TRACE: ",
+    "[SGXSan] ALWAYS: ", "[SGXSan] ERROR: ", "[SGXSan] WARNING: ",
+    "[SGXSan] DEBUG: ",  "[SGXSan] TRACE: ",
 };
 
 bool asan_inited = false;
@@ -241,12 +238,6 @@ __attribute__((constructor)) void SGXSanInit() {
   sgxsan_assert(hook_libstdcxx_heap_mgr() == 0);
   asan_inited = true;
 }
-
-/* CovMap */
-/* Set by pass, get by runtime */
-static uint8_t *__SGXSanCovMap = (uint8_t *)0x1234567890;
-extern "C" void setCovMapAddr(uint8_t *addr) { __SGXSanCovMap = addr; }
-extern "C" uint8_t *getCovMapAddr() { return __SGXSanCovMap; }
 
 /// SLSan Callbacks to show dynamic value flow
 extern "C" void PrintPtr(char *info, void *addr, size_t size) {

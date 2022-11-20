@@ -54,22 +54,20 @@ extern "C" sgx_status_t tsticker_ecall(const sgx_enclave_id_t eid,
   return result;
 }
 
-// Used by SanCov Pass for Enclave
-uint8_t *__SGXSanCovMap;
-
 extern "C" int hook_enclave();
 extern "C" uint8_t *getCovMapAddr();
 extern "C" void PoisonEnclaveDSOCodeSegment();
 // gAlreadyAsanInited should reside in Enclave image, since we should set it to
 // false whenever we load Enclave image and call __asan_init
 bool gAlreadyAsanInited = false;
+/// @brief Must called before SanitizerCoverage's ctors, since in this function
+/// I hook callbacks in these ctors.
 extern "C" void __asan_init() {
   if (gAlreadyAsanInited == false) {
     // We already initialized shadow memory in host ctor
     if (hook_enclave() != 0) {
       abort();
     }
-    __SGXSanCovMap = getCovMapAddr();
     PoisonEnclaveDSOCodeSegment();
     gAlreadyAsanInited = true;
   }
