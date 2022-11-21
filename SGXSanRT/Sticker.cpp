@@ -252,12 +252,14 @@ extern "C" sgx_status_t sgx_create_enclave_ex(
                                  ex_features, ex_features_p);
 }
 
-extern "C" void __sanitizer_cov_8bit_counters_init(uint8_t *Start,
-                                                   uint8_t *Stop);
-extern "C" void __sanitizer_cov_8bit_counters_unregister(uint8_t *Start);
-extern "C" void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
-                                         const uintptr_t *pcs_end);
-extern "C" void __sanitizer_cov_pcs_unregister(const uintptr_t *pcs_beg);
+extern "C" __attribute__((weak)) void
+__sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
+extern "C" __attribute__((weak)) void
+__sanitizer_cov_8bit_counters_unregister(uint8_t *Start);
+extern "C" __attribute__((weak)) void
+__sanitizer_cov_pcs_init(const uintptr_t *pcs_beg, const uintptr_t *pcs_end);
+extern "C" __attribute__((weak)) void
+__sanitizer_cov_pcs_unregister(const uintptr_t *pcs_beg);
 
 uptr gEnclaveDSOSanCovCntrsStart = 0, gEnclaveDSOSanCovCntrsStop = 0,
      gEnclaveDSOSanCovPCsStart = 0, gEnclaveDSOSanCovPCsStop = 0;
@@ -297,15 +299,19 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   //     gEnclaveDSOSanCovCntrsStart == 0,
   //     "Fail to hook Enclave's __sanitizer_cov_8bit_counters_init and "
   //     "record section start address, or don't enable inline-8bit-counters");
-  __sanitizer_cov_8bit_counters_unregister(
-      (uint8_t *)gEnclaveDSOSanCovCntrsStart);
+  if (__sanitizer_cov_8bit_counters_unregister) {
+    __sanitizer_cov_8bit_counters_unregister(
+        (uint8_t *)gEnclaveDSOSanCovCntrsStart);
+  }
   gEnclaveDSOSanCovCntrsStart = 0;
   gEnclaveDSOSanCovCntrsStop = 0;
 
   // sgxsan_warning(gEnclaveDSOSanCovPCsStart == 0,
   //                "Fail to hook Enclave's __sanitizer_cov_pcs_init and "
   //                "record section start address, or don't enable pc-table");
-  __sanitizer_cov_pcs_unregister((uintptr_t *)gEnclaveDSOSanCovPCsStart);
+  if (__sanitizer_cov_pcs_unregister) {
+    __sanitizer_cov_pcs_unregister((uintptr_t *)gEnclaveDSOSanCovPCsStart);
+  }
   gEnclaveDSOSanCovPCsStart = 0;
   gEnclaveDSOSanCovPCsStop = 0;
 
