@@ -31,6 +31,7 @@ std::string ClEnclaveFileName;
 size_t ClMaxStringLength;
 size_t ClMaxCount;
 size_t ClMaxSize;
+size_t ClUserCheckSize;
 int ClUsedLogLevel;
 bool ClProvideNullPointer;
 double ClProvideNullPointerProbability;
@@ -116,6 +117,7 @@ enum FuzzDataTy {
   FUZZ_RET,
   FUZZ_BOOL,
   FUZZ_SEQ,
+  FUZZ_USER_CHECK_SIZE,
 };
 
 enum DataOp {
@@ -209,6 +211,11 @@ public:
       fillRand(&newData, sizeof(size_t));
       newData %= (maxValue + 1);
       mutatorJson[JSonPtr / "Data"] = newData;
+      break;
+    }
+    case FUZZ_USER_CHECK_SIZE: {
+      sgxfuzz_assert(req.size <= sizeof(size_t));
+      mutatorJson[JSonPtr / "Data"] = ClUserCheckSize;
       break;
     }
     case FUZZ_RET:
@@ -340,6 +347,10 @@ public:
           }
           mutatorJson[ptr / "Data"] = data;
         }
+        break;
+      }
+      case FUZZ_USER_CHECK_SIZE: {
+        /* Do nothing */
         break;
       }
       case FUZZ_ARRAY:
@@ -591,6 +602,7 @@ public:
         break;
       }
       case FUZZ_SIZE:
+      case FUZZ_USER_CHECK_SIZE:
       case FUZZ_COUNT: {
         sgxfuzz_assert((byteArrLen <= sizeof(size_t)));
         size_t data = consumerJson[consumerJsonPtr / "Data"];
@@ -666,7 +678,7 @@ public:
         std::string(cStrAsParamID) + "_getUserCheckCount";
     size_t result;
     getBytes(strAsParamID.c_str(), (uint8_t *)&result, sizeof(size_t),
-             FUZZ_COUNT);
+             FUZZ_USER_CHECK_SIZE);
     return result;
   }
 
@@ -827,7 +839,10 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       "Provide NULL for fuzzed pointer parameter")(
       "cb_provide_nullptr_probability",
       po::value<double>(&ClProvideNullPointerProbability)->default_value(0.01),
-      "The minimum granularity is 0.01");
+      "The minimum granularity is 0.01")(
+      "cb_user_check_size",
+      po::value<size_t>(&ClUserCheckSize)->default_value(4096),
+      "Specify prepared data size for user_check pointer");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
