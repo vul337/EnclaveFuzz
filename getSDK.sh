@@ -60,6 +60,7 @@ ${MAKE} clean -s
 ${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} linux/libsgx_trts_sim.a ${PREFIX}/lib64
 ${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr \
+    --redefine-sym atexit=_deleted_atexit \
     --redefine-sym __cxa_atexit=_deleted__cxa_atexit \
     --redefine-sym sgx_ocall=_deleted_sgx_ocall \
     --redefine-sym get_thread_data=_deleted_get_thread_data \

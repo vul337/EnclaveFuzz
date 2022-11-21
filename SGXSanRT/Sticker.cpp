@@ -222,7 +222,7 @@ extern "C" sgx_status_t __sgx_create_enclave_ex(
     const void *ex_features_p[32]) {
   setEnclaveFileName(file_name);
   gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_NOW);
-  sgxsan_assert(gEnclaveHandler != nullptr);
+  sgxsan_error(gEnclaveHandler == nullptr, "%s\n", dlerror());
 
   tsticker_ecall =
       (decltype(tsticker_ecall))dlsym(gEnclaveHandler, "tsticker_ecall");
