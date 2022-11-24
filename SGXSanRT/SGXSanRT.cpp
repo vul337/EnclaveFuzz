@@ -118,7 +118,10 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   }
 }
 
-static void register_sgxsan_sigaction() {
+bool AlreadyRegisterSignalHandler = false;
+extern "C" void register_sgxsan_sigaction() {
+  if (AlreadyRegisterSignalHandler)
+    return;
   struct sigaction sig_act;
   memset(&sig_act, 0, sizeof(sig_act));
   sig_act.sa_sigaction = sgxsan_sigaction;
@@ -131,6 +134,7 @@ static void register_sgxsan_sigaction() {
   // hool SIGSEGV
   sgxsan_error(0 != sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]),
                "Fail to regist SIGSEGV action\n");
+  AlreadyRegisterSignalHandler = true;
 }
 
 /// \brief Initialize shadow memory
@@ -234,7 +238,6 @@ __attribute__((constructor)) void SGXSanInit() {
   std::ios_base::Init _init;
   sgxsan_init_shadow_memory();
   PrintAddressSpaceLayout();
-  register_sgxsan_sigaction();
   sgxsan_assert(hook_libstdcxx_heap_mgr() == 0);
   asan_inited = true;
 }

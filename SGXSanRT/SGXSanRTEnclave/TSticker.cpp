@@ -38,6 +38,7 @@ extern "C" sgx_status_t tsticker_ecall(const sgx_enclave_id_t eid,
 extern "C" int hook_enclave();
 extern "C" uint8_t *getCovMapAddr();
 extern "C" void PoisonEnclaveDSOCodeSegment();
+extern "C" void register_sgxsan_sigaction();
 // gAlreadyAsanInited should reside in Enclave image, since we should set it to
 // false whenever we load Enclave image and call __asan_init
 bool gAlreadyAsanInited = false;
@@ -45,6 +46,7 @@ bool gAlreadyAsanInited = false;
 /// I hook callbacks in these ctors.
 extern "C" void __asan_init() {
   if (gAlreadyAsanInited == false) {
+    register_sgxsan_sigaction();
     // We already initialized shadow memory in host ctor
     if (hook_enclave() != 0) {
       abort();
