@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 
 /* Page assumption */
 #define PAGE_SIZE 0x1000
@@ -206,3 +207,20 @@ static inline void FastMemSet(void *dst, uint8_t c, size_t n) {
 
 /// Cipher detect
 void check_output_hybrid(uint64_t addr, uint64_t size);
+
+/* addr2line & backtrace Util */
+std::string addr2fname(void *addr);
+void *sgxsan_backtrace_i(int idx);
+
+/* Set or get global Enclave file name */
+void setEnclaveFileName(std::string fileName);
+std::string getEnclaveFileName();
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+void register_sgxsan_sigaction();
+int hook_enclave();
+#if defined(__cplusplus)
+}
+#endif

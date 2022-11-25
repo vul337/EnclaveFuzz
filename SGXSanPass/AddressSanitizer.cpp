@@ -3866,9 +3866,14 @@ void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI) {
     hookWrapper = &SGXSanMemmoveS;
   } else
     abort();
-  CI->replaceAllUsesWith(
-      IRB.CreateCall(*hookWrapper, {CI->getOperand(0), CI->getOperand(1),
-                                    CI->getOperand(2), CI->getOperand(3)}));
+  CI->replaceAllUsesWith(IRB.CreateCall(
+      *hookWrapper,
+      {IRB.CreatePointerCast(CI->getOperand(0), IRB.getInt8PtrTy()),
+       IRB.CreateIntCast(CI->getOperand(1), IntptrTy, false),
+       callee_name == "memset_s"
+           ? IRB.CreateIntCast(CI->getOperand(2), IRB.getInt32Ty(), true)
+           : IRB.CreatePointerCast(CI->getOperand(2), IRB.getInt8PtrTy()),
+       IRB.CreateIntCast(CI->getOperand(3), IntptrTy, false)}));
   CI->eraseFromParent();
 }
 

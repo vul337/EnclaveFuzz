@@ -18,18 +18,7 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
       sgxsan_warning(
           true,
           "Detect Double-Fetch Situation, and modify it with random data\n");
-      size_t step_times = size / sizeof(int), remained = size % sizeof(int);
-      int *ptr_i32 = (int *)ptr;
-      for (size_t step = 0; step < step_times; step++) {
-        ptr_i32[step] = rand();
-      }
-      uint8_t *ptr_remained = (uint8_t *)((uptr)ptr + size * sizeof(int));
-      if (remained > 0) {
-        int rand_res = rand();
-        for (size_t i = 0; i < remained; i++) {
-          ptr_remained[i] = rand_res >> (i * 8);
-        }
-      }
+      // TODO: give it a new value
     }
   }
   MemAccessMgr::add_out_of_enclave_access_cnt();

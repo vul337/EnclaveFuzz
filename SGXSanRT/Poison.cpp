@@ -73,7 +73,7 @@ void FastPoisonShadowPartialRightRedzone(uptr aligned_addr, uptr size,
 }
 
 void PoisonShadow(uptr addr, uptr size, uint8_t value,
-                   bool returnBackToNormal) {
+                  bool returnBackToNormal) {
   // If addr do not aligned at granularity, start posioning from
   // RoundUpTo(addr, granularity)
   if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY))) {
@@ -218,11 +218,18 @@ void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value, bool doPoison) {
 
 void MoveShallowShadow(uptr dst_addr, uptr src_addr, uptr dst_size,
                        uptr copy_cnt) {
-  uint8_t *dst_shadow_addr = (uint8_t *)MEM_TO_SHADOW(dst_addr);
-  uint8_t *src_shadow_addr = (uint8_t *)MEM_TO_SHADOW(src_addr);
-  for (size_t i = 0;
-       i < RoundUpDiv(std::min(dst_size, copy_cnt), SHADOW_GRANULARITY); i++) {
-    *dst_shadow_addr |= L2F(*src_shadow_addr);
+  uptr new_dst_addr = RoundUpTo(dst_addr, SHADOW_GRANULARITY);
+  uptr new_src_addr = RoundUpTo(src_addr, SHADOW_GRANULARITY);
+  size_t new_dst_size = dst_size - (new_dst_addr - dst_addr);
+  size_t new_copy_cnt = copy_cnt - (new_src_addr - src_addr);
+
+  size_t processed_size = std::min(new_dst_size, new_copy_cnt);
+  size_t shadowSize = RoundUpDiv(processed_size, SHADOW_GRANULARITY);
+
+  uint8_t *dst_shadow_addr = (uint8_t *)MEM_TO_SHADOW(new_dst_addr);
+  uint8_t *src_shadow_addr = (uint8_t *)MEM_TO_SHADOW(new_src_addr);
+  for (size_t i = 0; i < shadowSize; i++) {
+    dst_shadow_addr[i] = dst_shadow_addr[i] | L2F(src_shadow_addr[i]);
   }
 }
 

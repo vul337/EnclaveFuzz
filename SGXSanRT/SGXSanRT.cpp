@@ -2,6 +2,7 @@
 #include "ArgShadow.h"
 #include "Malloc.h"
 #include "MemAccessMgr.h"
+#include "Sticker.h"
 #include "plthook.h"
 #include <boost/program_options.hpp>
 #include <execinfo.h>
@@ -119,7 +120,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
 }
 
 bool AlreadyRegisterSignalHandler = false;
-extern "C" void register_sgxsan_sigaction() {
+void register_sgxsan_sigaction() {
   if (AlreadyRegisterSignalHandler)
     return;
   struct sigaction sig_act;
@@ -198,11 +199,7 @@ static std::string __gEnclaveFileName = "";
 std::string getEnclaveFileName() { return __gEnclaveFileName; }
 void setEnclaveFileName(std::string fileName) { __gEnclaveFileName = fileName; }
 
-extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
-                                                           uint8_t *Stop);
-extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
-                                                 const uintptr_t *pcs_end);
-extern "C" int hook_enclave() {
+int hook_enclave() {
   plthook_t *plthook;
   std::string fileName = getEnclaveFileName();
   sgxsan_assert(fileName != "");
@@ -288,16 +285,23 @@ static void PrintShadowMap(log_level ll, uptr addr) {
   uptr shadowAddr = MEM_TO_SHADOW(addr);
   uptr shadowAddrRow = RoundDownTo(shadowAddr, 0x10);
   int shadowAddrCol = (int)(shadowAddr - shadowAddrRow);
+
+  sgxsan_assert(shadowAddrRow >= kLowShadowBeg &&
+                shadowAddrRow <= (kHighShadowEnd - 0xF));
+  uptr startRow = (shadowAddrRow - kLowShadowBeg) > 0x50 ? shadowAddrRow - 0x50
+                                                         : kLowShadowBeg;
+  uptr endRow = (kHighShadowEnd + 1 - shadowAddrRow) > 0x50
+                    ? shadowAddrRow + 0x50
+                    : (kHighShadowEnd + 1);
   char buf[BUFSIZ];
   snprintf(buf, BUFSIZ, "Shadow bytes around the buggy address:\n");
-  std::string str = buf;
-  for (int i = 0; i <= 10; i++) {
-    snprintf(buf, BUFSIZ, "%s%p:", i == 5 ? "=>" : "  ",
-             (void *)(shadowAddrRow - 0x50 + 0x10 * i));
+  std::string str(buf);
+  for (uptr i = startRow; i < endRow; i += 0x10) {
+    snprintf(buf, BUFSIZ, "%s%p:", i == shadowAddrRow ? "=>" : "  ", (void *)i);
     str += buf;
     for (int j = 0; j < 16; j++) {
       std::string prefix = " ", appendix = "";
-      if (i == 5) {
+      if (i == shadowAddrRow) {
         if (j == shadowAddrCol) {
           prefix = "[";
           if (shadowAddrCol == 15) {
@@ -306,8 +310,7 @@ static void PrintShadowMap(log_level ll, uptr addr) {
         } else if (j == shadowAddrCol + 1)
           prefix = "]";
       }
-      snprintf(buf, BUFSIZ, "%s%02x%s", prefix.c_str(),
-               *(uint8_t *)(shadowAddrRow - 0x50 + 0x10 * i + j),
+      snprintf(buf, BUFSIZ, "%s%02x%s", prefix.c_str(), *(uint8_t *)(i + j),
                appendix.c_str());
       str += buf;
     }
@@ -360,12 +363,25 @@ std::string addr2line(uptr addr, std::string fileName) {
   return sgxsan_exec(cmd_str.c_str());
 }
 
-std::string addr2line_fname(uptr addr, std::string fileName) {
+static std::string _addr2fname(uptr addr, std::string fileName) {
   std::stringstream cmd;
   cmd << "addr2line -fCe " << fileName.c_str() << " " << std::hex << addr
       << " | head -n 1";
   std::string cmd_str = cmd.str();
   return sgxsan_exec(cmd_str.c_str());
+}
+
+std::string addr2fname(void *addr) {
+  std::string fname = "";
+  Dl_info info;
+  if (dladdr(addr, &info) != 0) {
+    fname = _addr2fname(
+        (uptr)addr -
+            ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
+        info.dli_fname);
+    fname.erase(std::remove(fname.begin(), fname.end(), '\n'), fname.end());
+  }
+  return fname;
 }
 
 void sgxsan_backtrace(log_level ll) {
@@ -389,7 +405,7 @@ void sgxsan_backtrace(log_level ll) {
 #endif
 }
 
-static void *sgxsan_backtrace_i(int idx) {
+void *sgxsan_backtrace_i(int idx) {
   void *array[idx + 1];
   int size = backtrace(array, idx + 1);
   sgxsan_assert(size == idx + 1);
@@ -438,16 +454,9 @@ static EncryptStatus isCiphertext(uint64_t addr, uint64_t size) {
   }
 
   if (!is_cipher) {
-    Dl_info info;
     void *addr = sgxsan_backtrace_i(4);
-    if (dladdr(addr, &info) != 0) {
-      auto fname = addr2line_fname(
-          (uptr)addr -
-              ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
-          info.dli_fname);
-      fname.erase(std::remove(fname.begin(), fname.end(), '\n'), fname.end());
-      log_warning("[%s] Plaintext transfering...\n", fname.c_str());
-    }
+    std::string fname = addr2fname(addr);
+    log_warning("[%s] Plaintext transfering...\n", fname.c_str());
   }
   return is_cipher ? Ciphertext : Plaintext;
 }

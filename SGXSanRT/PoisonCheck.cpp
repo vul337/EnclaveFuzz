@@ -1,6 +1,7 @@
 #include "PoisonCheck.h"
 #include "MemAccessMgr.h"
 #include "Poison.h"
+#include "SGXSanRT.h"
 #include <algorithm>
 #include <assert.h>
 #include <string.h>
@@ -606,7 +607,7 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
 
 /// \param size should not be 0
 #define RANGE_CHECK(beg, size, regionInOutEnclaveStatus, PoisonedAddr,         \
-                    IsWrite)                                                   \
+                    IsWrite, ParentFunc)                                       \
   do {                                                                         \
     RegionInOutEnclaveStatusAndPoisonedAddr(                                   \
         (uptr)beg, size, regionInOutEnclaveStatus, PoisonedAddr, kL1Filter);   \
@@ -617,7 +618,7 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
         ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
       }                                                                        \
     } else if (regionInOutEnclaveStatus == OutEnclave) {                       \
-      MemAccessMgrOutEnclaveAccess(beg, size, IsWrite);                        \
+      MemAccessMgrOutEnclaveAccess(beg, size, IsWrite, false, ParentFunc);     \
     } else {                                                                   \
       sgxsan_error(true, "Invalid regionInOutEnclaveStatus\n");                \
     }                                                                          \
@@ -655,8 +656,11 @@ void *__asan_memcpy(void *dst, const void *src, uptr size) {
     }
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
+    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false,
+                parentFunc);
+    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true,
+                parentFunc);
     LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, size);
   }
   return memcpy(dst, src, size);
@@ -668,7 +672,9 @@ void *__asan_memset(void *dst, int c, uptr size) {
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus dstInOutEnclaveStatus;
     uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
+    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true,
+                parentFunc);
   }
   return memset(dst, c, size);
 }
@@ -679,8 +685,11 @@ void *__asan_memmove(void *dst, const void *src, uptr size) {
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
+    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false,
+                parentFunc);
+    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true,
+                parentFunc);
     LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, size);
   }
   return memmove(dst, src, size);
@@ -706,8 +715,11 @@ errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
     }
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
+    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false,
+                parentFunc);
+    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true,
+                parentFunc);
     LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, count);
   }
   return memcpy_s(dst, dstSize, src, count);
@@ -719,8 +731,9 @@ errno_t __sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t n) {
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus dstInOutEnclaveStatus;
     uptr dstPoisonedAddr;
+    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
     RANGE_CHECK(dst, std::max(dstSize, n), dstInOutEnclaveStatus,
-                dstPoisonedAddr, true);
+                dstPoisonedAddr, true, parentFunc);
   }
   return memset_s(dst, dstSize, c, n);
 }
@@ -732,8 +745,11 @@ errno_t __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
+    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false,
+                parentFunc);
+    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true,
+                parentFunc);
     LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, count);
   }
   return memmove_s(dst, dstSize, src, count);

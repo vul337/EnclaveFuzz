@@ -28,7 +28,8 @@ set(SOURCE
 
 include_directories(
     libFuzzer
-    ../json/single_include)
+    ../json/single_include
+    ${LINUX_SGX_MINI}/common/inc)
 
 add_library(
     SGXFuzzerRT STATIC 

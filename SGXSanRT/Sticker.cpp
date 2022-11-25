@@ -1,3 +1,4 @@
+#include "Sticker.h"
 #include "Malloc.h"
 #include "Poison.h"
 #include "SGXSanRT.h"
@@ -168,9 +169,6 @@ sgx_status_t sgx_cpuid(int cpuinfo[4], int leaf) {
 
 /// life time management
 static void *gEnclaveHandler = nullptr;
-void setEnclaveFileName(std::string fileName);
-std::string getEnclaveFileName();
-
 static int dlItCallbackPoisonEnclaveDSO(struct dl_phdr_info *info, size_t size,
                                         void *data) {
   auto EnclaveDSOStart = *(uptr *)data;
@@ -196,7 +194,7 @@ static int dlItCallbackPoisonEnclaveDSO(struct dl_phdr_info *info, size_t size,
   }
 }
 
-extern "C" void PoisonEnclaveDSOCodeSegment() {
+void PoisonEnclaveDSOCodeSegment() {
   // Currently, called from __asan_init, we still in dlopen, so we can't get
   // dlopen-ed handler, and we also have to call this func before poisoning
   // global, since we directly write shadow byte of globals to map

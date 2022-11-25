@@ -1,4 +1,6 @@
 #include "Poison.h"
+#include "SGXSanRT.h"
+#include "Sticker.h"
 #include "arch.h"
 #include "rts_cmd.h"
 #include "rts_sim.h"
@@ -35,10 +37,6 @@ extern "C" sgx_status_t tsticker_ecall(const sgx_enclave_id_t eid,
   return result;
 }
 
-extern "C" int hook_enclave();
-extern "C" uint8_t *getCovMapAddr();
-extern "C" void PoisonEnclaveDSOCodeSegment();
-extern "C" void register_sgxsan_sigaction();
 // gAlreadyAsanInited should reside in Enclave image, since we should set it to
 // false whenever we load Enclave image and call __asan_init
 bool gAlreadyAsanInited = false;
