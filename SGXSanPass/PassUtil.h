@@ -76,18 +76,6 @@ static inline std::string toString(Value *val) {
 
 static inline void dump(Value *val) { dbgs() << toString(val) << "\n\n"; }
 
-static inline uint64_t getAllocaSizeInBytes(const AllocaInst &AI) {
-  uint64_t ArraySize = 1;
-  if (AI.isArrayAllocation()) {
-    const ConstantInt *CI = dyn_cast<ConstantInt>(AI.getArraySize());
-    assert(CI && "non-constant array size");
-    ArraySize = CI->getZExtValue();
-  }
-  Type *Ty = AI.getAllocatedType();
-  uint64_t SizeInBytes = AI.getModule()->getDataLayout().getTypeAllocSize(Ty);
-  return SizeInBytes * ArraySize;
-}
-
 static inline SmallVector<User *> getNonCastUsers(Value *value) {
   SmallVector<User *> users;
   for (User *user : value->users()) {

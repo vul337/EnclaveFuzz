@@ -160,6 +160,8 @@ public:
     }
   }
 
+  Value *getAllocaSizeInBytes(AllocaInst *AI, Instruction *insertPt);
+
 private:
   std::unordered_set<SVF::ObjVar *> SensitiveObjs, WorkList, ProcessedList;
   std::unordered_set<Value *> poisonedInst;

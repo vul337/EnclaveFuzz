@@ -179,12 +179,22 @@ void SensitiveLeakSanitizer::poisonSensitiveStackOrHeapObj(
   ShallowUnpoisonStackObj(objPN);
 }
 
+Value *SensitiveLeakSanitizer::getAllocaSizeInBytes(AllocaInst *AI,
+                                                    Instruction *insertPt) {
+  IRBuilder<> IRB(insertPt);
+  Value *ArraySize = ConstantInt::get(IntptrTy, 1);
+  if (AI->isArrayAllocation()) {
+    ArraySize = const_cast<Value *>(AI->getArraySize());
+  }
+  Type *Ty = AI->getAllocatedType();
+  uint64_t SizeInBytes = AI->getModule()->getDataLayout().getTypeAllocSize(Ty);
+  return IRB.CreateMul(ConstantInt::get(IntptrTy, SizeInBytes), ArraySize);
+}
+
 Value *SensitiveLeakSanitizer::getStackOrHeapInstObjSize(Instruction *objI) {
   Value *objSize = nullptr;
   if (AllocaInst *AI = dyn_cast<AllocaInst>(objI)) {
-    size_t _objSize = getAllocaSizeInBytes(*AI);
-    assert(_objSize > 0);
-    objSize = ConstantInt::get(IntptrTy, _objSize);
+    objSize = getAllocaSizeInBytes(AI, objI->getNextNode());
   } else if (CallInst *CI = dyn_cast<CallInst>(objI)) {
     assert(CI->getFunctionType()->getReturnType()->isPointerTy());
     IRBuilder<> IRB(objI->getNextNode());
@@ -320,9 +330,12 @@ SensitiveLeakSanitizer::getNonPtrObjPNs(SVF::ObjVar *objPN) {
     for (SVF::NodeID deepObjNodeID : ander->getPts(objPN->getId())) {
       SVF::ObjVar *deepObjPN = cast<SVF::ObjVar>(pag->getGNode(deepObjNodeID));
       if (isa<SVF::DummyObjVar>(deepObjPN) ||
-          deepObjPN->getMemObj()->isFunction())
+          deepObjPN->getMemObj()->isFunction()) {
         continue;
-      assert(getPointerLevel(deepObjPN->getValue()) < pointerLevel);
+      }
+      if (getPointerLevel(deepObjPN->getValue()) >= pointerLevel) {
+        continue;
+      }
       objPNs.merge(getNonPtrObjPNs(deepObjPN));
     }
   } else {
@@ -1180,14 +1193,13 @@ void SensitiveLeakSanitizer::ShallowUnpoisonStackObj(SVF::ObjVar *objPN) {
       for (ReturnInst *RI :
            SGXSanInstVisitor::visitFunction(*(AI->getFunction()))
                .ReturnInstVec) {
-        IRBuilder<> IRB(RI);
         assert(AI->getAllocatedType()->isSized() && !AI->isSwiftError());
-        auto _objSize = getAllocaSizeInBytes(*AI);
-        assert(_objSize > 0);
-        IRB.CreateCall(
-            ShallowPoisonShadow,
-            {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()), IRB.getInt64(_objSize),
-             IRB.getInt8(kSGXSanSensitiveObjData), IRB.getInt1(false)});
+        Value *objSize = getAllocaSizeInBytes(AI, RI);
+        IRBuilder<> IRB(RI);
+        IRB.CreateCall(ShallowPoisonShadow,
+                       {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()), objSize,
+                        IRB.getInt8(kSGXSanSensitiveObjData),
+                        IRB.getInt1(false)});
       }
       shallowUnpoisonedStackObjs.emplace(AI);
     }
@@ -1208,6 +1220,10 @@ void SensitiveLeakSanitizer::propagateShadowInMemTransfer(
     CallInst *CI, Instruction *insertPoint, Value *dstPtr, Value *srcPtr,
     Value *dstSize, Value *copyCnt) {
   assert(CI != nullptr && not isa<Function>(dstPtr));
+  // Ignore transfer of address (e.g. transfer of pointer i8* in i8**)
+  if (getPointerLevel(dstPtr) != 1 or getPointerLevel(srcPtr) != 1) {
+    return;
+  }
   if (processedMemTransferInst.count(CI) != 0)
     return;
 

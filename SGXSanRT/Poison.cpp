@@ -191,6 +191,8 @@ void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value, bool doPoison) {
     size += addr - aligned_addr;
     addr = aligned_addr;
   }
+  if (size == 0)
+    return;
   uptr *p_shadow = (uptr *)MEM_TO_SHADOW(addr);
   uptr shadow_size = RoundUpDiv(size, SHADOW_GRANULARITY);
   uptr extendedValue = ExtendInt8(value);
