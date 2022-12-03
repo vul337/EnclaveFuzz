@@ -573,8 +573,9 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
             jsonPtr.parent_pointer().to_string(), "", 0, M);
         currentID = IRB.CreateGlobalStringPtr(jsonPtr.back(), "", 0, M);
       }
-      if (edlJson[jsonPtr / "out"] == true or
-          edlJson[jsonPtr / "user_check"] == true) {
+      // TODO: If ocall pointer is [user_check] and point to memory outside
+      // Enclave
+      if (edlJson[jsonPtr / "out"] == true) {
         // dump(edlJson, jsonPtr);
         inheritDirectionAttr(jsonPtr, 0);
         IRBuilder<> IRB(insertPt);
@@ -621,8 +622,6 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
           // it's count
           if (edlJson[jsonPtr / "c_array_count"].is_number()) {
             ptCnt = IRB.getInt64(edlJson[jsonPtr / "c_array_count"]);
-          } else if (edlJson[jsonPtr / "user_check"] == true) {
-            ptCnt = IRB.CreateCall(getUserCheckCount, {eleSize, jsonPtrAsID});
           } else {
             auto _count = edlJson[jsonPtr / "count"],
                  _size = edlJson[jsonPtr / "size"];
