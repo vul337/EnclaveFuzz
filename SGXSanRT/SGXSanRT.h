@@ -209,7 +209,7 @@ static inline void FastMemSet(void *dst, uint8_t c, size_t n) {
 void check_output_hybrid(uint64_t addr, uint64_t size);
 
 /* addr2line & backtrace Util */
-std::string addr2fname(void *addr);
+std::string addr2fname_try(void *addr);
 void *sgxsan_backtrace_i(int idx);
 
 /* Set or get global Enclave file name */

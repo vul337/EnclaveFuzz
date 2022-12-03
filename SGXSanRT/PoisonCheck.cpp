@@ -656,7 +656,7 @@ void *__asan_memcpy(void *dst, const void *src, uptr size) {
     }
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    char *parentFunc = (char *)addr2fname_try(sgxsan_backtrace_i(2)).c_str();
     RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false,
                 parentFunc);
     RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true,
@@ -672,7 +672,7 @@ void *__asan_memset(void *dst, int c, uptr size) {
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus dstInOutEnclaveStatus;
     uptr dstPoisonedAddr;
-    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    char *parentFunc = (char *)addr2fname_try(sgxsan_backtrace_i(2)).c_str();
     RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true,
                 parentFunc);
   }
@@ -685,7 +685,7 @@ void *__asan_memmove(void *dst, const void *src, uptr size) {
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    char *parentFunc = (char *)addr2fname_try(sgxsan_backtrace_i(2)).c_str();
     RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false,
                 parentFunc);
     RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true,
@@ -715,7 +715,7 @@ errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
     }
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    char *parentFunc = (char *)addr2fname_try(sgxsan_backtrace_i(2)).c_str();
     RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false,
                 parentFunc);
     RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true,
@@ -731,7 +731,7 @@ errno_t __sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t n) {
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus dstInOutEnclaveStatus;
     uptr dstPoisonedAddr;
-    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    char *parentFunc = (char *)addr2fname_try(sgxsan_backtrace_i(2)).c_str();
     RANGE_CHECK(dst, std::max(dstSize, n), dstInOutEnclaveStatus,
                 dstPoisonedAddr, true, parentFunc);
   }
@@ -745,7 +745,7 @@ errno_t __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
   if (LIKELY(asan_inited)) {
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
-    char *parentFunc = (char *)addr2fname(sgxsan_backtrace_i(2)).c_str();
+    char *parentFunc = (char *)addr2fname_try(sgxsan_backtrace_i(2)).c_str();
     RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false,
                 parentFunc);
     RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true,

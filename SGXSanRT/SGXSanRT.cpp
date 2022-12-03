@@ -5,6 +5,7 @@
 #include "Sticker.h"
 #include "plthook.h"
 #include <boost/program_options.hpp>
+#include <boost/stacktrace.hpp>
 #include <execinfo.h>
 #include <fstream>
 #include <iostream>
@@ -344,6 +345,16 @@ static std::string _addr2fname(uptr addr, std::string fileName) {
   return sgxsan_exec(cmd_str.c_str());
 }
 
+std::string addr2fname_try(void *addr) {
+  std::string fname = "";
+  Dl_info info;
+  if (dladdr(addr, &info) != 0) {
+    const char *_sname = info.dli_sname;
+    fname = _sname ? std::string(_sname) : "";
+  }
+  return fname;
+}
+
 std::string addr2fname(void *addr) {
   std::string fname = "";
   Dl_info info;
@@ -374,6 +385,18 @@ void sgxsan_backtrace(log_level ll) {
       log_always_np(str.c_str());
     }
   }
+  log_always_np("== SGXSan Backtrace END ==\n");
+#endif
+}
+
+void sgxsan_backtrace_boost(log_level ll) {
+#if (DUMP_STACK_TRACE)
+  if (ll > USED_LOG_LEVEL)
+    return;
+  log_always_np("== SGXSan Backtrace BEG ==\n");
+  std::stringstream ss;
+  ss << boost::stacktrace::stacktrace();
+  log_always_np("%s", ss.str().c_str());
   log_always_np("== SGXSan Backtrace END ==\n");
 #endif
 }
