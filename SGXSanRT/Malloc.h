@@ -6,20 +6,35 @@
 #include <pthread.h>
 #include <stddef.h>
 
-#define MALLOC SGXSAN(malloc)
-#define BACKEND_MALLOC malloc
-#define FREE SGXSAN(free)
-#define BACKEND_FREE free
-#define CALLOC SGXSAN(calloc)
-#define BACKEND_CALLOC calloc
-#define REALLOC SGXSAN(realloc)
-#define BACKEND_REALLOC realloc
-#define MALLOC_USABLE_SIZE SGXSAN(malloc_usable_size)
-#define BACKEND_MALLOC_USABLE_SIZE malloc_usable_size
+#define FRONT_END(sym) sym
+#define BACK_END(sym) back_end_##sym
+
+#define MALLOC FRONT_END(malloc)
+#define BACKEND_MALLOC BACK_END(malloc)
+#define FREE FRONT_END(free)
+#define BACKEND_FREE BACK_END(free)
+#define CALLOC FRONT_END(calloc)
+#define BACKEND_CALLOC BACK_END(calloc)
+#define REALLOC FRONT_END(realloc)
+#define BACKEND_REALLOC BACK_END(realloc)
+#define MALLOC_USABLE_SIZE FRONT_END(malloc_usable_size)
+#define BACKEND_MALLOC_USABLE_SIZE BACK_END(malloc_usable_size)
+
+#define DECLARE_BACK_END(sym) extern decltype(sym) *BACK_END(sym)
+DECLARE_BACK_END(malloc);
+DECLARE_BACK_END(free);
+DECLARE_BACK_END(calloc);
+DECLARE_BACK_END(realloc);
+DECLARE_BACK_END(malloc_usable_size);
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
+void *__libc_malloc(size_t size) throw();
+void __libc_free(void *ptr) throw();
+void *__libc_calloc(size_t nmemb, size_t size) throw();
+void *__libc_realloc(void *ptr, size_t size) throw();
+void updateBackEndHeapAllocator();
 void *MALLOC(size_t size);
 void FREE(void *ptr);
 void *CALLOC(size_t n_elements, size_t elem_size);

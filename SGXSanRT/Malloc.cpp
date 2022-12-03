@@ -5,6 +5,32 @@
 #include <string.h>
 #include <unordered_set>
 
+#define DEFINE_BACK_END(sym) decltype(sym) *BACK_END(sym)
+DEFINE_BACK_END(malloc) = nullptr /* __libc_malloc */;
+DEFINE_BACK_END(free) = nullptr /* __libc_free */;
+DEFINE_BACK_END(calloc) = __libc_calloc;
+DEFINE_BACK_END(realloc) = nullptr /* __libc_realloc */;
+DEFINE_BACK_END(malloc_usable_size) = nullptr;
+#undef DEFINE_BACK_END
+
+bool alreadyUpdateBackEndHeapAllocator = false;
+void updateBackEndHeapAllocator() {
+  // since we also update it in SGXSan ctor, so this statement only will be
+  // triggered before SGXSan's ctor, and only one main thread exists, thus,
+  // needn't consider multi-thread situation
+  if (alreadyUpdateBackEndHeapAllocator)
+    return;
+#define GET_BACK_END(sym)                                                      \
+  sgxsan_assert(BACK_END(sym) = (decltype(sym) *)dlsym(RTLD_NEXT, #sym))
+  GET_BACK_END(malloc);
+  GET_BACK_END(free);
+  GET_BACK_END(calloc);
+  GET_BACK_END(realloc);
+  GET_BACK_END(malloc_usable_size);
+#undef GET_BACK_END
+  alreadyUpdateBackEndHeapAllocator = true;
+}
+
 static QuarantineCache QCache;
 QuarantineCache *gQCache = &QCache;
 
@@ -38,7 +64,7 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
       global_heap_usage -= allocated_size;
     }
     pthread_mutex_unlock(&heap_usage_mutex);
-  } 
+  }
 #else
   (void)ptr;
   (void)true_add_false_minus;
@@ -47,6 +73,7 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
 }
 
 void *MALLOC(size_t size) {
+  updateBackEndHeapAllocator();
   if (size == 0) {
     sgxsan_warning(true, "Malloc 0 size\n");
     // return nullptr;
@@ -107,38 +134,56 @@ void *MALLOC(size_t size) {
 }
 
 void FREE(void *ptr) {
+  uptr user_beg, alignment;
+  chunk *m;
+  QuarantineElement qe;
+  updateBackEndHeapAllocator();
   if (not asan_inited) {
-    update_heap_usage(ptr, false);
-    BACKEND_FREE(ptr);
-    return;
+    goto fallback;
   }
   if (ptr == nullptr)
     return;
 
-  uptr user_beg = (uptr)ptr;
+  user_beg = (uptr)ptr;
+  alignment = SHADOW_GRANULARITY;
+
+  m = (chunk *)(user_beg - sizeof(chunk));
+  if (m->magic != kHeapObjectChunkMagic) {
+    // It may be malloced before SGXSan's init, directly free it, and leave
+    // normal free to check pointer
+    goto fallback;
+  }
+
   if (*(uint8_t *)MEM_TO_SHADOW(user_beg) == kAsanHeapFreeMagic) {
     GET_CALLER_PC_BP_SP;
     ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
   }
-  uptr alignment = SHADOW_GRANULARITY;
   sgxsan_assert(IsAligned(user_beg, alignment));
 
-  chunk *m = (chunk *)(user_beg - sizeof(chunk));
-  sgxsan_assert(m->magic == kHeapObjectChunkMagic);
   log_trace("\n");
   log_trace("[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg,
             user_beg + m->user_size, m->alloc_beg + m->alloc_size);
   PoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
                kAsanHeapFreeMagic);
 
-  QuarantineElement qe = {.alloc_beg = m->alloc_beg,
-                          .alloc_size = m->alloc_size,
-                          .user_beg = user_beg,
-                          .user_size = m->user_size};
+  qe.alloc_beg = m->alloc_beg;
+  qe.alloc_size = m->alloc_size;
+  qe.user_beg = user_beg;
+  qe.user_size = m->user_size;
+
   gQCache->put(qe);
+  goto exit;
+
+fallback:
+  update_heap_usage(ptr, false);
+  BACKEND_FREE(ptr);
+exit:
+  return;
 }
 
 void *CALLOC(size_t n_elements, size_t elem_size) {
+  // Since dlsym use calloc, so avoid call updateBackEndHeapAllocator and dlsym
+  // in it, and we directly use __libc_calloc as backend calloc
   if (not asan_inited) {
     return BACKEND_CALLOC(n_elements, elem_size);
   }
@@ -157,6 +202,7 @@ void *CALLOC(size_t n_elements, size_t elem_size) {
 }
 
 void *REALLOC(void *oldmem, size_t bytes) {
+  updateBackEndHeapAllocator();
   if (not asan_inited) {
     return BACKEND_REALLOC(oldmem, bytes);
   }
@@ -182,6 +228,7 @@ void *REALLOC(void *oldmem, size_t bytes) {
 }
 
 size_t MALLOC_USABLE_SIZE(void *mem) {
+  updateBackEndHeapAllocator();
   chunk *m = (chunk *)((uptr)mem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
   return m->user_size;

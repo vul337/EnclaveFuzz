@@ -173,27 +173,6 @@ static void sgxsan_init_shadow_memory() {
   }
 }
 
-int hook_libstdcxx_heap_mgr() {
-  // Should avoid to use C++, since malloc etc. in stdc++ library will be hooked
-  plthook_t *plthook;
-
-  if (plthook_open(&plthook, "libstdc++.so.6") != 0) {
-    log_error("plthook_open error: %s\n", plthook_error());
-    return -1;
-  }
-  /// \c calloc and \c malloc_usable_size is not used by
-  /// \file /lib/x86_64-linux-gnu/libstdc++.so.6
-  if (plthook_replace(plthook, "malloc", (void *)SGXSAN(malloc), NULL) != 0 ||
-      plthook_replace(plthook, "free", (void *)SGXSAN(free), NULL) != 0 ||
-      plthook_replace(plthook, "realloc", (void *)SGXSAN(realloc), NULL) != 0) {
-    log_error("plthook_replace error: %s\n", plthook_error());
-    plthook_close(plthook);
-    return -1;
-  }
-  plthook_close(plthook);
-  return 0;
-}
-
 /* Updated by sgx_create_enclave and used by hook_enclave */
 static std::string __gEnclaveFileName = "";
 std::string getEnclaveFileName() { return __gEnclaveFileName; }
@@ -216,11 +195,6 @@ int hook_enclave() {
     return -1;                                                                 \
   }
   int result;
-  HOOK_SYM(result, plthook, malloc)
-  HOOK_SYM(result, plthook, free)
-  HOOK_SYM(result, plthook, malloc_usable_size)
-  HOOK_SYM(result, plthook, calloc)
-  HOOK_SYM(result, plthook, realloc)
   HOOK_SYM(result, plthook, __sanitizer_cov_8bit_counters_init)
   HOOK_SYM(result, plthook, __sanitizer_cov_pcs_init)
 #undef HOOK_SYM
@@ -229,13 +203,12 @@ int hook_enclave() {
 }
 
 __attribute__((constructor)) void SGXSanInit() {
-  if (LIKELY(asan_inited))
-    return;
+  assert(not asan_inited);
+  updateBackEndHeapAllocator();
   // make sure c++ stream is initialized
   std::ios_base::Init _init;
   sgxsan_init_shadow_memory();
   PrintAddressSpaceLayout();
-  sgxsan_assert(hook_libstdcxx_heap_mgr() == 0);
   asan_inited = true;
 }
 
