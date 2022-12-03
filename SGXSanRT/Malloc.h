@@ -5,6 +5,7 @@
 #include <deque>
 #include <pthread.h>
 #include <stddef.h>
+#include <sys/resource.h>
 
 #define FRONT_END(sym) sym
 #define BACK_END(sym) back_end_##sym
@@ -152,6 +153,8 @@ struct QuarantineElement {
 typedef std::deque<QuarantineElement, ContainerAllocator<QuarantineElement>>
     QuarantineQueueTy;
 
+#define SGXSAN_MAX_QUARANTINE_SIZE 0x10000000
+
 class QuarantineCache {
 public:
   QuarantineCache() {
@@ -162,7 +165,13 @@ public:
     sgxsan_assert(m_queue != nullptr);
     m_mutex = PTHREAD_MUTEX_INITIALIZER;
     m_used_size = 0;
-    m_max_size = 0x10000;
+    // Calculate suitable quarantine size
+    struct rlimit64 limit64;
+    sgxsan_assert(getrlimit64(RLIMIT_DATA, &limit64) == 0);
+    struct rlimit limit;
+    sgxsan_assert(getrlimit(RLIMIT_DATA, &limit) == 0);
+    m_max_size = std::min(std::min(limit64.rlim_cur, limit.rlim_cur) >> 4,
+                          (size_t)SGXSAN_MAX_QUARANTINE_SIZE);
   }
 
   ~QuarantineCache() {
