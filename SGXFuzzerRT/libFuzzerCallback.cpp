@@ -35,6 +35,7 @@ size_t ClUserCheckSize;
 int ClUsedLogLevel;
 bool ClProvideNullPointer;
 double ClProvideNullPointerProbability;
+double ClReturn0Probability;
 
 // Fuzz sequence
 enum FuzzerTestModeTy { TEST_ONE, TEST_RANDOM, TEST_USER };
@@ -223,7 +224,12 @@ public:
     case FUZZ_DATA: {
       uint8_t newData[req.size];
       memset(newData, 0, req.size);
-      fillRand(newData, req.size);
+      bool return0 = (rand() % 100) < (ClReturn0Probability * 100);
+      if (req.dataType == FUZZ_RET and return0) {
+        // Do nothing, since already set 0
+      } else {
+        fillRand(newData, req.size);
+      }
       mutatorJson[JSonPtr / "Data"] =
           EncodeBase64(std::vector<uint8_t>(newData, newData + req.size));
       break;
@@ -359,7 +365,12 @@ public:
         auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
         uint8_t cByteArr[byteArr.size()];
         memcpy(cByteArr, byteArr.data(), byteArr.size());
-        LLVMFuzzerMutate(cByteArr, byteArr.size(), byteArr.size());
+        bool return0 = (rand() % 100) < (ClReturn0Probability * 100);
+        if (dataTy == FUZZ_RET and return0) {
+          memset(cByteArr, 0, byteArr.size());
+        } else {
+          LLVMFuzzerMutate(cByteArr, byteArr.size(), byteArr.size());
+        }
         // Fixed-size mutate
         mutatorJson[ptr / "Data"] = EncodeBase64(
             std::vector<uint8_t>(cByteArr, cByteArr + byteArr.size()));
@@ -839,10 +850,13 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       "Provide NULL for fuzzed pointer parameter")(
       "cb_provide_nullptr_probability",
       po::value<double>(&ClProvideNullPointerProbability)->default_value(0.01),
-      "The minimum granularity is 0.01")(
+      "The minimum granularity is 0.01 (1%)")(
       "cb_user_check_size",
       po::value<size_t>(&ClUserCheckSize)->default_value(4096),
-      "Specify prepared data size for user_check pointer");
+      "Specify prepared data size for user_check pointer")(
+      "cb_return0_probability",
+      po::value<double>(&ClReturn0Probability)->default_value(0.01),
+      "The minimum granularity is 0.01 (1%)");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
