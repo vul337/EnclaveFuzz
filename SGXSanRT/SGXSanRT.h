@@ -190,21 +190,6 @@ static inline int getArraySum(int *array, int size) {
   return sum;
 }
 
-static inline void FastMemSet(void *dst, uint8_t c, size_t n) {
-  size_t step_size = sizeof(uptr), step_times = n / step_size,
-         remained = n % step_size;
-
-  if (step_times > 0) {
-    uptr extendedC = ExtendInt8(c);
-    uptr *p = (uptr *)dst;
-    for (size_t step = 0; step < step_times; step++) {
-      p[step] = extendedC;
-    }
-    dst = (void *)((uptr)dst + n - remained);
-  }
-  memset(dst, c, remained);
-}
-
 /// Cipher detect
 void check_output_hybrid(uint64_t addr, uint64_t size);
 

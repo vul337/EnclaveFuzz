@@ -47,16 +47,16 @@ extern "C" void __asan_alloca_poison(uptr addr, uptr size) {
 extern "C" void __asan_allocas_unpoison(uptr top, uptr bottom) {
   if ((!top) || (top > bottom))
     return;
-  FastMemSet((void *)MemToShadow(top), kAsanNotPoisonedMagic,
-             (bottom - top) / SHADOW_GRANULARITY);
+  memset((void *)MemToShadow(top), kAsanNotPoisonedMagic,
+         (bottom - top) / SHADOW_GRANULARITY);
 }
 
 /// Level 1 API
 void FastPoisonShadow(uptr aligned_addr, uptr aligned_size, uint8_t value,
                       bool returnBackToNormal) {
-  FastMemSet((void *)MEM_TO_SHADOW(aligned_addr),
-             returnBackToNormal ? value : L0P(value),
-             aligned_size / SHADOW_GRANULARITY);
+  memset((void *)MEM_TO_SHADOW(aligned_addr),
+         returnBackToNormal ? value : L0P(value),
+         aligned_size / SHADOW_GRANULARITY);
 }
 
 /// Poison valid memory with right redzone
