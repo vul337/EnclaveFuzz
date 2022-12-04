@@ -37,31 +37,51 @@ __thread sgx_ocall_table_t *g_enclave_ocall_table = nullptr;
 __thread bool RunInEnclave = false;
 __thread bool AlreadyFirstECall = false;
 __thread TrustThread *sgxsan_thread = nullptr;
+thread_local std::vector<unsigned int> ocallHistory;
 
 /// Thread Data
 extern "C" thread_data_t *get_thread_data() { return &sgxsan_thread->m_td; }
+
 sgx_status_t (*tsticker_ecall)(const sgx_enclave_id_t eid, const int index,
                                const void *ocall_table, void *ms);
+bool (*check_ecall)(ECallCheckType ty, uint32_t targetECallIdx,
+                    unsigned int curOCallIdx);
+
 extern "C" sgx_status_t sgx_ecall(const sgx_enclave_id_t eid, const int index,
                                   const void *ocall_table, void *ms) {
   (void)eid;
+  sgx_status_t result = SGX_ERROR_UNEXPECTED;
   RunInEnclave = true;
+
   bool curIsFirstECall = false;
   if (AlreadyFirstECall == false) {
+    // Current is fisrt ecall
+    if (check_ecall(CHECK_ECALL_PRIVATE, index, 0)) {
+      result = SGX_ERROR_ECALL_NOT_ALLOWED;
+      goto exit;
+    }
     AlreadyFirstECall = true;
     curIsFirstECall = true;
     sgxsan_thread = g_thread_pool->alloc(gettid());
+  } else {
+    // Current is OCall, but only allowed ECalls can be called,
+    // thus to check it
+    if (not check_ecall(CHECK_ECALL_ALLOWED, index, ocallHistory.back())) {
+      result = SGX_ERROR_ECALL_NOT_ALLOWED;
+      goto exit;
+    }
   }
 
   g_enclave_ocall_table = (sgx_ocall_table_t *)ocall_table;
   get_thread_data()->last_error = errno;
   sgxsan_assert(tsticker_ecall);
-  auto result = tsticker_ecall(eid, index, nullptr, ms);
+  result = tsticker_ecall(eid, index, nullptr, ms);
   if (curIsFirstECall) {
     g_thread_pool->free(sgxsan_thread);
     sgxsan_thread = nullptr;
     AlreadyFirstECall = false;
   }
+exit:
   RunInEnclave = false;
   return result;
 }
@@ -73,7 +93,10 @@ extern "C" sgx_status_t sgx_ecall_switchless(const sgx_enclave_id_t eid,
 extern "C" sgx_status_t sgx_ocall(const unsigned int index, void *ms) {
   RunInEnclave = false;
   sgxsan_assert(index < g_enclave_ocall_table->count);
+  ocallHistory.push_back(index);
   auto result = ((bridge_fn_t)g_enclave_ocall_table->ocall[index])(ms);
+  sgxsan_assert(ocallHistory.size() > 0 and ocallHistory.back() == index);
+  ocallHistory.pop_back();
   RunInEnclave = true;
   return result;
 }
@@ -222,9 +245,10 @@ extern "C" sgx_status_t __sgx_create_enclave_ex(
   gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_NOW);
   sgxsan_error(gEnclaveHandler == nullptr, "%s\n", dlerror());
 
-  tsticker_ecall =
-      (decltype(tsticker_ecall))dlsym(gEnclaveHandler, "tsticker_ecall");
-  sgxsan_assert(tsticker_ecall != nullptr);
+  sgxsan_assert(tsticker_ecall = (decltype(tsticker_ecall))dlsym(
+                    gEnclaveHandler, "tsticker_ecall"));
+  sgxsan_assert(check_ecall = (decltype(check_ecall))dlsym(gEnclaveHandler,
+                                                           "check_ecall"));
   tsticker_ecall(0, ECMD_INIT_ENCLAVE, nullptr, nullptr);
   return SGX_SUCCESS;
 }

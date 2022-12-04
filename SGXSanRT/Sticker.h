@@ -1,6 +1,8 @@
 #pragma once
 #include "SGXSanRT.h"
 
+enum ECallCheckType { CHECK_ECALL_PRIVATE, CHECK_ECALL_ALLOWED };
+
 #if defined(__cplusplus)
 extern "C" {
 #endif

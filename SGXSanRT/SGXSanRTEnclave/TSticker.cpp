@@ -15,6 +15,7 @@
 /// Birdge Sticker
 typedef sgx_status_t (*ecall_func_t)(void *ms);
 extern const ecall_table_t g_ecall_table;
+extern entry_table_t g_dyn_entry_table;
 secs_t g_secs;
 
 static void SGXInitInternal() {
@@ -51,5 +52,22 @@ extern "C" void __asan_init() {
     }
     PoisonEnclaveDSOCodeSegment();
     gAlreadyAsanInited = true;
+  }
+}
+
+extern "C" bool check_ecall(ECallCheckType ty, uint32_t targetECallIdx,
+                            unsigned int curOCallIdx) {
+  switch (ty) {
+  case CHECK_ECALL_PRIVATE: {
+    return g_ecall_table.ecall_table[targetECallIdx].is_priv;
+  }
+  case CHECK_ECALL_ALLOWED: {
+    sgxsan_assert(curOCallIdx < g_dyn_entry_table.nr_ocall);
+    return g_dyn_entry_table
+        .entry_table[curOCallIdx * g_ecall_table.nr_ecall + targetECallIdx];
+  }
+  default: {
+    abort();
+  }
   }
 }
