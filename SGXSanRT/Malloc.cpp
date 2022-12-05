@@ -6,10 +6,10 @@
 #include <unordered_set>
 
 #define DEFINE_BACK_END(sym) decltype(sym) *BACK_END(sym)
-DEFINE_BACK_END(malloc) = nullptr /* __libc_malloc */;
-DEFINE_BACK_END(free) = nullptr /* __libc_free */;
+DEFINE_BACK_END(malloc) = __libc_malloc;
+DEFINE_BACK_END(free) = __libc_free;
 DEFINE_BACK_END(calloc) = __libc_calloc;
-DEFINE_BACK_END(realloc) = nullptr /* __libc_realloc */;
+DEFINE_BACK_END(realloc) = __libc_realloc;
 DEFINE_BACK_END(malloc_usable_size) = nullptr;
 #undef DEFINE_BACK_END
 
