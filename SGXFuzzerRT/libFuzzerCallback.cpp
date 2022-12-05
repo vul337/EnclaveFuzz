@@ -139,13 +139,11 @@ struct InputJsonDataInfo {
   nlohmann::ordered_json json;
   std::vector<uint8_t> bjdata;
   std::string dataID; /* Current use SHA-1 of json content */
-  std::string bjdataBase64;
 
   void clear() {
     json.clear();
     bjdata.clear();
     dataID = "";
-    bjdataBase64 = "";
   }
 };
 
@@ -185,7 +183,7 @@ public:
     size_t newStrLen = rand() % (ClMaxStringLength + 1);
     T newStr[newStrLen + 1];
     fillStrRand(newStr, newStrLen + 1);
-    mutatorJson[ptr] = EncodeBase64(std::vector<uint8_t>(
+    mutatorJson[ptr] = ordered_json::binary(std::vector<uint8_t>(
         (uint8_t *)newStr, (uint8_t *)(newStr + newStrLen + 1)));
   }
 
@@ -230,8 +228,8 @@ public:
       } else {
         fillRand(newData, req.size);
       }
-      mutatorJson[JSonPtr / "Data"] =
-          EncodeBase64(std::vector<uint8_t>(newData, newData + req.size));
+      mutatorJson[JSonPtr / "Data"] = ordered_json::binary(
+          std::vector<uint8_t>(newData, newData + req.size));
       break;
     }
     case FUZZ_BOOL: {
@@ -241,7 +239,7 @@ public:
       break;
     }
     case FUZZ_SEQ: {
-      std::vector<int> callSeq(req.size);
+      ordered_json::array_t callSeq(req.size);
       // array [0,req.size)
       std::iota(callSeq.begin(), callSeq.end(), 0);
       // Fisher–Yates shuffle
@@ -249,9 +247,7 @@ public:
         int j = rand() % (i + 1);
         std::swap(callSeq[i], callSeq[j]);
       }
-      mutatorJson[JSonPtr / "Data"] = EncodeBase64(
-          std::vector<uint8_t>((uint8_t *)callSeq.data(),
-                               (uint8_t *)(callSeq.data() + callSeq.size())));
+      mutatorJson[JSonPtr / "Data"] = callSeq;
       break;
     }
     default: {
@@ -261,8 +257,9 @@ public:
     }
   }
 
-  void dumpJson(ordered_json json);
-  void dumpJsonPtr(ordered_json::json_pointer ptr);
+  void dump(log_level ll, ordered_json json);
+  void dump(log_level ll, ordered_json::json_pointer ptr);
+  void dump(log_level ll, ordered_json json, ordered_json::json_pointer ptr);
 
   void AdjustItemInMutatorJSon(RequestInfo req) {
     auto &mutatorJson = mutatorData.json;
@@ -271,9 +268,9 @@ public:
     // should only expand byte array
     case FUZZ_ARRAY:
     case FUZZ_DATA: {
-      auto data = DecodeBase64(mutatorJson[JSonPtr / "Data"]);
+      std::vector<uint8_t> data = mutatorJson[JSonPtr / "Data"];
       AdjustNBytes(data, req.size, req.op);
-      mutatorJson[JSonPtr / "Data"] = EncodeBase64(data);
+      mutatorJson[JSonPtr / "Data"] = ordered_json::binary(data);
       break;
     }
     default: {
@@ -307,7 +304,7 @@ public:
   template <class T>
   void _mutateString(ordered_json &mutatorJson,
                      ordered_json::json_pointer ptr) {
-    auto byteArr = DecodeBase64(std::string(mutatorJson[ptr]));
+    std::vector<uint8_t> byteArr = mutatorJson[ptr];
     sgxfuzz_assert(byteArr.size() % sizeof(T) == 0);
     size_t strLen =
         std::min((byteArr.size() / sizeof(T)) - 1, (size_t)ClMaxStringLength);
@@ -320,7 +317,7 @@ public:
     sgxfuzz_assert(newLen <= ClMaxStringLength);
     str[newLen] = '\0';
     mutatorJson[ptr] =
-        EncodeBase64(std::vector<uint8_t>(str, str + newLen + 1));
+        ordered_json::binary(std::vector<uint8_t>(str, str + newLen + 1));
   }
 
   void mutateOnMutatorJSon(bool canChangeSize = true) {
@@ -362,7 +359,7 @@ public:
       case FUZZ_ARRAY:
       case FUZZ_DATA:
       case FUZZ_RET: {
-        auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
+        std::vector<uint8_t> byteArr = mutatorJson[ptr / "Data"];
         uint8_t cByteArr[byteArr.size()];
         memcpy(cByteArr, byteArr.data(), byteArr.size());
         bool return0 = (rand() % 100) < (ClReturn0Probability * 100);
@@ -372,7 +369,7 @@ public:
           LLVMFuzzerMutate(cByteArr, byteArr.size(), byteArr.size());
         }
         // Fixed-size mutate
-        mutatorJson[ptr / "Data"] = EncodeBase64(
+        mutatorJson[ptr / "Data"] = ordered_json::binary(
             std::vector<uint8_t>(cByteArr, cByteArr + byteArr.size()));
         break;
       }
@@ -383,19 +380,13 @@ public:
         break;
       }
       case FUZZ_SEQ: {
-        auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
-        sgxfuzz_assert(byteArr.size() % sizeof(int) == 0);
-        std::vector<int> callSeq((int *)byteArr.data(),
-                                 (int *)(byteArr.data() + byteArr.size()));
+        ordered_json::array_t callSeq = mutatorJson[ptr / "Data"];
         // Fisher–Yates shuffle
         for (int i = callSeq.size() - 1; i > 0; i--) {
           int j = rand() % (i + 1);
           std::swap(callSeq[i], callSeq[j]);
         }
-
-        mutatorJson[ptr / "Data"] = EncodeBase64(
-            std::vector<uint8_t>((uint8_t *)callSeq.data(),
-                                 (uint8_t *)(callSeq.data() + callSeq.size())));
+        mutatorJson[ptr / "Data"] = callSeq;
         break;
       }
       default: {
@@ -423,7 +414,6 @@ public:
   size_t mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
     if (reqQueue.empty()) {
       mutatorData.bjdata = std::vector<uint8_t>(Data, Data + Size);
-      mutatorData.bjdataBase64 = EncodeBase64(mutatorData.bjdata);
       try {
         mutatorData.json =
             nlohmann::ordered_json::from_bjdata(mutatorData.bjdata);
@@ -433,7 +423,7 @@ public:
       }
       mutatorData.dataID = getSha1Str(mutatorData.bjdata);
       log_trace("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
-      dumpJson(mutatorData.json);
+      dump(LOG_LEVEL_TRACE, mutatorData.json);
 
       /// Arbitrarily mutate on \c mutatorJson
       mutateOnMutatorJSon();
@@ -442,8 +432,9 @@ public:
       // avoid future adjustment
       sgxfuzz_assert(reqQueue.size() == 1);
       for (auto it = reqQueue.begin(); it != reqQueue.end();) {
-        mutatorData.bjdataBase64 = it->first;
-        mutatorData.bjdata = DecodeBase64(mutatorData.bjdataBase64);
+        mutatorData.dataID = it->first;
+        DataAndReq dq = it->second;
+        mutatorData.bjdata = dq.data;
         try {
           mutatorData.json =
               nlohmann::ordered_json::from_bjdata(mutatorData.bjdata);
@@ -451,18 +442,16 @@ public:
           // leave mutatorJson empty, and it should be empty
           sgxfuzz_assert(mutatorData.json.empty());
         }
-        mutatorData.dataID = getSha1Str(mutatorData.bjdata);
         log_trace("[Before Mutate, ID: %s]\n", mutatorData.dataID.c_str());
-        dumpJson(mutatorData.json);
+        dump(LOG_LEVEL_TRACE, mutatorData.json);
 
         // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
         mutateOnMutatorJSon(false);
         /// process \c reqQueue
-        auto paramReqs = it->second;
         it = reqQueue.erase(it);
-        log_trace("reqQueue remove %s\n", mutatorData.bjdataBase64.c_str());
+        log_trace("reqQueue remove %s\n", mutatorData.dataID.c_str());
         sgxfuzz_assert(reqQueue.empty());
-        for (auto paramReq : paramReqs) {
+        for (auto paramReq : dq.param2Reqs) {
           auto req = paramReq.second;
           nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsParamID);
           switch (req.op) {
@@ -487,43 +476,46 @@ public:
     }
     // update mutator data with new one
     mutatorData.bjdata = nlohmann::ordered_json::to_bjdata(mutatorData.json);
-    mutatorData.bjdataBase64 = EncodeBase64(mutatorData.bjdata);
     mutatorData.dataID = getSha1Str(mutatorData.bjdata);
     sgxfuzz_assert(mutatorData.bjdata.size() <= MaxSize);
 
     memcpy(Data, mutatorData.bjdata.data(), mutatorData.bjdata.size());
     log_trace("[After Mutate, ID: %s]\n", mutatorData.dataID.c_str());
-    dumpJson(mutatorData.json);
+    dump(LOG_LEVEL_TRACE, mutatorData.json);
     size_t newSize = mutatorData.bjdata.size();
     mutatorData.clear();
     return newSize;
   }
 
-  /// @brief mutatorJson with DataID should process req
-  /// @param DataID
+  /// @brief Request to process req with mutatorJson
+  /// @param bjData
   /// @param req
-  void SendRequest(std::string DataID, RequestInfo req) {
+  void SendRequest(std::vector<uint8_t> bjData, RequestInfo req) {
     // 1. When ReadCorpus, we may send one or more requests per seed, but have
     // no opportunity to mutate in order to process request. We only keep
-    // request of latest input data with DataID.
-    // 2. When test one, we may send several requests with same DataID but with
+    // request of latest bjData.
+    // 2. When test one, we may send several requests with same bjData but with
     // different paramID, record all of them
+    std::string bjDataSha1 = getSha1Str(bjData);
     if (reqQueue.size() == 1) {
-      if (reqQueue.begin()->first != DataID) {
-        // There already is data with different DataID
+      if (reqQueue.begin()->first != bjDataSha1) {
+        // There already is different bjData recorded
         reqQueue.clear();
       }
     } else if (reqQueue.size() > 1) {
       abort();
     }
-    log_trace("reqQueue add %s %s\n", DataID.c_str(), req.StrAsParamID.c_str());
-    reqQueue[DataID][req.StrAsParamID] = req;
+    log_trace("reqQueue add %s %s\n", bjDataSha1.c_str(),
+              req.StrAsParamID.c_str());
+    DataAndReq &dq = reqQueue[bjDataSha1];
+    dq.data = bjData;
+    dq.param2Reqs[req.StrAsParamID] = req;
   }
 
   template <class T>
   void _getString(uint8_t *&dst, ordered_json &consumerJson,
                   ordered_json::json_pointer ptr) {
-    std::vector<uint8_t> data = DecodeBase64(std::string(consumerJson[ptr]));
+    std::vector<uint8_t> data = consumerJson[ptr];
     if (dst == nullptr) {
       dst = (uint8_t *)managedMalloc(data.size());
     }
@@ -560,7 +552,7 @@ public:
       // Send request to mutator that we need data for current ID
       log_debug("Need mutator create data for current [%s]\n",
                 strAsParamID.c_str());
-      SendRequest(consumerData.bjdataBase64,
+      SendRequest(consumerData.bjdata,
                   {strAsParamID, DATA_CREATE, byteArrLen, dataTy});
       /// early leave \c leaveLLVMFuzzerTestOneInput
       leaveLLVMFuzzerTestOneInput();
@@ -568,20 +560,19 @@ public:
       // Already prepared data for current ID
       FuzzDataTy dataTy = consumerJson[consumerJsonPtr / "DataType"];
       log_trace("Get JSON item [%s]\n", strAsParamID.c_str());
-      dumpJson(consumerJson[consumerJsonPtr]);
+      dump(LOG_LEVEL_TRACE, consumerJson[consumerJsonPtr]);
       switch (dataTy) {
       case FUZZ_ARRAY:
       case FUZZ_DATA:
       case FUZZ_RET: {
-        std::vector<uint8_t> data =
-            DecodeBase64(std::string(consumerJson[consumerJsonPtr / "Data"]));
+        std::vector<uint8_t> data = consumerJson[consumerJsonPtr / "Data"];
         size_t preparedDataSize = data.size();
         if (preparedDataSize < byteArrLen) {
           size_t extraSizeNeeded = byteArrLen - preparedDataSize;
           // Send request to mutator that prepared data is not enough
           log_debug("Need mutator provide more data [%ld] for current [%s]\n",
                     extraSizeNeeded, strAsParamID.c_str());
-          SendRequest(consumerData.bjdataBase64,
+          SendRequest(consumerData.bjdata,
                       {strAsParamID, DATA_EXPAND, extraSizeNeeded, dataTy});
           leaveLLVMFuzzerTestOneInput();
         }
@@ -594,7 +585,7 @@ public:
           // Send request to mutator that prepared data is too much
           log_debug("Need mutator provide less data [%d] for current [%s]\n",
                     sizeNeedReduced, strAsParamID.c_str());
-          SendRequest(consumerData.bjdataBase64,
+          SendRequest(consumerData.bjdata,
                       {strAsParamID, DATA_SHRINK, sizeNeedReduced, dataTy});
           // we needn't early return in this situation, since we can only use
           // partial prepared data, then there may be several requests with same
@@ -702,7 +693,6 @@ public:
 
   void deserializeToConsumerJson(const uint8_t *Data, size_t Size) {
     consumerData.bjdata = std::vector<uint8_t>(Data, Data + Size);
-    consumerData.bjdataBase64 = EncodeBase64(consumerData.bjdata);
     try {
       consumerData.json =
           nlohmann::ordered_json::from_bjdata(consumerData.bjdata);
@@ -712,7 +702,7 @@ public:
     }
     consumerData.dataID = getSha1Str(consumerData.bjdata);
     log_debug("[Before Test, ID: %s]\n", consumerData.dataID.c_str());
-    dumpJson(consumerData.json);
+    dump(LOG_LEVEL_TRACE, consumerData.json);
   }
 
   void clearAtConsumerEnd() {
@@ -753,16 +743,18 @@ public:
   std::vector<int> getCallSequence(size_t funcNum) {
     auto &consumerJson = consumerData.json;
     if (consumerJson["CallSeq"].is_null()) {
-      SendRequest(consumerData.bjdataBase64,
+      SendRequest(consumerData.bjdata,
                   {"CallSeq", DATA_CREATE, funcNum, FUZZ_SEQ});
       leaveLLVMFuzzerTestOneInput();
       // Shouldn't reach here, avoid compile warning
       abort();
     } else {
-      auto byteArr = DecodeBase64(std::string(consumerJson["CallSeq"]["Data"]));
-      sgxfuzz_assert(byteArr.size() % sizeof(int) == 0);
-      return std::vector<int>((int *)byteArr.data(),
-                              (int *)(byteArr.data() + byteArr.size()));
+      ordered_json::array_t callSeq = consumerJson["CallSeq"]["Data"];
+      std::vector<int> intCallSeq;
+      for (auto seq : callSeq) {
+        intCallSeq.push_back((int)seq);
+      }
+      return intCallSeq;
     }
   }
 
@@ -783,21 +775,29 @@ public:
 
 private:
   InputJsonDataInfo consumerData, mutatorData;
-  std::map<std::string /* DataID */,
-           std::map<std::string /* ParamID */, RequestInfo>>
-      reqQueue;
+  struct DataAndReq {
+    std::vector<uint8_t> data;
+    std::map<std::string /* ParamID */, RequestInfo> param2Reqs;
+  };
+  std::map<std::string /* DataID */, DataAndReq> reqQueue;
   std::vector<uint8_t *> allocatedMemAreas;
   std::vector<int> ECallCalledTimesMap;
   int currentCalledECallIndex;
 };
 FuzzDataFactory data_factory;
 
-void FuzzDataFactory::dumpJson(ordered_json json) {
-  log_trace_np("%s\n", json.dump(4).c_str());
+void FuzzDataFactory::dump(log_level ll, ordered_json json) {
+  sgxfuzz_log(ll, false, "%s\n", json.dump(4).c_str());
 }
 
-void FuzzDataFactory::dumpJsonPtr(ordered_json::json_pointer ptr) {
-  log_trace("%s\n", ptr.to_string().c_str());
+void FuzzDataFactory::dump(log_level ll, ordered_json::json_pointer ptr) {
+  sgxfuzz_log(ll, true, "%s\n", ptr.to_string().c_str());
+}
+
+void FuzzDataFactory::dump(log_level ll, ordered_json json,
+                           ordered_json::json_pointer jsonPtr) {
+  sgxfuzz_log(ll, false, "%s\n%s\n", jsonPtr.to_string().c_str(),
+              json[jsonPtr].dump(4));
 }
 
 void ShowAllECalls() {
