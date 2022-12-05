@@ -41,11 +41,14 @@ public:
   bool _hasPointerElement(Type *type, size_t level = 0);
   Function *createEcallFuzzWrapperFunc(std::string ecallName);
   // create content for ocall [out] pointer parameters
-  void saveCreatedInput2OCallPtrParam(Function *ocallFunc,
+  void saveCreatedInput2OCallPtrParam(Function *ocallWrapper,
+                                      std::string realOCallName,
                                       Instruction *insertPt);
   void createOcallFunc(std::string ocallName);
   void passStaticAnalysisResultToRuntime(
       SmallVector<Constant *> &ecallFuzzWrapperFuncs);
+  void hookOCallWithWrapper(Module &M,
+                            SmallVector<std::string> filteredOCallNames);
   bool runOnModule(Module &M);
 
 private:

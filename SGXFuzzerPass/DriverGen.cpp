@@ -1,8 +1,5 @@
-#include <fstream>
-#include <string>
-#include <tuple>
-#include <unistd.h>
-
+#include "DriverGen.h"
+#include "PassUtil.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -17,8 +14,10 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-
-#include "DriverGen.h"
+#include <fstream>
+#include <string>
+#include <tuple>
+#include <unistd.h>
 
 using namespace llvm;
 using json = nlohmann::json;
@@ -33,6 +32,12 @@ static cl::opt<bool>
                        cl::desc("Enable fill parameter data at once for pure "
                                 "data that don't contain pointer in subfield"),
                        cl::Hidden);
+
+static cl::opt<std::string>
+    ClOCallWrapperPrefix("ocall-wrapper-prefix", cl::init("__ocall_wrapper_"),
+                         cl::desc("Prefix of wrapper of OCall, in which we "
+                                  "call real OCall and modify return values"),
+                         cl::Hidden);
 
 enum GetByteType {
   FUZZ_STRING,
@@ -558,13 +563,13 @@ Function *DriverGenerator::createEcallFuzzWrapperFunc(std::string ecallName) {
 }
 
 // create content for ocall [out] pointer parameters
-void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
+void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
+                                                     std::string realOCallName,
                                                      Instruction *insertPt) {
-  auto ocallName = ocallFunc->getName().str();
-  for (auto &arg : ocallFunc->args()) {
+  for (auto &arg : ocallWapper->args()) {
     auto idx = arg.getArgNo();
     if (auto pointerTy = dyn_cast<PointerType>(arg.getType())) {
-      json::json_pointer jsonPtr("/untrusted/" + ocallName + "/parameter/" +
+      json::json_pointer jsonPtr("/untrusted/" + realOCallName + "/parameter/" +
                                  std::to_string(idx));
       Value *parentID = nullptr, *currentID = nullptr;
       {
@@ -628,9 +633,9 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
             Value *count = _count.is_null() ? IRB.getInt64(1)
                            : _count.is_number()
                                ? cast<Value>(IRB.getInt64(_count))
-                               : IRB.CreateIntCast(
-                                     ocallFunc->getArg(_count["co_param_pos"]),
-                                     Type::getInt64Ty(*C), false);
+                               : IRB.CreateIntCast(ocallWapper->getArg(
+                                                       _count["co_param_pos"]),
+                                                   Type::getInt64Ty(*C), false);
             Value *size = nullptr;
             if (_size.is_null()) {
               size = eleSize;
@@ -644,8 +649,9 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
                 eleSize = IRB.getInt64(num_size);
               }
             } else {
-              size = IRB.CreateIntCast(ocallFunc->getArg(_size["co_param_pos"]),
-                                       Type::getInt64Ty(*C), false);
+              size =
+                  IRB.CreateIntCast(ocallWapper->getArg(_size["co_param_pos"]),
+                                    Type::getInt64Ty(*C), false);
             }
             ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
             // Maybe size*count < eleSize
@@ -691,15 +697,23 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallFunc,
 
 void DriverGenerator::createOcallFunc(std::string ocallName) {
   // create empty ocall_xxx() function when it's only a declaration
-  auto ocallFunc = M->getFunction(ocallName);
-  if (not ocallFunc->isDeclaration())
-    return;
-  ocallFunc->setLinkage(GlobalValue::WeakAnyLinkage);
-  auto EntryBB = BasicBlock::Create(*C, "", ocallFunc);
+  auto realOCall = M->getFunction(ocallName);
+  FunctionCallee ocallWrapperCallee = M->getOrInsertFunction(
+      ClOCallWrapperPrefix + ocallName, realOCall->getFunctionType());
+  Function *ocallWrapper = cast<Function>(ocallWrapperCallee.getCallee());
+  auto EntryBB = BasicBlock::Create(*C, "", ocallWrapper);
   // create return instruction
   IRBuilder<> IRB(EntryBB);
   auto retVoidI = IRB.CreateRetVoid();
-  auto funcRetType = ocallFunc->getReturnType();
+
+  // Call real OCall in wrapper
+  SmallVector<Value *> args;
+  for (auto &arg : ocallWrapper->args()) {
+    args.push_back(&arg);
+  }
+  IRB.SetInsertPoint(retVoidI);
+  IRB.CreateCall(realOCall->getFunctionType(), realOCall, args);
+  auto funcRetType = ocallWrapper->getReturnType();
   ReturnInst *retI = nullptr;
   if (funcRetType->isVoidTy()) {
     retI = retVoidI;
@@ -721,7 +735,7 @@ void DriverGenerator::createOcallFunc(std::string ocallName) {
   }
   retVoidI = nullptr;
 
-  saveCreatedInput2OCallPtrParam(ocallFunc, retI);
+  saveCreatedInput2OCallPtrParam(ocallWrapper, ocallName, retI);
 }
 
 void DriverGenerator::passStaticAnalysisResultToRuntime(
@@ -757,20 +771,68 @@ void DriverGenerator::passStaticAnalysisResultToRuntime(
       ConstantArray::get(ecallFuzzWrapperNameArrTy, wrapperNames));
 }
 
-bool DriverGenerator::runOnModule(Module &M) {
-  bool isAtUBridge = false;
-  for (auto &GV : M.globals()) {
-    if (GV.getName().contains("ocall_table_")) {
-      isAtUBridge = true;
-      break;
+void DriverGenerator::hookOCallWithWrapper(
+    Module &M,
+    SmallVector<std::string>
+        filteredOCallNames) { // Collect all CallInst in current Module
+  SmallVector<CallInst *> CIsInModule =
+      SGXSanInstVisitor::visitModule(M).CallInstVec;
+
+  // Replace OCall with wrapper
+  for (auto CI : CIsInModule) {
+    if (auto callee = getCalledFunctionStripPointerCast(CI)) {
+      std::string calleeName = callee->getName().str();
+      if (std::find_if(filteredOCallNames.begin(), filteredOCallNames.end(),
+                       [calleeName](std::string str) {
+                         return str == calleeName;
+                       }) != filteredOCallNames.end()) {
+        // Declare wrapper
+        FunctionCallee ocallWrapperCallee = M.getOrInsertFunction(
+            ClOCallWrapperPrefix + calleeName, callee->getFunctionType());
+
+        // get CI arguments
+        SmallVector<Value *> CIOps;
+        for (auto &arg : CI->args()) {
+          CIOps.push_back(arg.get());
+        }
+
+        // Replace it
+        IRBuilder<> IRB(CI);
+        CallInst *wrapperCI = IRB.CreateCall(ocallWrapperCallee, CIOps);
+        CI->replaceAllUsesWith(wrapperCI);
+        CI->eraseFromParent();
+      }
     }
   }
-  if (not isAtUBridge) {
+}
+
+bool isAtUBridge(Module &M) {
+  for (auto &GV : M.globals()) {
+    if (GV.getName().contains("ocall_table_")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool DriverGenerator::runOnModule(Module &M) {
+  if (not isAtUBridge(M)) {
     // dbgs() << M.getName() << " isn't a UBridge\n";
     return false;
   }
   dbgs() << M.getName() << " is a UBridge, start generating...\n";
   initialize(M);
+
+  // Collect all OCalls' names except it start with sgxsan_ocall_
+  SmallVector<std::string> filteredOCallNames;
+  for (auto &ocallInfo : edlJson["untrusted"].items()) {
+    std::string ocallName = ocallInfo.key();
+    if (StringRef(ocallName).startswith("sgxsan_ocall_"))
+      continue;
+    filteredOCallNames.push_back(ocallName);
+  }
+
+  hookOCallWithWrapper(M, filteredOCallNames);
 
   // create wrapper functions used to fuzz ecall
   SmallVector<Constant *> ecallFuzzWrapperFuncs;
@@ -782,10 +844,7 @@ bool DriverGenerator::runOnModule(Module &M) {
   }
 
   // create ocalls
-  for (auto &ocallInfo : edlJson["untrusted"].items()) {
-    std::string ocallName = ocallInfo.key();
-    if (StringRef(ocallName).startswith("sgxsan_ocall_"))
-      continue;
+  for (auto ocallName : filteredOCallNames) {
     createOcallFunc(ocallName);
   }
   // at the end
