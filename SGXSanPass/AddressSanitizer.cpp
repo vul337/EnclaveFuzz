@@ -2980,7 +2980,6 @@ bool AddressSanitizer::suppressInstrumentationSiteForDebug(int &Instrumented) {
 
 bool AddressSanitizer::instrumentFunction(Function &F,
                                           const TargetLibraryInfo *TLI) {
-  isFuncAtTBridge = false;
   if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
     return false;
   if (!ClDebugFunc.empty() && ClDebugFunc == F.getName())
@@ -3084,11 +3083,9 @@ bool AddressSanitizer::instrumentFunction(Function &F,
             ("sgx_" /* ecall wrapper prefix */ + callee_name.str())) {
           // it's an ecall wrapper
           RealEcallInsts.push_back(CI);
-          isFuncAtTBridge = true;
         } else if (callee_name == "sgx_ocall" or
                    callee_name == "sgx_ocall_switchless") {
           SGXOcallInsts.push_back(CI);
-          isFuncAtTBridge = true;
         } else if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
                    callee_name == "memmove_s") {
           SecIntrinToInstrument.push_back(CI);
