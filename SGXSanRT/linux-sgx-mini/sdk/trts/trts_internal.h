@@ -1,5 +1,5 @@
 #pragma once
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include "arch.h"
 #include "se_event.h"
 #include "thread_data.h"

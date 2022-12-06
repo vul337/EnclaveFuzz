@@ -6,6 +6,7 @@ include_directories(
     ${LINUX_SGX_MINI}/common/inc/internal
     ${LINUX_SGX_MINI}/sdk/simulation/tinst
     ${LINUX_SGX_MINI}/sdk/trts
+    ../SGXSanRTApp
     ../)
 
 add_library(

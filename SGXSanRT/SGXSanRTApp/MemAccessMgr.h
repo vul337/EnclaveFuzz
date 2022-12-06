@@ -1,7 +1,7 @@
 #pragma once
 
 #include "PoisonCheck.h"
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include <deque>
 #include <map>
 #include <pthread.h>

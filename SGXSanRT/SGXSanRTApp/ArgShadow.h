@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 
 // Function address -> function arguments' shadow map
 // [-1,0,1,...,MAX_ARG_NUM-2] ( -1 means return value)

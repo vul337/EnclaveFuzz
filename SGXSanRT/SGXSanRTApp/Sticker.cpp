@@ -1,7 +1,7 @@
 #include "Sticker.h"
 #include "Malloc.h"
 #include "Poison.h"
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include "arch.h"
 #include "cpuid.h"
 #include "plthook.h"

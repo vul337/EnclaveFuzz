@@ -1,5 +1,5 @@
 #pragma once
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 
 enum ECallCheckType { CHECK_ECALL_PRIVATE, CHECK_ECALL_ALLOWED };
 

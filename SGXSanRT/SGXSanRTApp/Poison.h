@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include <stdint.h>
 
 extern bool __thread RunInEnclave;

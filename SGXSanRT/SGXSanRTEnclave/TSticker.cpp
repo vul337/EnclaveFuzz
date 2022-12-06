@@ -1,5 +1,5 @@
 #include "Poison.h"
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include "Sticker.h"
 #include "arch.h"
 #include "rts_cmd.h"

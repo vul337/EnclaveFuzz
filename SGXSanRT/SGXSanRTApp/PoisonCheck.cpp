@@ -1,7 +1,7 @@
 #include "PoisonCheck.h"
 #include "MemAccessMgr.h"
 #include "Poison.h"
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include <algorithm>
 #include <assert.h>
 #include <string.h>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Poison.h"
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include <stdint.h>
 #include <utility>
 

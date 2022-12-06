@@ -1,4 +1,4 @@
-#include "SGXSanRT.h"
+#include "SGXSanRTApp.h"
 #include "ArgShadow.h"
 #include "Malloc.h"
 #include "MemAccessMgr.h"
