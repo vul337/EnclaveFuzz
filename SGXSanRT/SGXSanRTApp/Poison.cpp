@@ -151,7 +151,11 @@ static void RegisterGlobal(const SGXSanGlobal *g) {
 
 // Register an array of globals.
 extern "C" void __asan_register_globals(SGXSanGlobal *globals, uptr n) {
-  RunInEnclave = true;
+  bool origInEnclave = false;
+  if (RunInEnclave == false)
+    RunInEnclave = true;
+  else
+    origInEnclave = true;
   for (uptr i = 0; i < n; i++) {
     RegisterGlobal(&globals[i]);
   }
@@ -159,7 +163,7 @@ extern "C" void __asan_register_globals(SGXSanGlobal *globals, uptr n) {
   // Poison the metadata. It should not be accessible to user code.
   PoisonShadow((uptr)globals, n * sizeof(SGXSanGlobal),
                kAsanGlobalRedzoneMagic);
-  RunInEnclave = false;
+  RunInEnclave = origInEnclave;
 }
 
 static void UnregisterGlobal(const SGXSanGlobal *g) {

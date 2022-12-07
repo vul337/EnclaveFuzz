@@ -43,9 +43,11 @@ public:
 
   static void add_out_of_enclave_access_cnt() {
 #if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
-    if (m_active) {
-      sgxsan_assert(m_inited);
-      m_out_of_enclave_access_cnt++;
+    if (RunInEnclave) {
+      if (m_active) {
+        sgxsan_assert(m_inited);
+        m_out_of_enclave_access_cnt++;
+      }
     }
 #endif
   }
@@ -100,12 +102,24 @@ public:
   }
 
   static void add_in_enclave_access_cnt() {
+    if (RunInEnclave) {
 #if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
-    if (m_active) {
-      sgxsan_assert(m_inited);
-      m_in_enclave_access_cnt++;
-    }
+      if (m_active) {
+        sgxsan_assert(m_inited);
+        m_in_enclave_access_cnt++;
+      }
 #endif
+    } else {
+      sgxsan_error(true, "Illegal access Enclave from outside\n");
+    }
+  }
+
+  static void clear() {
+    m_control_fetchs.clear();
+    m_active = false;
+    m_inited = false;
+    m_out_enclave_access_cnt = 0;
+    m_in_enclave_access_cnt = 0;
   }
 
 private:
@@ -121,12 +135,13 @@ private:
 #if defined(__cplusplus)
 extern "C" {
 #endif
-void MemAccessMgrOutEnclaveAccess(const void *start, size_t size,
-                                     bool is_write, bool used_to_cmp = false,
-                                     char *parent_func = nullptr);
+void MemAccessMgrOutEnclaveAccess(const void *start, size_t size, bool is_write,
+                                  bool used_to_cmp = false,
+                                  char *parent_func = nullptr);
 void MemAccessMgrInEnclaveAccess();
 void MemAccessMgrActive();
 void MemAccessMgrDeactive();
+void MemAccessMgrClear();
 #if defined(__cplusplus)
 }
 #endif

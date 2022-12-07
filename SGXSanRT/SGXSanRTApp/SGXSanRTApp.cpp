@@ -484,6 +484,12 @@ void check_output_hybrid(uint64_t addr, uint64_t size) {
   pthread_rwlock_unlock(&output_history_rwlock);
 }
 
+void ClearPlaintextOutputHistory() {
+  pthread_rwlock_wrlock(&output_history_rwlock);
+  output_history.clear();
+  pthread_rwlock_unlock(&output_history_rwlock);
+}
+
 static __thread int TD_init_count = 0;
 
 extern "C" void TDECallConstructor() {
@@ -504,6 +510,13 @@ extern "C" void TDECallDestructor() {
   }
   TD_init_count--;
   sgxsan_assert(TD_init_count >= 0);
+}
+
+void TDECallClear() { TD_init_count = 0; }
+
+void ClearSGXSanRT() {
+  TDECallClear();
+  ClearPlaintextOutputHistory();
 }
 
 enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };

@@ -45,6 +45,14 @@ public:
     pthread_mutex_unlock(&m_mutex);
   }
 
+  void clear() {
+    pthread_mutex_lock(&m_mutex);
+    for (auto &pair : m_usage_map) {
+      pair.second = 0;
+    }
+    pthread_mutex_unlock(&m_mutex);
+  }
+
   TrustThread *get(pid_t tid) {
     for (auto pair : m_usage_map) {
       if (pair.second == tid) {

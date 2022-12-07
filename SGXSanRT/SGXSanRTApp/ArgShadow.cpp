@@ -15,3 +15,5 @@ bool ArgIsPoisoned(void *func_addr, int arg_pos) {
 void PushArgShadowStack(void *func_addr) { ArgShadowStack::push(func_addr); }
 
 void PopArgShadowStack(void *func_addr) { ArgShadowStack::pop(func_addr); }
+
+void ClearArgShadowStack() { ArgShadowStack::clear(); }

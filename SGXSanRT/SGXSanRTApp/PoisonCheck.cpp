@@ -628,18 +628,22 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
 #define LEAK_CHECK_MT(srcInOutEnclave, dstInOutEnclave, srcAddr, srcSize)      \
   do {                                                                         \
     if (srcInOutEnclave == InEnclave && dstInOutEnclave == OutEnclave) {       \
-      InOutEnclaveStatus _srcInOutEnclave;                                     \
-      PoisonStatus _srcPoisonedStatus;                                         \
-      RegionInOutEnclaveStatusAndPoisonStatus((uptr)srcAddr, srcSize,          \
-                                              _srcInOutEnclave,                \
-                                              _srcPoisonedStatus, kL2Filter);  \
-      sgxsan_assert(_srcInOutEnclave == InEnclave);                            \
-      if (_srcPoisonedStatus != NotPoisoned) {                                 \
-        GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, (uptr)srcAddr, 0, srcSize, false,       \
-                           "[WARNING] Plaintext Transfer");                    \
+      if (RunInEnclave) {                                                      \
+        InOutEnclaveStatus _srcInOutEnclave;                                   \
+        PoisonStatus _srcPoisonedStatus;                                       \
+        RegionInOutEnclaveStatusAndPoisonStatus(                               \
+            (uptr)srcAddr, srcSize, _srcInOutEnclave, _srcPoisonedStatus,      \
+            kL2Filter);                                                        \
+        sgxsan_assert(_srcInOutEnclave == InEnclave);                          \
+        if (_srcPoisonedStatus != NotPoisoned) {                               \
+          GET_CALLER_PC_BP_SP;                                                 \
+          ReportGenericError(pc, bp, sp, (uptr)srcAddr, 0, srcSize, false,     \
+                             "[WARNING] Plaintext Transfer");                  \
+        }                                                                      \
+        check_output_hybrid((uptr)srcAddr, srcSize);                           \
+      } else {                                                                 \
+        sgxsan_error(true, "Illegal access Enclave from outside");             \
       }                                                                        \
-      check_output_hybrid((uptr)srcAddr, srcSize);                             \
     }                                                                          \
   } while (0);
 

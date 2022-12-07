@@ -193,6 +193,8 @@ static inline int getArraySum(int *array, int size) {
 /// Cipher detect
 void check_output_hybrid(uint64_t addr, uint64_t size);
 
+void ClearSGXSanRT();
+
 /* addr2line & backtrace Util */
 std::string addr2fname_try(void *addr);
 void *sgxsan_backtrace_i(int idx);

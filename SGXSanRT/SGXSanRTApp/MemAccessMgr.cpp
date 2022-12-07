@@ -31,3 +31,5 @@ void MemAccessMgrDeactive() { MemAccessMgr::deactive(); }
 void MemAccessMgrInEnclaveAccess() {
   MemAccessMgr::add_in_enclave_access_cnt();
 }
+
+void MemAccessMgrClear() { MemAccessMgr::clear(); }

@@ -75,6 +75,7 @@ public:
 
   static void init() { sgxsan_assert(0 == stack_depth); }
   static void destroy() { sgxsan_assert(0 == stack_depth); }
+  static void clear() { stack_depth = 0; }
 
 private:
   static __thread ArgShadowTy arg_shadow_stack[MAX_STACK_DEPTH];
@@ -89,6 +90,7 @@ void PoisonArg(void *func_addr, int arg_pos);
 bool ArgIsPoisoned(void *func_addr, int arg_pos);
 void PushArgShadowStack(void *func_addr);
 void PopArgShadowStack(void *func_addr);
+void ClearArgShadowStack();
 #if defined(__cplusplus)
 }
 #endif

@@ -1,5 +1,7 @@
 #include "Sticker.h"
+#include "ArgShadow.h"
 #include "Malloc.h"
+#include "MemAccessMgr.h"
 #include "Poison.h"
 #include "SGXSanRTApp.h"
 #include "arch.h"
@@ -126,6 +128,17 @@ extern "C" void sgx_ocfree() {
   }
 }
 
+extern "C" void ClearOCAllocStack() {
+  while (OCAllocStack.size() > 0) {
+    auto &top = OCAllocStack.top();
+    for (auto ocallocAddr : top) {
+      BACKEND_FREE(ocallocAddr);
+    }
+    top.clear();
+    OCAllocStack.pop();
+  }
+}
+
 // replace libsgx_tstdc with normal glibc and additional API
 extern "C" {
 
@@ -206,9 +219,13 @@ static int dlItCallbackPoisonEnclaveDSO(struct dl_phdr_info *info, size_t size,
             EnclaveDSOStart + phdr->p_vaddr + phdr->p_memsz - 1, phdr->p_align);
 
         // Poison Enclave DSO
-        RunInEnclave = true;
+        bool origInEnclave = false;
+        if (RunInEnclave == false)
+          RunInEnclave = true;
+        else
+          origInEnclave = true;
         PoisonShadow(beg, end - beg, kAsanNotPoisonedMagic);
-        RunInEnclave = false;
+        RunInEnclave = origInEnclave;
       }
     }
     return 1;
@@ -242,14 +259,18 @@ extern "C" sgx_status_t __sgx_create_enclave_ex(
     sgx_misc_attribute_t *misc_attr, const uint32_t ex_features,
     const void *ex_features_p[32]) {
   setEnclaveFileName(file_name);
+  RunInEnclave = true;
   gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_NOW);
+  RunInEnclave = false;
   sgxsan_error(gEnclaveHandler == nullptr, "%s\n", dlerror());
 
   sgxsan_assert(tsticker_ecall = (decltype(tsticker_ecall))dlsym(
                     gEnclaveHandler, "tsticker_ecall"));
   sgxsan_assert(check_ecall = (decltype(check_ecall))dlsym(gEnclaveHandler,
                                                            "check_ecall"));
+  RunInEnclave = true;
   tsticker_ecall(0, ECMD_INIT_ENCLAVE, nullptr, nullptr);
+  RunInEnclave = false;
   return SGX_SUCCESS;
 }
 
@@ -316,6 +337,16 @@ extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
   __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
 }
 
+void ClearSticker() {
+  g_enclave_ocall_table = nullptr;
+  RunInEnclave = false;
+  AlreadyFirstECall = false;
+  sgxsan_thread = nullptr;
+  ocallHistory.clear();
+  g_thread_pool->clear();
+  ClearOCAllocStack();
+}
+
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   // sgxsan_warning(
   //     gEnclaveDSOSanCovCntrsStart == 0,
@@ -337,7 +368,16 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   gEnclaveDSOSanCovPCsStart = 0;
   gEnclaveDSOSanCovPCsStop = 0;
 
+  // Since we will access object belong to Enclave, so set RunInEnclave to true
+  RunInEnclave = true;
   sgxsan_assert(dlclose(gEnclaveHandler) == 0);
+  RunInEnclave = false;
+
+  // Clear SGXSanRT's global status belong to Enclave
+  ClearSGXSanRT();
+  MemAccessMgrClear();
+  ClearArgShadowStack();
+  ClearSticker();
   gEnclaveHandler = nullptr;
   return SGX_SUCCESS;
 }
