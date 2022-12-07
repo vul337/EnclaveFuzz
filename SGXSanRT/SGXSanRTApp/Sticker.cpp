@@ -58,7 +58,7 @@ extern "C" sgx_status_t sgx_ecall(const sgx_enclave_id_t eid, const int index,
   bool curIsFirstECall = false;
   if (AlreadyFirstECall == false) {
     // Current is fisrt ecall
-    if (check_ecall(CHECK_ECALL_PRIVATE, index, 0)) {
+    if (index >= 0 and check_ecall(CHECK_ECALL_PRIVATE, index, 0)) {
       result = SGX_ERROR_ECALL_NOT_ALLOWED;
       goto exit;
     }
@@ -68,7 +68,8 @@ extern "C" sgx_status_t sgx_ecall(const sgx_enclave_id_t eid, const int index,
   } else {
     // Current is OCall, but only allowed ECalls can be called,
     // thus to check it
-    if (not check_ecall(CHECK_ECALL_ALLOWED, index, ocallHistory.back())) {
+    if (index >= 0 and
+        not check_ecall(CHECK_ECALL_ALLOWED, index, ocallHistory.back())) {
       result = SGX_ERROR_ECALL_NOT_ALLOWED;
       goto exit;
     }
