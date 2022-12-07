@@ -183,7 +183,7 @@ public:
     size_t newStrLen = rand() % (ClMaxStringLength + 1);
     T newStr[newStrLen + 1];
     fillStrRand(newStr, newStrLen + 1);
-    mutatorJson[ptr] = ordered_json::binary(std::vector<uint8_t>(
+    mutatorJson[ptr] = EncodeBase64(std::vector<uint8_t>(
         (uint8_t *)newStr, (uint8_t *)(newStr + newStrLen + 1)));
   }
 
@@ -228,8 +228,8 @@ public:
       } else {
         fillRand(newData, req.size);
       }
-      mutatorJson[JSonPtr / "Data"] = ordered_json::binary(
-          std::vector<uint8_t>(newData, newData + req.size));
+      mutatorJson[JSonPtr / "Data"] =
+          EncodeBase64(std::vector<uint8_t>(newData, newData + req.size));
       break;
     }
     case FUZZ_BOOL: {
@@ -268,9 +268,9 @@ public:
     // should only expand byte array
     case FUZZ_ARRAY:
     case FUZZ_DATA: {
-      std::vector<uint8_t> data = mutatorJson[JSonPtr / "Data"];
+      auto data = DecodeBase64(mutatorJson[JSonPtr / "Data"]);
       AdjustNBytes(data, req.size, req.op);
-      mutatorJson[JSonPtr / "Data"] = ordered_json::binary(data);
+      mutatorJson[JSonPtr / "Data"] = EncodeBase64(data);
       break;
     }
     default: {
@@ -304,7 +304,7 @@ public:
   template <class T>
   void _mutateString(ordered_json &mutatorJson,
                      ordered_json::json_pointer ptr) {
-    std::vector<uint8_t> byteArr = mutatorJson[ptr];
+    auto byteArr = DecodeBase64(std::string(mutatorJson[ptr]));
     sgxfuzz_assert(byteArr.size() % sizeof(T) == 0);
     size_t strLen =
         std::min((byteArr.size() / sizeof(T)) - 1, (size_t)ClMaxStringLength);
@@ -317,7 +317,7 @@ public:
     sgxfuzz_assert(newLen <= ClMaxStringLength);
     str[newLen] = '\0';
     mutatorJson[ptr] =
-        ordered_json::binary(std::vector<uint8_t>(str, str + newLen + 1));
+        EncodeBase64(std::vector<uint8_t>(str, str + newLen + 1));
   }
 
   void mutateOnMutatorJSon(bool canChangeSize = true) {
@@ -359,7 +359,7 @@ public:
       case FUZZ_ARRAY:
       case FUZZ_DATA:
       case FUZZ_RET: {
-        std::vector<uint8_t> byteArr = mutatorJson[ptr / "Data"];
+        auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
         uint8_t cByteArr[byteArr.size()];
         memcpy(cByteArr, byteArr.data(), byteArr.size());
         bool return0 = (rand() % 100) < (ClReturn0Probability * 100);
@@ -369,7 +369,7 @@ public:
           LLVMFuzzerMutate(cByteArr, byteArr.size(), byteArr.size());
         }
         // Fixed-size mutate
-        mutatorJson[ptr / "Data"] = ordered_json::binary(
+        mutatorJson[ptr / "Data"] = EncodeBase64(
             std::vector<uint8_t>(cByteArr, cByteArr + byteArr.size()));
         break;
       }
@@ -515,7 +515,7 @@ public:
   template <class T>
   void _getString(uint8_t *&dst, ordered_json &consumerJson,
                   ordered_json::json_pointer ptr) {
-    std::vector<uint8_t> data = consumerJson[ptr];
+    std::vector<uint8_t> data = DecodeBase64(std::string(consumerJson[ptr]));
     if (dst == nullptr) {
       dst = (uint8_t *)managedMalloc(data.size());
     }
@@ -565,7 +565,8 @@ public:
       case FUZZ_ARRAY:
       case FUZZ_DATA:
       case FUZZ_RET: {
-        std::vector<uint8_t> data = consumerJson[consumerJsonPtr / "Data"];
+        std::vector<uint8_t> data =
+            DecodeBase64(std::string(consumerJson[consumerJsonPtr / "Data"]));
         size_t preparedDataSize = data.size();
         if (preparedDataSize < byteArrLen) {
           size_t extraSizeNeeded = byteArrLen - preparedDataSize;
@@ -787,15 +788,21 @@ private:
 FuzzDataFactory data_factory;
 
 void FuzzDataFactory::dump(log_level ll, ordered_json json) {
+  if (ll > ClUsedLogLevel)
+    return;
   sgxfuzz_log(ll, false, "%s\n", json.dump(4).c_str());
 }
 
 void FuzzDataFactory::dump(log_level ll, ordered_json::json_pointer ptr) {
+  if (ll > ClUsedLogLevel)
+    return;
   sgxfuzz_log(ll, true, "%s\n", ptr.to_string().c_str());
 }
 
 void FuzzDataFactory::dump(log_level ll, ordered_json json,
                            ordered_json::json_pointer jsonPtr) {
+  if (ll > ClUsedLogLevel)
+    return;
   sgxfuzz_log(ll, false, "%s\n%s\n", jsonPtr.to_string().c_str(),
               json[jsonPtr].dump(4));
 }
