@@ -802,14 +802,14 @@ void FuzzDataFactory::dump(log_level ll, ordered_json json,
 }
 
 void ShowAllECalls() {
-  log_debug("[Init] Num of ECall: %d\n", sgx_fuzzer_ecall_num);
+  log_always("[Init] Num of ECall: %d\n", sgx_fuzzer_ecall_num);
   std::string ecalls;
   for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
     ecalls += std::string("  " + std::to_string(i) + " - " +
                           sgx_fuzzer_ecall_wrapper_name_array[i]) +
               "\n";
   }
-  log_debug("ECalls:\n%s\n", ecalls.c_str());
+  log_always("ECalls:\n%s\n", ecalls.c_str());
 }
 
 // libFuzzer Callbacks
@@ -873,12 +873,12 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   if (vm.count("inner_help")) {
     std::stringstream ss;
     ss << desc << "\n";
-    log_debug(ss.str().c_str());
+    log_always(ss.str().c_str());
     exit(0);
   } else if (vm.count("sgxfuzz_test_one")) {
     gFuzzerMode = TEST_ONE;
     gFuzzerSeq.push_back(vm["sgxfuzz_test_one"].as<int>());
-    log_debug("Test one: %d\n", gFuzzerSeq[0]);
+    log_always("Test one: %d\n", gFuzzerSeq[0]);
   } else if (vm.count("sgxfuzz_test_user")) {
     gFuzzerMode = TEST_USER;
     std::vector<std::string> indicesVec =
@@ -894,11 +894,11 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       }
     }
 
-    log_debug("Test user specified:");
+    log_always("Test user specified:");
     for (auto id : gFuzzerSeq) {
-      log_debug_np(" %d", id);
+      log_always_np(" %d", id);
     }
-    log_debug_np("\n");
+    log_always_np("\n");
   } else if (vm.count("sgxfuzz_print_ecalls")) {
     ShowAllECalls();
     exit(0);
@@ -921,11 +921,11 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
         gFilterOutIndices.push_back(fiterOutECallIdx);
       }
     }
-    log_debug("Filter out:");
+    log_always("Filter out:");
     for (auto filterOutIdx : gFilterOutIndices) {
-      log_debug_np(" %d", filterOutIdx);
+      log_always_np(" %d", filterOutIdx);
     }
-    log_debug_np("\n");
+    log_always_np("\n");
   }
   sgxfuzz_assert(ClUsedLogLevel <= 4);
   ShowAllECalls();
