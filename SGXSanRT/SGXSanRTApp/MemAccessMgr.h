@@ -109,8 +109,6 @@ public:
         m_in_enclave_access_cnt++;
       }
 #endif
-    } else {
-      sgxsan_error(true, "Illegal access Enclave from outside\n");
     }
   }
 

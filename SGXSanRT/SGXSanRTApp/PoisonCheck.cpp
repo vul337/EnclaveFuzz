@@ -641,8 +641,6 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
                              "[WARNING] Plaintext Transfer");                  \
         }                                                                      \
         check_output_hybrid((uptr)srcAddr, srcSize);                           \
-      } else {                                                                 \
-        sgxsan_error(true, "Illegal access Enclave from outside");             \
       }                                                                        \
     }                                                                          \
   } while (0);
