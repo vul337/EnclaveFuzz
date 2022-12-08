@@ -117,7 +117,7 @@ extern "C" void PopOCAllocStack() { OCAllocStack.pop(); }
 
 extern "C" void *sgx_ocalloc(size_t size) {
   auto &top = OCAllocStack.top();
-  void *ocallocAddr = BACKEND_MALLOC(size);
+  void *ocallocAddr = malloc(size);
   top.push_back(ocallocAddr);
   return ocallocAddr;
 }
@@ -125,7 +125,7 @@ extern "C" void *sgx_ocalloc(size_t size) {
 extern "C" void sgx_ocfree() {
   auto &top = OCAllocStack.top();
   for (auto ocallocAddr : top) {
-    BACKEND_FREE(ocallocAddr);
+    free(ocallocAddr);
   }
 }
 
@@ -133,7 +133,7 @@ extern "C" void ClearOCAllocStack() {
   while (OCAllocStack.size() > 0) {
     auto &top = OCAllocStack.top();
     for (auto ocallocAddr : top) {
-      BACKEND_FREE(ocallocAddr);
+      free(ocallocAddr);
     }
     top.clear();
     OCAllocStack.pop();
@@ -313,9 +313,9 @@ extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
   if (gEnclaveDSOSanCovCntrsStart == (uptr)Start) {
     return;
   }
-  log_always("Hook __sanitizer_cov_8bit_counters_init of Enclave, %ld inline "
-             "8-bit counts [%p, %p)\n",
-             (uptr)Stop - (uptr)Start, Start, Stop);
+  log_debug("Hook __sanitizer_cov_8bit_counters_init of Enclave, %ld inline "
+            "8-bit counts [%p, %p)\n",
+            (uptr)Stop - (uptr)Start, Start, Stop);
   gEnclaveDSOSanCovCntrsStart = (uptr)Start;
   gEnclaveDSOSanCovCntrsStop = (uptr)Stop;
   __sanitizer_cov_8bit_counters_init(Start, Stop);
@@ -332,9 +332,9 @@ extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
   }
   gEnclaveDSOSanCovPCsStart = (uptr)pcs_beg;
   gEnclaveDSOSanCovPCsStop = (uptr)pcs_end;
-  log_always("Hook __sanitizer_cov_pcs_init of Enclave, %ld PCs [%p, %p)\n",
-             (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
-             pcs_end);
+  log_debug("Hook __sanitizer_cov_pcs_init of Enclave, %ld PCs [%p, %p)\n",
+            (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
+            pcs_end);
   __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
 }
 
