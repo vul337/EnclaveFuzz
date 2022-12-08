@@ -379,6 +379,7 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   MemAccessMgrClear();
   ClearArgShadowStack();
   ClearSticker();
+  ClearStackPoison();
   gEnclaveHandler = nullptr;
   return SGX_SUCCESS;
 }

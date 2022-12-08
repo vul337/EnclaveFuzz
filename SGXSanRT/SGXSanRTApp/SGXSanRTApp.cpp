@@ -4,6 +4,7 @@
 #include "MemAccessMgr.h"
 #include "Sticker.h"
 #include "plthook.h"
+#include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <boost/stacktrace.hpp>
 #include <execinfo.h>
@@ -539,4 +540,21 @@ extern "C" void ReportSensitiveDataLeak(SensitiveDataType srcType,
     abort();
   }
   log_warning("Dst info: 0x%lx(0x%lx)\n", dstAddr, dstSize);
+}
+
+void ClearStackPoison() {
+  std::fstream f("/proc/self/maps", std::ios::in);
+  std::string line;
+  while (std::getline(f, line)) {
+    if (line.find("[stack]") != std::string::npos) {
+      std::vector<std::string> vec1, vec2;
+      boost::split(vec1, line, [](char c) { return c == ' '; });
+      boost::trim(vec1[0]);
+      boost::split(vec2, vec1[0], [](char c) { return c == '-'; });
+      sgxsan_assert(vec2.size() == 2);
+      uptr stackBase = std::stoull("0x" + vec2[0], 0, 16);
+      uptr stackEnd = std::stoull("0x" + vec2[1], 0, 16);
+      PoisonShadow(stackBase, stackEnd - stackBase, 0, true);
+    }
+  }
 }
