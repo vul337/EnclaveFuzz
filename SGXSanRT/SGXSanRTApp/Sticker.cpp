@@ -206,8 +206,22 @@ sgx_status_t sgx_cpuid(int cpuinfo[4], int leaf) {
 
 /// life time management
 static void *gEnclaveHandler = nullptr;
-static int dlItCallbackPoisonEnclaveDSO(struct dl_phdr_info *info, size_t size,
-                                        void *data) {
+static std::map<uptr, uptr, std::less<uptr>,
+                ContainerAllocator<std::pair<const uptr, uptr>>>
+    EnclaveDSOStart2End;
+
+bool isInEnclaveDSORange(uptr addr, size_t len) {
+  for (auto pair : EnclaveDSOStart2End) {
+    // Shouldn't overlap different segments
+    if (pair.first <= addr and (addr + len) < pair.second) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static int dlItCBGetEnclaveDSO(struct dl_phdr_info *info, size_t size,
+                               void *data) {
   auto EnclaveDSOStart = *(uptr *)data;
   if (EnclaveDSOStart == info->dlpi_addr) {
     // Found interesting DSO
@@ -220,18 +234,26 @@ static int dlItCallbackPoisonEnclaveDSO(struct dl_phdr_info *info, size_t size,
             EnclaveDSOStart + phdr->p_vaddr + phdr->p_memsz - 1, phdr->p_align);
 
         // Poison Enclave DSO
-        bool origInEnclave = false;
-        if (RunInEnclave == false)
-          RunInEnclave = true;
-        else
-          origInEnclave = true;
-        PoisonShadow(beg, end - beg, kAsanNotPoisonedMagic);
-        RunInEnclave = origInEnclave;
+        sgxsan_assert(EnclaveDSOStart2End.count(beg) == 0);
+        EnclaveDSOStart2End[beg] = end;
       }
     }
     return 1;
   } else {
     return 0;
+  }
+}
+
+void _PoisonEnclaveDSOCodeSegment() {
+  for (auto pair : EnclaveDSOStart2End) {
+    uptr beg = pair.first, end = pair.second;
+    bool origInEnclave = false;
+    if (RunInEnclave == false)
+      RunInEnclave = true;
+    else
+      origInEnclave = true;
+    PoisonShadow(beg, end - beg, kAsanNotPoisonedMagic);
+    RunInEnclave = origInEnclave;
   }
 }
 
@@ -251,7 +273,9 @@ void PoisonEnclaveDSOCodeSegment() {
   sgxsan_assert(dlclose(handler) == 0);
 
   // To find Enclave DSO and poison it with InEnclave flag
-  dl_iterate_phdr(dlItCallbackPoisonEnclaveDSO, &EnclaveStartAddr);
+  sgxsan_assert(EnclaveDSOStart2End.size() == 0);
+  dl_iterate_phdr(dlItCBGetEnclaveDSO, &EnclaveStartAddr);
+  _PoisonEnclaveDSOCodeSegment();
 }
 
 extern "C" sgx_status_t __sgx_create_enclave_ex(
@@ -346,6 +370,7 @@ void ClearSticker() {
   ocallHistory.clear();
   g_thread_pool->clear();
   ClearOCAllocStack();
+  EnclaveDSOStart2End.clear();
 }
 
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
@@ -380,6 +405,7 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   ClearArgShadowStack();
   ClearSticker();
   ClearStackPoison();
+  ClearHeapObject();
   gEnclaveHandler = nullptr;
   return SGX_SUCCESS;
 }

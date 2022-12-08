@@ -119,6 +119,7 @@ public:
     m_out_enclave_access_cnt = 0;
     m_in_enclave_access_cnt = 0;
   }
+  static bool inited() { return m_inited; }
 
 private:
   static thread_local std::deque<FetchInfo> m_control_fetchs;
@@ -140,6 +141,7 @@ void MemAccessMgrInEnclaveAccess();
 void MemAccessMgrActive();
 void MemAccessMgrDeactive();
 void MemAccessMgrClear();
+bool MemAccessMgrInited();
 #if defined(__cplusplus)
 }
 #endif

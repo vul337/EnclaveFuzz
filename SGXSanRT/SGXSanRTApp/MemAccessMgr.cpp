@@ -33,3 +33,5 @@ void MemAccessMgrInEnclaveAccess() {
 }
 
 void MemAccessMgrClear() { MemAccessMgr::clear(); }
+
+bool MemAccessMgrInited() { return MemAccessMgr::inited(); }

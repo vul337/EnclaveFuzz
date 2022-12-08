@@ -36,6 +36,7 @@ void __libc_free(void *ptr) throw();
 void *__libc_calloc(size_t nmemb, size_t size) throw();
 void *__libc_realloc(void *ptr, size_t size) throw();
 void updateBackEndHeapAllocator();
+void ClearHeapObject();
 void *MALLOC(size_t size);
 void FREE(void *ptr);
 void *CALLOC(size_t n_elements, size_t elem_size);
@@ -80,7 +81,9 @@ public:
   typedef ptrdiff_t difference_type;
 
   // rebind allocator to type U
-  template <class U> struct rebind { typedef ContainerAllocator<U> other; };
+  template <class U> struct rebind {
+    typedef ContainerAllocator<U> other;
+  };
 
   // return address of values
   pointer address(reference value) const { return &value; }
