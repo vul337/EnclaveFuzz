@@ -51,10 +51,6 @@ extern sgx_status_t (*sgx_fuzzer_ecall_array[])();
 extern int sgx_fuzzer_ecall_num;
 extern char *sgx_fuzzer_ecall_wrapper_name_array[];
 
-/// Used to leave \c LLVMFuzzerTestOneInput
-jmp_buf sgx_fuzzer_jmp_buf;
-void leaveLLVMFuzzerTestOneInput() { longjmp(sgx_fuzzer_jmp_buf, 0); }
-
 // log util
 static const char *log_level_to_prefix[] = {
     "",
@@ -550,12 +546,11 @@ public:
     auto &consumerJson = consumerData.json;
     if (consumerJson[consumerJsonPtr].is_null()) {
       // Send request to mutator that we need data for current ID
-      log_debug("Need mutator create data for current [%s]\n",
-                strAsParamID.c_str());
       SendRequest(consumerData.bjdata,
                   {strAsParamID, DATA_CREATE, byteArrLen, dataTy});
-      /// early leave \c leaveLLVMFuzzerTestOneInput
-      leaveLLVMFuzzerTestOneInput();
+      std::stringstream ss;
+      ss << "Need mutator create data for current [" << strAsParamID << "]\n";
+      throw std::runtime_error(ss.str());
     } else {
       // Already prepared data for current ID
       FuzzDataTy dataTy = consumerJson[consumerJsonPtr / "DataType"];
@@ -571,11 +566,12 @@ public:
         if (preparedDataSize < byteArrLen) {
           size_t extraSizeNeeded = byteArrLen - preparedDataSize;
           // Send request to mutator that prepared data is not enough
-          log_debug("Need mutator provide more data [%ld] for current [%s]\n",
-                    extraSizeNeeded, strAsParamID.c_str());
           SendRequest(consumerData.bjdata,
                       {strAsParamID, DATA_EXPAND, extraSizeNeeded, dataTy});
-          leaveLLVMFuzzerTestOneInput();
+          std::stringstream ss;
+          ss << "Need mutator provide more data [" << extraSizeNeeded
+             << "] for current [" << strAsParamID << "]\n";
+          throw std::runtime_error(ss.str());
         }
         if (dst == nullptr) {
           dst = (uint8_t *)managedMalloc(byteArrLen);
@@ -746,9 +742,7 @@ public:
     if (consumerJson["CallSeq"].is_null()) {
       SendRequest(consumerData.bjdata,
                   {"CallSeq", DATA_CREATE, funcNum, FUZZ_SEQ});
-      leaveLLVMFuzzerTestOneInput();
-      // Shouldn't reach here, avoid compile warning
-      abort();
+      throw std::runtime_error("Need Call Sequence Data");
     } else {
       ordered_json::array_t callSeq = consumerJson["CallSeq"]["Data"];
       std::vector<int> intCallSeq;
@@ -973,11 +967,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   /// Deserialize data to \c FuzzDataFactory::ConsumerJSon
   data_factory.deserializeToConsumerJson(Data, Size);
 
-  if (setjmp(sgx_fuzzer_jmp_buf) != 0) {
-    /// jump from \c leaveLLVMFuzzerTestOneInput , and we leave current function
-    goto exit;
-  }
-
   emitTimes++;
   // Initialize Enclave
   ret = sgx_create_enclave(ClEnclaveFileName.c_str(),
@@ -989,7 +978,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   if (gFuzzerMode == TEST_ONE || gFuzzerMode == TEST_USER) {
     callSeq = gFuzzerSeq;
   } else {
-    callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
+    try {
+      callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
+    } catch (std::runtime_error const &e) {
+      log_debug("%s\n", e.what());
+      goto exit;
+    }
   }
   for (int i : callSeq) {
     sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
@@ -1002,7 +996,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     log_trace("[TEST] ECall-%d: %s\n", i,
               sgx_fuzzer_ecall_wrapper_name_array[i]);
     data_factory.updateCurrentCalledECallIndex(i);
-    ret = sgx_fuzzer_ecall_array[i]();
+    try {
+      ret = sgx_fuzzer_ecall_array[i]();
+    } catch (std::runtime_error const &e) {
+      log_debug("%s\n", e.what());
+      goto exit;
+    }
     sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
                       ret != SGX_ERROR_ECALL_NOT_ALLOWED,
                   "[FAIL] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
