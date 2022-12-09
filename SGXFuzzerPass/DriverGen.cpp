@@ -315,7 +315,10 @@ Value *DriverGenerator::createParamContent(
                                       ->getPointerElementType(),
                                   co_param_ptr);
           }
-          ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
+          ptCnt = IRB.CreateUDiv(
+              IRB.CreateMul(IRB.CreateIntCast(size, IRB.getInt64Ty(), false),
+                            IRB.CreateIntCast(count, IRB.getInt64Ty(), false)),
+              eleSize);
           // Maybe size*count < eleSize, due to problem of Enclave developer
           ptCnt = IRB.CreateSelect(IRB.CreateICmpSGT(ptCnt, IRB.getInt64(1)),
                                    ptCnt, IRB.getInt64(1), "ptCnt");
