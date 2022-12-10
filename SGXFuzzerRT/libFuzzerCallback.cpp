@@ -442,7 +442,7 @@ public:
         dump(LOG_LEVEL_TRACE, mutatorData.json);
 
         // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
-        mutateOnMutatorJSon(false);
+        // mutateOnMutatorJSon(false);
         /// process \c reqQueue
         it = reqQueue.erase(it);
         log_trace("reqQueue remove %s\n", mutatorData.dataID.c_str());
@@ -537,8 +537,12 @@ public:
       return dst;
     }
 
-    int times = ECallCalledTimesMap[currentCalledECallIndex];
-    std::string strAsParamID = std::to_string(times) + cStrAsParamID;
+    if (not DataGetTimes.count(cStrAsParamID)) {
+      DataGetTimes[cStrAsParamID] = 0;
+    }
+    int times = DataGetTimes[cStrAsParamID]++;
+    std::string strAsParamID =
+        std::string(cStrAsParamID) + "_" + std::to_string(times);
     strAsParamID = std::regex_replace(strAsParamID, std::regex("/"), "_");
 
     auto consumerJsonPtr =
@@ -709,6 +713,7 @@ public:
       free(memArea);
     }
     allocatedMemAreas.clear();
+    DataGetTimes.clear();
   }
 
   void *managedMalloc(size_t size) {
@@ -753,21 +758,6 @@ public:
     }
   }
 
-  void initECallCalledTimesMap(int ECallNum) {
-    ECallCalledTimesMap = std::vector<int>(ECallNum);
-    std::fill(ECallCalledTimesMap.begin(), ECallCalledTimesMap.end(), 0);
-  }
-
-  void updateCurrentCalledECallIndex(int index) {
-    currentCalledECallIndex = index;
-  }
-
-  void increaseECallCalledTime(int ECallIdx) {
-    ECallCalledTimesMap[ECallIdx]++;
-  }
-
-  void destroyECallCalledTimesMap() { ECallCalledTimesMap.clear(); }
-
 private:
   InputJsonDataInfo consumerData, mutatorData;
   struct DataAndReq {
@@ -776,8 +766,7 @@ private:
   };
   std::map<std::string /* DataID */, DataAndReq> reqQueue;
   std::vector<uint8_t *> allocatedMemAreas;
-  std::vector<int> ECallCalledTimesMap;
-  int currentCalledECallIndex;
+  std::unordered_map<std::string, size_t> DataGetTimes;
 };
 FuzzDataFactory data_factory;
 
@@ -963,7 +952,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   static size_t emitTimes = 0, fullSucceedTimes = 0, succeedTimes = 0;
   bool hasTest = false;
   std::vector<int> callSeq;
-  data_factory.initECallCalledTimesMap(sgx_fuzzer_ecall_num);
   /// Deserialize data to \c FuzzDataFactory::ConsumerJSon
   data_factory.deserializeToConsumerJson(Data, Size);
 
@@ -995,7 +983,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
     log_trace("[TEST] ECall-%d: %s\n", i,
               sgx_fuzzer_ecall_wrapper_name_array[i]);
-    data_factory.updateCurrentCalledECallIndex(i);
     try {
       ret = sgx_fuzzer_ecall_array[i]();
     } catch (std::runtime_error const &e) {
@@ -1005,7 +992,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
                       ret != SGX_ERROR_ECALL_NOT_ALLOWED,
                   "[FAIL] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
-    data_factory.increaseECallCalledTime(i);
     hasTest = true;
   }
   fullSucceedTimes++;
@@ -1014,7 +1000,6 @@ exit:
   /// Clear \c FuzzDataFactory::ConsumerJSon and free temp buffer before leave
   /// current round
   data_factory.clearAtConsumerEnd();
-  data_factory.destroyECallCalledTimesMap();
   if (hasTest)
     succeedTimes++;
   log_debug("FullSucceedTimes/SucceedTimes/EmitTimes=%ld/%ld/%ld\n",
