@@ -34,6 +34,7 @@ size_t ClMaxSize;
 size_t ClUserCheckSize;
 int ClUsedLogLevel;
 bool ClProvideNullPointer;
+bool ClAlwaysMuate;
 double ClProvideNullPointerProbability;
 double ClReturn0Probability;
 
@@ -442,7 +443,9 @@ public:
         dump(LOG_LEVEL_TRACE, mutatorData.json);
 
         // Mutate data except which is FUZZ_COUNT/FUZZ_SIZE type
-        // mutateOnMutatorJSon(false);
+        if (ClAlwaysMuate) {
+          mutateOnMutatorJSon(false);
+        }
         /// process \c reqQueue
         it = reqQueue.erase(it);
         log_trace("reqQueue remove %s\n", mutatorData.dataID.c_str());
@@ -838,6 +841,10 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
       "cb_provide_nullptr",
       po::value<bool>(&ClProvideNullPointer)->default_value(true),
       "Provide NULL for fuzzed pointer parameter")(
+      "cb_always_mutate", po::value<bool>(&ClAlwaysMuate)->default_value(false),
+      "We will directly goto mutation stage when lack of params, and at the "
+      "mutation stage, whether we mutate params already exist (but don't "
+      "mutate params used to indicate size/count)")(
       "cb_provide_nullptr_probability",
       po::value<double>(&ClProvideNullPointerProbability)->default_value(0.01),
       "The minimum granularity is 0.01 (1%)")(

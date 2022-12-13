@@ -47,7 +47,9 @@ enum GetByteType {
   FUZZ_SIZE,
   FUZZ_COUNT,
   FUZZ_RET,
-  FUZZ_STRUCT
+  FUZZ_BOOL,
+  FUZZ_SEQ,
+  FUZZ_USER_CHECK_SIZE,
 };
 
 void DriverGenerator::initialize(Module &M) {
@@ -698,11 +700,11 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
   }
 }
 
-void DriverGenerator::createOcallFunc(std::string ocallName) {
-  // create empty ocall_xxx() function when it's only a declaration
-  auto realOCall = M->getFunction(ocallName);
+void DriverGenerator::createOcallFunc(std::string realOCallName) {
+  auto realOCall = M->getFunction(realOCallName);
+  // create empty ocall wrapper function
   FunctionCallee ocallWrapperCallee = M->getOrInsertFunction(
-      ClOCallWrapperPrefix + ocallName, realOCall->getFunctionType());
+      ClOCallWrapperPrefix + realOCallName, realOCall->getFunctionType());
   Function *ocallWrapper = cast<Function>(ocallWrapperCallee.getCallee());
   auto EntryBB = BasicBlock::Create(*C, "", ocallWrapper);
   // create return instruction
@@ -721,7 +723,7 @@ void DriverGenerator::createOcallFunc(std::string ocallName) {
   if (funcRetType->isVoidTy()) {
     retI = retVoidI;
   } else {
-    auto jsonPtr = json::json_pointer("/untrusted") / ocallName / "return";
+    auto jsonPtr = json::json_pointer("/untrusted") / realOCallName / "return";
     Value *parentID = IRB.CreateGlobalStringPtr(
               jsonPtr.parent_pointer().to_string(), "", 0, M),
           *currentID = IRB.CreateGlobalStringPtr(jsonPtr.back(), "", 0, M);
@@ -738,7 +740,7 @@ void DriverGenerator::createOcallFunc(std::string ocallName) {
   }
   retVoidI = nullptr;
 
-  saveCreatedInput2OCallPtrParam(ocallWrapper, ocallName, retI);
+  saveCreatedInput2OCallPtrParam(ocallWrapper, realOCallName, retI);
 }
 
 void DriverGenerator::passStaticAnalysisResultToRuntime(
