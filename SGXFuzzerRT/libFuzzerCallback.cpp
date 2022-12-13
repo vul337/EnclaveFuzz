@@ -628,7 +628,7 @@ public:
         break;
       }
       default: {
-        abort();
+        sgxfuzz_error(true, "Unsupported FUZZ_XXX type\n");
         break;
       }
       }
