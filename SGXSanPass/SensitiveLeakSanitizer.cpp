@@ -1,9 +1,11 @@
 #include "SensitiveLeakSanitizer.h"
-
 #include "SGXSanPassConfig.h"
 #include "nlohmann/json.hpp"
 #include "llvm/Demangle/Demangle.h"
+#include <boost/algorithm/string.hpp>
 #include <filesystem>
+#include <sys/time.h>
+#include <vector>
 
 using namespace llvm;
 using ordered_json = nlohmann::ordered_json;
@@ -14,9 +16,22 @@ static cl::opt<int> ClHeapAllocatorsMaxCollectionTimes(
     cl::desc("max times of collection heap allocator wrappers"), cl::Hidden,
     cl::init(5));
 
+static cl::opt<size_t>
+    ClMaxProcessDeepObjPNCount("max-process-deep-objpn-count",
+                               cl::desc("max count to process deep objPN"),
+                               cl::Hidden, cl::init(10));
+
+static cl::opt<unsigned int> ClMaxDeepObjPNNestedLevel(
+    "max-deep-objpn-nested-level",
+    cl::desc("max nested level to process deep objPN"), cl::Hidden,
+    cl::init(2));
+
 // #define DUMP_VALUE_FLOW
 // #define SHOW_WORK_OBJ_PTS
 const uint8_t kSGXSanSensitiveObjData = 0x20;
+
+std::regex SensitiveLeakSanitizer::nonAlphanumeric("[^0-9a-zA-Z]");
+std::regex SensitiveLeakSanitizer::nonBlank("^\\S+$");
 
 Value *SensitiveLeakSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
   // as shadow memory only map elrange, let Shadow - EnclaveBase
@@ -114,13 +129,19 @@ void SensitiveLeakSanitizer::poisonSensitiveStackOrHeapObj(
   if (AllocaInst *objAI = dyn_cast<AllocaInst>(objI)) {
     /// TODO: extend at next time
     assert(sensitiveIndicator == nullptr);
-    auto AILifeTimeStart =
-        SGXSanInstVisitor::visitFunction(*objAI->getFunction()).AILifeTimeStart;
-    for (auto start : AILifeTimeStart[objAI]) {
-      objLivePoints.push_back(start->getNextNode());
-    }
-    if (objLivePoints.size() == 0) {
+    auto &visitInfos = SGXSanInstVisitor::visitFunction(*objAI->getFunction());
+    if (objAI->isStaticAlloca()) {
       objLivePoints.push_back(objAI->getNextNode());
+    } else {
+      for (auto start : visitInfos.AILifeTimeStart[objAI]) {
+        objLivePoints.push_back(start->getNextNode());
+      }
+      if (objLivePoints.size() == 0) {
+        // C API alloca
+        // Since it maybe in branch, we can't unpoison it at function end
+        // without prior knowledge about branch condition
+        objLivePoints.push_back(objAI->getNextNode());
+      }
     }
   } else if (CallInst *objCI = dyn_cast<CallInst>(objI)) {
     objLivePoints.push_back(objCI->getNextNode());
@@ -275,9 +296,9 @@ void SensitiveLeakSanitizer::addAndPoisonSensitiveObj(
   }
 }
 
-int SensitiveLeakSanitizer::getPointerLevel(const Value *ptr) {
+unsigned int SensitiveLeakSanitizer::getPointerLevel(const Value *ptr) {
   assert(ptr);
-  int level = 0;
+  unsigned int level = 0;
   Type *type = ptr->getType();
   while (PointerType *ptrTy = dyn_cast<PointerType>(type)) {
     level++;
@@ -286,9 +307,8 @@ int SensitiveLeakSanitizer::getPointerLevel(const Value *ptr) {
   return level;
 }
 
-std::unordered_set<SVF::ObjVar *>
-SensitiveLeakSanitizer::getTargetObj(Value *value) {
-  std::unordered_set<SVF::ObjVar *> objVars;
+void SensitiveLeakSanitizer::getTargetObj(
+    std::unordered_set<SVF::ObjVar *> &objVars, Value *value) {
   if (objSym->find(SVF::SVFUtil::getGlobalRep(value)) != objSym->end()) {
     objVars.emplace(
         cast<SVF::ObjVar>(pag->getGNode(pag->getObjectNode(value))));
@@ -297,55 +317,71 @@ SensitiveLeakSanitizer::getTargetObj(Value *value) {
       objVars.emplace(cast<SVF::ObjVar>(pag->getGNode(objPNID)));
     }
   }
-  return objVars;
 }
 
-std::unordered_set<SVF::ObjVar *>
-SensitiveLeakSanitizer::getNonPtrObjPNs(Value *value) {
-  std::unordered_set<SVF::ObjVar *> dstObjPNs;
+void SensitiveLeakSanitizer::getNonPtrObjPNs(
+    std::unordered_set<SVF::ObjVar *> &dstObjPNs, Value *value) {
   assert(value);
   if (isa<Function>(value))
-    return dstObjPNs;
+    return;
 
-  for (auto objPN : getTargetObj(value)) {
-    dstObjPNs.merge(getNonPtrObjPNs(objPN));
+  std::unordered_set<SVF::ObjVar *> objVars;
+  getTargetObj(objVars, value);
+  for (auto objPN : objVars) {
+    getNonPtrObjPNs(dstObjPNs, objPN);
   }
-  return dstObjPNs;
+  return;
 }
 
-std::unordered_set<SVF::ObjVar *>
-SensitiveLeakSanitizer::getNonPtrObjPNs(SVF::ObjVar *objPN) {
-  std::unordered_set<SVF::ObjVar *> objPNs;
+void SensitiveLeakSanitizer::getNonPtrObjPNs(
+    std::unordered_set<SVF::ObjVar *> &objPNs, SVF::ObjVar *objPN,
+    size_t level) {
+  static thread_local std::unordered_set<SVF::ObjVar *>
+      AlreadyCheckNonPtrObjPNs;
+  if (level == 0) {
+    AlreadyCheckNonPtrObjPNs.clear();
+  }
+  level++;
+  if (AlreadyCheckNonPtrObjPNs.count(objPN) != 0) {
+    return;
+  }
+  AlreadyCheckNonPtrObjPNs.emplace(objPN);
+
   assert(objPN);
   auto memObj = objPN->getMemObj();
   if (isa<SVF::DummyObjVar>(objPN) || memObj->isFunction())
-    return objPNs;
-  int pointerLevel = getPointerLevel(objPN->getValue());
-  if (pointerLevel == 1) {
+    return;
+  unsigned int pointerLevel = getPointerLevel(objPN->getValue());
+  if (pointerLevel == 0) {
+    abort();
+  } else if (pointerLevel == 1) {
     assert(not isa<CallInst>(objPN->getValue()) || memObj->isHeap());
     objPNs.emplace(objPN);
+  } else if (pointerLevel > ClMaxDeepObjPNNestedLevel) {
+    // Too nested, ignore it
   } else if (pointerLevel > 1) {
     // SVF models ConstantObj as special ObjPN#1, so there is no individual
     // ObjPN for string constant etc..
+    size_t processedPtCnt = 0;
     for (SVF::NodeID deepObjNodeID : ander->getPts(objPN->getId())) {
       SVF::ObjVar *deepObjPN = cast<SVF::ObjVar>(pag->getGNode(deepObjNodeID));
       if (isa<SVF::DummyObjVar>(deepObjPN) ||
-          deepObjPN->getMemObj()->isFunction()) {
+          deepObjPN->getMemObj()->isFunction() ||
+          getPointerLevel(deepObjPN->getValue()) >= pointerLevel) {
         continue;
       }
-      if (getPointerLevel(deepObjPN->getValue()) >= pointerLevel) {
-        continue;
+      getNonPtrObjPNs(objPNs, deepObjPN, level);
+      if (++processedPtCnt >= ClMaxProcessDeepObjPNCount) {
+        break;
       }
-      objPNs.merge(getNonPtrObjPNs(deepObjPN));
     }
-  } else {
-    abort();
   }
-  return objPNs;
+  return;
 }
 
 void SensitiveLeakSanitizer::pushSensitiveObj(Value *annotatedPtr) {
-  std::unordered_set<SVF::ObjVar *> objSet = getNonPtrObjPNs(annotatedPtr);
+  std::unordered_set<SVF::ObjVar *> objSet;
+  getNonPtrObjPNs(objSet, annotatedPtr);
   assert(objSet.size() <= 1);
   for (auto obj : objSet) {
     addAndPoisonSensitiveObj(obj);
@@ -378,21 +414,19 @@ bool SensitiveLeakSanitizer::ContainWord(StringRef str,
   return str.contains(capitalWord);
 }
 
-bool SensitiveLeakSanitizer::ContainWordExactly(StringRef str,
+bool SensitiveLeakSanitizer::ContainWordExactly(std::string str,
                                                 const std::string word) {
   if (word == "")
     return true;
   else if (str == "")
     return false;
   // filter out non-alphanumeric word
-  std::regex nonAlphanumeric("[^0-9a-zA-Z]");
   if (std::regex_search(word, nonAlphanumeric)) {
     errs() << "[ERROR] Word contain non-alphanumeric\n";
     abort();
   }
   // filter out non-word str
-  std::regex word_regex("^\\S+$");
-  if (not std::regex_match(str.str(), word_regex)) {
+  if (not std::regex_match(str, nonBlank)) {
     errs() << "[ERROR] str isn't a valid word\n";
     abort();
   }
@@ -401,18 +435,38 @@ bool SensitiveLeakSanitizer::ContainWordExactly(StringRef str,
   std::string lowercaseWord = word;
   std::for_each(lowercaseWord.begin(), lowercaseWord.end(),
                 [](char &c) { c = std::tolower(c); });
-  std::regex wordRegex("([^a-zA-Z]|^)" + lowercaseWord + "([^a-zA-Z]|$)",
-                       std::regex_constants::icase);
-  if (std::regex_search(str.str(), wordRegex))
-    return true;
+
+  // If find lowercase word
+  std::vector<boost::iterator_range<std::string::const_iterator>>
+      LowercaseMatches;
+  boost::find_all(LowercaseMatches, str, lowercaseWord);
+  for (auto m : LowercaseMatches) {
+    size_t idx = m.begin() - str.begin();
+    if (idx != 0 and isalpha(str[idx - 1])) {
+      return false;
+    }
+    size_t nextCharIdx = idx + lowercaseWord.length();
+    return nextCharIdx >= str.length() ? true /* Achieve end */
+                                       : !islower(str[nextCharIdx]);
+  }
 
   // get capitalized word
   std::string capitalWord = lowercaseWord;
   capitalWord[0] = std::toupper(capitalWord[0]);
-  // Camel case naming
-  std::regex capitalWordRegex("(^" + lowercaseWord + "|" + capitalWord +
-                              ")([^a-z]|$)");
-  return std::regex_search(str.str(), capitalWordRegex);
+
+  // If find capital word
+  std::vector<boost::iterator_range<std::string::const_iterator>>
+      CapitalMatches;
+  boost::find_all(CapitalMatches, str, capitalWord);
+  for (auto m : CapitalMatches) {
+    size_t idx = m.begin() - str.begin();
+    size_t nextCharIdx = idx + capitalWord.length();
+    return nextCharIdx >= str.length() ? true /* Achieve end */
+                                       : !islower(str[nextCharIdx]);
+  }
+
+  // Can't find
+  return false;
 }
 
 bool SensitiveLeakSanitizer::isEncryptionFunction(Function *F) {
@@ -498,7 +552,7 @@ bool SensitiveLeakSanitizer::isSensitive(StringRef str) {
                        }) != plaintextKeywords.end() ||
           std::find_if(exactSecretKeywords.begin(), exactSecretKeywords.end(),
                        [&](std::string keyword) {
-                         return ContainWordExactly(str, keyword);
+                         return ContainWordExactly(str.str(), keyword);
                        }) != exactSecretKeywords.end()) &&
          not(std::find_if(ciphertextKeywords.begin(), ciphertextKeywords.end(),
                           [&](std::string keyword) {
@@ -507,7 +561,7 @@ bool SensitiveLeakSanitizer::isSensitive(StringRef str) {
              std::find_if(exactCiphertextKeywords.begin(),
                           exactCiphertextKeywords.end(),
                           [&](std::string keyword) {
-                            return ContainWordExactly(str, keyword);
+                            return ContainWordExactly(str.str(), keyword);
                           }) != exactCiphertextKeywords.end());
 }
 
@@ -518,7 +572,7 @@ bool SensitiveLeakSanitizer::mayBeSensitive(StringRef str) {
                       }) != inputKeywords.end() ||
          std::find_if(exactInputKeywords.begin(), exactInputKeywords.end(),
                       [&](std::string keyword) {
-                        return ContainWordExactly(str, keyword);
+                        return ContainWordExactly(str.str(), keyword);
                       }) != exactInputKeywords.end();
 }
 
@@ -611,7 +665,9 @@ void SensitiveLeakSanitizer::collectAndPoisonSensitiveObj() {
           }
         }
         for (auto argNo : argNoVec) {
-          for (auto objPN : getNonPtrObjPNs(CI->getArgOperand(argNo))) {
+          std::unordered_set<SVF::ObjVar *> _objPNs;
+          getNonPtrObjPNs(_objPNs, CI->getArgOperand(argNo));
+          for (auto objPN : _objPNs) {
             auto objName = getObjMeaningfulName(objPN);
             if (objName != "") {
               auto sensitiveLevel = getSensitiveLevel(objName);
@@ -712,6 +768,11 @@ void SensitiveLeakSanitizer::updateSVFExtAPI() {
 void SensitiveLeakSanitizer::initSVF() {
   collectHeapAllocators();
   updateSVFExtAPI();
+
+  dbgs() << "Start SVF analysis\n";
+  struct timeval svf_start, svf_end, svf_spend;
+  gettimeofday(&svf_start, NULL);
+
   svfModule = SVF::LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(*M);
   svfModule->buildSymbolTableInfo();
   SVF::SVFIRBuilder builder;
@@ -721,6 +782,15 @@ void SensitiveLeakSanitizer::initSVF() {
   ander = SVF::AndersenWaveDiff::createAndersenWaveDiff(pag);
   callgraph = ander->getPTACallGraph();
   objSym = &SVF::SymbolTableInfo::SymbolInfo()->objSyms();
+
+  dbgs() << "End of SVF analysis\n";
+  gettimeofday(&svf_end, NULL);
+  timersub(&svf_end, &svf_start, &svf_spend);
+  std::stringstream ss;
+  ss << "Time elapsed(SVF): " << (long int)svf_spend.tv_sec << "."
+     << std::setfill('0') << std::setw(6) << (long int)svf_spend.tv_usec
+     << " seconds\n";
+  dbgs() << ss.str();
 }
 
 void SensitiveLeakSanitizer::initializeCallbacks() {
@@ -804,8 +874,8 @@ bool SensitiveLeakSanitizer::isHeapAllocatorWrapper(Function &F) {
     if (calleeFunc && heapAllocators.count(calleeFunc)) {
       heapPtrs.push_back(CallI);
     }
-    // Indirect call, then find if the function pointer is a global pointer that
-    // point to heap allocator
+    // Indirect call, then find if the function pointer is a global pointer
+    // that point to heap allocator
     else if (calleeFunc == nullptr) {
       if (LoadInst *LoadI = dyn_cast<LoadInst>(calleeValue)) {
         // TODO: deal with uninitialized heapAllocatorGlobalPtr
@@ -956,9 +1026,9 @@ SensitiveLeakSanitizer::getDirectAndIndirectCalledFunction(CallInst *CI) {
   Function *callee = getCalledFunctionStripPointerCast(CI);
   if (callee == nullptr) {
     // it's an indirect call
-    for (auto indCall : callgraph->getIndCallMap()) {
+    for (auto &indCall : callgraph->getIndCallMap()) {
       if (indCall.first->getCallSite() == CI) {
-        for (auto svfCallee : indCall.second) {
+        for (auto &svfCallee : indCall.second) {
           calleeVec.push_back(svfCallee->getLLVMFun());
         }
       }
@@ -1175,9 +1245,13 @@ void SensitiveLeakSanitizer::PoisonRetShadow(Value *src, Value *isPoisoned,
 }
 
 void SensitiveLeakSanitizer::addPtObj2WorkList(Value *ptr) {
-  assert(ptr->getType()->isPointerTy() && getPointerLevel(ptr) == 1 &&
-         not isa<Function>(ptr));
-  for (auto objPN : getNonPtrObjPNs(ptr)) {
+  assert(ptr->getType()->isPointerTy() && not isa<Function>(ptr));
+  if (getPointerLevel(ptr) != 1) {
+    return;
+  }
+  std::unordered_set<SVF::ObjVar *> _objPNs;
+  getNonPtrObjPNs(_objPNs, ptr);
+  for (auto objPN : _objPNs) {
     if (ProcessedList.count(objPN) == 0)
       WorkList.emplace(objPN);
   }
@@ -1190,12 +1264,30 @@ void SensitiveLeakSanitizer::ShallowUnpoisonStackObj(SVF::ObjVar *objPN) {
         dyn_cast<AllocaInst>(const_cast<Value *>(objPN->getValue()));
     // stack object must be a AllocInst
     if (AI && shallowUnpoisonedStackObjs.count(AI) == 0) {
-      for (ReturnInst *RI :
-           SGXSanInstVisitor::visitFunction(*(AI->getFunction()))
-               .ReturnInstVec) {
+      SmallVector<Instruction *> AIDiePoints;
+      auto &visitInfos = SGXSanInstVisitor::visitFunction(*(AI->getFunction()));
+      if (AI->isStaticAlloca()) {
+        for (ReturnInst *RI : visitInfos.ReturnInstVec) {
+          AIDiePoints.push_back(RI);
+        }
+      } else {
+        for (auto end : visitInfos.AILifeTimeEnd[AI]) {
+          AIDiePoints.push_back(end);
+        }
+        if (AIDiePoints.size() == 0) {
+          // C API alloca
+          // Since it maybe in branch, we can't unpoison it at function end
+          // without prior knowledge about branch condition
+          auto BBTerm = AI->getParent()->getTerminator();
+          assert(BBTerm);
+          AIDiePoints.push_back(BBTerm);
+        }
+      }
+
+      for (Instruction *diePt : AIDiePoints) {
         assert(AI->getAllocatedType()->isSized() && !AI->isSwiftError());
-        Value *objSize = getAllocaSizeInBytes(AI, RI);
-        IRBuilder<> IRB(RI);
+        Value *objSize = getAllocaSizeInBytes(AI, diePt);
+        IRBuilder<> IRB(diePt);
         IRB.CreateCall(ShallowPoisonShadow,
                        {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()), objSize,
                         IRB.getInt8(kSGXSanSensitiveObjData),
@@ -1210,7 +1302,9 @@ void SensitiveLeakSanitizer::ShallowUnpoisonStackObj(Value *value) {
   assert(value);
   if (isa<Function>(value))
     return;
-  for (auto objPN : getTargetObj(value)) {
+  std::unordered_set<SVF::ObjVar *> objVars;
+  getTargetObj(objVars, value);
+  for (auto objPN : objVars) {
     // inter-function situation may have multi point-tos
     ShallowUnpoisonStackObj(objPN);
   }
@@ -1328,6 +1422,9 @@ void SensitiveLeakSanitizer::PoisonMemsetDst(Value *src, Value *isSrcPoisoned,
 }
 
 void SensitiveLeakSanitizer::propagateShadow(Value *src) {
+  if (src->getType()->isPointerTy()) {
+    return;
+  }
   // src maybe 'Function Argument'/LoadInst/'Return Value of CallInst'
   for (User *srcUser : getNonCastUsers(src)) {
     if (isa<StoreInst>(srcUser) || isa<CallInst>(srcUser) ||
@@ -1375,9 +1472,9 @@ void SensitiveLeakSanitizer::propagateShadow(Value *src) {
       } else if (ReturnInst *RI = dyn_cast<ReturnInst>(srcUser)) {
         assert(stripCast(RI->getOperand(0)) == src);
         Function *callee = RI->getFunction();
-        for (auto callInstToCallGraphEdges :
+        for (auto &callInstToCallGraphEdges :
              callgraph->getCallInstToCallGraphEdgesMap()) {
-          for (auto callGraphEdge : callInstToCallGraphEdges.second) {
+          for (auto &callGraphEdge : callInstToCallGraphEdges.second) {
             if (callGraphEdge->getDstNode()->getFunction()->getLLVMFun() ==
                 callee) {
               CallInst *callerCI = cast<CallInst>(const_cast<Instruction *>(

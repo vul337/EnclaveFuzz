@@ -117,7 +117,7 @@ struct VisitInfo {
   SmallVector<Instruction *> BroadReturnInstVec;
   SmallVector<CallInst *> CallInstVec;
   std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>>
-      AILifeTimeStart;
+      AILifeTimeStart, AILifeTimeEnd;
 };
 
 class SGXSanInstVisitor {
@@ -137,13 +137,21 @@ public:
           info.CallInstVec.push_back(CallI);
 
           auto IntrinsicI = dyn_cast<IntrinsicInst>(CallI);
-          if (IntrinsicI &&
-              IntrinsicI->getIntrinsicID() == Intrinsic::lifetime_start) {
-            // it's a lifetime_start IntrinsicInst
-            AllocaInst *AllocaI =
-                findAllocaForValue(IntrinsicI->getArgOperand(1), true);
-            if (AllocaI)
-              info.AILifeTimeStart[AllocaI].push_back(IntrinsicI);
+          if (IntrinsicI) {
+            auto IntrinsicID = IntrinsicI->getIntrinsicID();
+            if (IntrinsicID == Intrinsic::lifetime_start) {
+              // it's a lifetime_start IntrinsicInst
+              AllocaInst *AllocaI =
+                  findAllocaForValue(IntrinsicI->getArgOperand(1), true);
+              if (AllocaI)
+                info.AILifeTimeStart[AllocaI].push_back(IntrinsicI);
+            } else if (IntrinsicID == Intrinsic::lifetime_end) {
+              // it's a lifetime_end IntrinsicInst
+              AllocaInst *AllocaI =
+                  findAllocaForValue(IntrinsicI->getArgOperand(1), true);
+              if (AllocaI)
+                info.AILifeTimeEnd[AllocaI].push_back(IntrinsicI);
+            }
           }
         }
       }
@@ -158,6 +166,9 @@ public:
         auto &BBVisitInfo = visitBasicBlock(BB);
         for (auto pair : BBVisitInfo.AILifeTimeStart) {
           FVisitInfo.AILifeTimeStart[pair.first].append(pair.second);
+        }
+        for (auto pair : BBVisitInfo.AILifeTimeEnd) {
+          FVisitInfo.AILifeTimeEnd[pair.first].append(pair.second);
         }
         FVisitInfo.BroadReturnInstVec.append(BBVisitInfo.BroadReturnInstVec);
         FVisitInfo.ReturnInstVec.append(BBVisitInfo.ReturnInstVec);
@@ -174,6 +185,9 @@ public:
         auto &FVisitInfo = visitFunction(F);
         for (auto pair : FVisitInfo.AILifeTimeStart) {
           MVisitInfo.AILifeTimeStart[pair.first].append(pair.second);
+        }
+        for (auto pair : FVisitInfo.AILifeTimeEnd) {
+          MVisitInfo.AILifeTimeEnd[pair.first].append(pair.second);
         }
         MVisitInfo.BroadReturnInstVec.append(FVisitInfo.BroadReturnInstVec);
         MVisitInfo.ReturnInstVec.append(FVisitInfo.ReturnInstVec);

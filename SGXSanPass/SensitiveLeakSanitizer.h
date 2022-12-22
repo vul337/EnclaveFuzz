@@ -66,12 +66,14 @@ public:
   void propagateShadowInMemTransfer(CallInst *CI, Instruction *insertPoint,
                                     Value *destPtr, Value *srcPtr,
                                     Value *dstSize, Value *copyCnt);
-  std::unordered_set<SVF::ObjVar *> getNonPtrObjPNs(SVF::ObjVar *objPN);
-  std::unordered_set<SVF::ObjVar *> getNonPtrObjPNs(Value *value);
+  void getNonPtrObjPNs(std::unordered_set<SVF::ObjVar *> &objPNs,
+                       SVF::ObjVar *objPN, size_t level = 0);
+  void getNonPtrObjPNs(std::unordered_set<SVF::ObjVar *> &dstObjPNs,
+                       Value *value);
   Value *instrumentPoisonCheck(Value *src);
   Value *isPtrPoisoned(Instruction *insertPoint, Value *ptr,
                        Value *size = nullptr);
-  static int getPointerLevel(const Value *ptr);
+  static unsigned int getPointerLevel(const Value *ptr);
   void PoisonCIOperand(Value *src, Value *isPoisoned, CallInst *CI,
                        int operandPosition);
   void PoisonSI(Value *src, Value *isPoisoned, StoreInst *SI);
@@ -83,7 +85,7 @@ public:
   static std::string extractAnnotation(Value *annotationStrVal);
   static bool isSecureVersionMemTransferCI(CallInst *CI);
   static bool ContainWord(StringRef str, const std::string word);
-  static bool ContainWordExactly(StringRef str, const std::string word);
+  static bool ContainWordExactly(std::string str, const std::string word);
   static bool isEncryptionFunction(Function *F);
   void RTPoisonSensitiveGV();
   void initializeCallbacks();
@@ -130,7 +132,7 @@ public:
 
   /// \retval 1) If \p value is just an object, then only this ObjVar will
   /// return \retval 2) Otherwise, objects this \p value point to will return
-  std::unordered_set<SVF::ObjVar *> getTargetObj(Value *value);
+  void getTargetObj(std::unordered_set<SVF::ObjVar *> &objVars, Value *value);
 
   Value *CheckIsPtrInEnclave(Value *ptr, Value *size, Instruction *insertPt,
                              const DebugLoc *dbgLoc);
@@ -207,5 +209,6 @@ private:
   size_t propagateCnt = 0;
   std::string ExtAPIJsonFile;
   ShadowMapping Mapping;
+  static std::regex nonAlphanumeric, nonBlank;
 };
 } // namespace llvm
