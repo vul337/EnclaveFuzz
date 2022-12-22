@@ -66,10 +66,9 @@ public:
   void propagateShadowInMemTransfer(CallInst *CI, Instruction *insertPoint,
                                     Value *destPtr, Value *srcPtr,
                                     Value *dstSize, Value *copyCnt);
-  void getNonPtrObjPNs(std::unordered_set<SVF::ObjVar *> &objPNs,
-                       SVF::ObjVar *objPN, size_t level = 0);
-  void getNonPtrObjPNs(std::unordered_set<SVF::ObjVar *> &dstObjPNs,
-                       Value *value);
+  void getNonPtrObjPNs(std::set<SVF::ObjVar *> &objPNs, SVF::ObjVar *objPN,
+                       size_t level = 0);
+  void getNonPtrObjPNs(std::set<SVF::ObjVar *> &dstObjPNs, Value *value);
   Value *instrumentPoisonCheck(Value *src);
   Value *isPtrPoisoned(Instruction *insertPoint, Value *ptr,
                        Value *size = nullptr);
@@ -132,7 +131,7 @@ public:
 
   /// \retval 1) If \p value is just an object, then only this ObjVar will
   /// return \retval 2) Otherwise, objects this \p value point to will return
-  void getTargetObj(std::unordered_set<SVF::ObjVar *> &objVars, Value *value);
+  void getTargetObj(std::set<SVF::ObjVar *> &objVars, Value *value);
 
   Value *CheckIsPtrInEnclave(Value *ptr, Value *size, Instruction *insertPt,
                              const DebugLoc *dbgLoc);
@@ -204,7 +203,7 @@ private:
       exactCiphertextKeywords = {"enc", "encrypt", "seal", "cipher"},
       inputKeywords = {"source", "input"}, exactInputKeywords = {"src", "in"},
       exactSecretKeywords = {"key", "dec"};
-  std::map<std::string, DICompositeType *> DICompositeTypeMap;
+  std::unordered_map<std::string, DICompositeType *> DICompositeTypeMap;
   std::unordered_set<DIType *> processedDITypes;
   size_t propagateCnt = 0;
   std::string ExtAPIJsonFile;

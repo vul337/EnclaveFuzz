@@ -307,8 +307,8 @@ unsigned int SensitiveLeakSanitizer::getPointerLevel(const Value *ptr) {
   return level;
 }
 
-void SensitiveLeakSanitizer::getTargetObj(
-    std::unordered_set<SVF::ObjVar *> &objVars, Value *value) {
+void SensitiveLeakSanitizer::getTargetObj(std::set<SVF::ObjVar *> &objVars,
+                                          Value *value) {
   if (objSym->find(SVF::SVFUtil::getGlobalRep(value)) != objSym->end()) {
     objVars.emplace(
         cast<SVF::ObjVar>(pag->getGNode(pag->getObjectNode(value))));
@@ -319,13 +319,13 @@ void SensitiveLeakSanitizer::getTargetObj(
   }
 }
 
-void SensitiveLeakSanitizer::getNonPtrObjPNs(
-    std::unordered_set<SVF::ObjVar *> &dstObjPNs, Value *value) {
+void SensitiveLeakSanitizer::getNonPtrObjPNs(std::set<SVF::ObjVar *> &dstObjPNs,
+                                             Value *value) {
   assert(value);
   if (isa<Function>(value))
     return;
 
-  std::unordered_set<SVF::ObjVar *> objVars;
+  std::set<SVF::ObjVar *> objVars;
   getTargetObj(objVars, value);
   for (auto objPN : objVars) {
     getNonPtrObjPNs(dstObjPNs, objPN);
@@ -333,9 +333,8 @@ void SensitiveLeakSanitizer::getNonPtrObjPNs(
   return;
 }
 
-void SensitiveLeakSanitizer::getNonPtrObjPNs(
-    std::unordered_set<SVF::ObjVar *> &objPNs, SVF::ObjVar *objPN,
-    size_t level) {
+void SensitiveLeakSanitizer::getNonPtrObjPNs(std::set<SVF::ObjVar *> &objPNs,
+                                             SVF::ObjVar *objPN, size_t level) {
   static thread_local std::unordered_set<SVF::ObjVar *>
       AlreadyCheckNonPtrObjPNs;
   if (level == 0) {
@@ -380,7 +379,7 @@ void SensitiveLeakSanitizer::getNonPtrObjPNs(
 }
 
 void SensitiveLeakSanitizer::pushSensitiveObj(Value *annotatedPtr) {
-  std::unordered_set<SVF::ObjVar *> objSet;
+  std::set<SVF::ObjVar *> objSet;
   getNonPtrObjPNs(objSet, annotatedPtr);
   assert(objSet.size() <= 1);
   for (auto obj : objSet) {
@@ -505,7 +504,7 @@ DICompositeType *
 SensitiveLeakSanitizer::getDICompositeType(StructType *structTy) {
   if (structTy == nullptr)
     return nullptr;
-  std::regex structPrefix("^struct\\.(.*)");
+  static std::regex structPrefix("^struct\\.(.*)");
   std::smatch match;
   std::string structName = structTy->getName().str();
   if (std::regex_search(structName, match, structPrefix)) {
@@ -665,7 +664,7 @@ void SensitiveLeakSanitizer::collectAndPoisonSensitiveObj() {
           }
         }
         for (auto argNo : argNoVec) {
-          std::unordered_set<SVF::ObjVar *> _objPNs;
+          std::set<SVF::ObjVar *> _objPNs;
           getNonPtrObjPNs(_objPNs, CI->getArgOperand(argNo));
           for (auto objPN : _objPNs) {
             auto objName = getObjMeaningfulName(objPN);
@@ -1249,7 +1248,7 @@ void SensitiveLeakSanitizer::addPtObj2WorkList(Value *ptr) {
   if (getPointerLevel(ptr) != 1) {
     return;
   }
-  std::unordered_set<SVF::ObjVar *> _objPNs;
+  std::set<SVF::ObjVar *> _objPNs;
   getNonPtrObjPNs(_objPNs, ptr);
   for (auto objPN : _objPNs) {
     if (ProcessedList.count(objPN) == 0)
@@ -1302,7 +1301,7 @@ void SensitiveLeakSanitizer::ShallowUnpoisonStackObj(Value *value) {
   assert(value);
   if (isa<Function>(value))
     return;
-  std::unordered_set<SVF::ObjVar *> objVars;
+  std::set<SVF::ObjVar *> objVars;
   getTargetObj(objVars, value);
   for (auto objPN : objVars) {
     // inter-function situation may have multi point-tos
