@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import sys
+import re
 import os
 import argparse
 import subprocess
@@ -25,12 +25,13 @@ def main():
                 pass
 
     res = subprocess.run(
-        ["nm", "--defined-only", object_abs], capture_output=True)
+        ["nm", "-C", "--defined-only", object_abs], capture_output=True)
     funcs = []
     for line in res.stdout.decode("utf-8").splitlines():
-        cols = line.split()
-        if cols[1] == "T" or cols[1] == "t":
-            funcs.append(cols[2])
+        match = re.match(r"\w+\s+([a-zA-Z])\s+(.*)", line)
+        assert match
+        if match.group(1) == "T" or match.group(1) == "t":
+            funcs.append(match.group(2))
 
     target_json[args.object] = funcs
     with open(output_abs, "w") as target_file:
