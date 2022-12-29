@@ -819,41 +819,49 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
   // Declare the supported options.
   po::options_description desc("LibFuzzerCallback's inner options");
-  desc.add_options()("inner_help", "produce help message")(
-      "cb_enclave_file_name",
-      po::value<std::string>(&ClEnclaveFileName)
-          ->default_value("enclave.signed.so"),
-      "Name of target Enclave file")(
-      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(32),
-      "Max count of elements for pointer which size is unknown or not fixed")(
-      "cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(128),
-      "Max size of pointer element")(
-      "cb_max_str_len",
-      po::value<size_t>(&ClMaxStringLength)->default_value(128),
-      "Max length of string")("cb_filter_out", po::value<std::string>(),
-                              "Specified ECalls that we don't test")(
-      "sgxfuzz_print_ecalls", "show all ecalls valid in this Enclave")(
-      "sgxfuzz_test_one", po::value<int>(), "test only one API user specified")(
-      "sgxfuzz_test_user", po::value<std::vector<std::string>>()->multitoken(),
-      "test a number of APIs user specified")(
-      "cb_log_level", po::value<int>(&ClUsedLogLevel)->default_value(2),
-      "0-Always, 1-Error, 2-Warning(Default), 3-Debug, 4-Trace")(
-      "cb_provide_nullptr",
-      po::value<bool>(&ClProvideNullPointer)->default_value(true),
-      "Provide NULL for fuzzed pointer parameter")(
+  auto add_opt = desc.add_options();
+  add_opt("cb_help", "produce help message");
+  add_opt("cb_enclave_file_name",
+          po::value<std::string>(&ClEnclaveFileName)
+              ->default_value("enclave.signed.so"),
+          "Name of target Enclave file");
+  add_opt(
+      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(8),
+      "Max count of elements for pointer which size is unknown or not fixed, "
+      "if set too large, multi-level pointer will consume a large memory");
+  add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(128),
+          "Max size of pointer element");
+  add_opt("cb_max_str_len",
+          po::value<size_t>(&ClMaxStringLength)->default_value(128),
+          "Max length of string");
+  add_opt("cb_filter_out", po::value<std::string>(),
+          "Specified ECalls that we don't test");
+  add_opt("sgxfuzz_print_ecalls", "show all ecalls valid in this Enclave");
+  add_opt("sgxfuzz_test_one", po::value<int>(),
+          "test only one API user specified");
+  add_opt("sgxfuzz_test_user",
+          po::value<std::vector<std::string>>()->multitoken(),
+          "test a number of APIs user specified");
+  add_opt("cb_log_level", po::value<int>(&ClUsedLogLevel)->default_value(2),
+          "0-Always, 1-Error, 2-Warning(Default), 3-Debug, 4-Trace");
+  add_opt("cb_provide_nullptr",
+          po::value<bool>(&ClProvideNullPointer)->default_value(true),
+          "Provide NULL for fuzzed pointer parameter");
+  add_opt(
       "cb_always_mutate", po::value<bool>(&ClAlwaysMuate)->default_value(false),
       "We will directly goto mutation stage when lack of params, and at the "
       "mutation stage, whether we mutate params already exist (but don't "
-      "mutate params used to indicate size/count)")(
+      "mutate params used to indicate size/count)");
+  add_opt(
       "cb_provide_nullptr_probability",
       po::value<double>(&ClProvideNullPointerProbability)->default_value(0.01),
-      "The minimum granularity is 0.01 (1%)")(
-      "cb_user_check_size",
-      po::value<size_t>(&ClUserCheckSize)->default_value(4096),
-      "Specify prepared data size for user_check pointer")(
-      "cb_return0_probability",
-      po::value<double>(&ClReturn0Probability)->default_value(0.01),
       "The minimum granularity is 0.01 (1%)");
+  add_opt("cb_user_check_size",
+          po::value<size_t>(&ClUserCheckSize)->default_value(4096),
+          "Specify prepared data size for user_check pointer");
+  add_opt("cb_return0_probability",
+          po::value<double>(&ClReturn0Probability)->default_value(0.01),
+          "The minimum granularity is 0.01 (1%)");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
