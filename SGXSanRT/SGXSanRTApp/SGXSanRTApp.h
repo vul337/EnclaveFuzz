@@ -71,7 +71,8 @@ enum log_level {
 #define USED_LOG_LEVEL LOG_LEVEL_WARNING
 #endif
 
-void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
+extern "C" void sgxsan_log(log_level ll, bool with_prefix, const char *fmt,
+                           ...);
 
 /// have prefix in output
 #define log_always(...) sgxsan_log(LOG_LEVEL_ALWAYS, true, __VA_ARGS__)
