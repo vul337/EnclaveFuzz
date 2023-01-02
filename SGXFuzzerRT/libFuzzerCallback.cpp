@@ -1,4 +1,6 @@
 #include "libFuzzerCallback.h"
+#include "RandPool.h"
+#include <assert.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <chrono>
@@ -13,6 +15,7 @@
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <ostream>
+#include <random>
 #include <regex>
 #include <setjmp.h>
 #include <stdio.h>
@@ -25,6 +28,8 @@
 
 using ordered_json = nlohmann::ordered_json;
 namespace po = boost::program_options;
+
+RandPool gRandPool;
 
 sgx_enclave_id_t global_eid = 0;
 std::string ClEnclaveFileName;
@@ -113,9 +118,8 @@ enum FuzzDataTy {
   FUZZ_SIZE,
   FUZZ_COUNT,
   FUZZ_RET,
-  FUZZ_BOOL,
+  FUZZ_BOOL_SET_NULL,
   FUZZ_SEQ,
-  FUZZ_USER_CHECK_SIZE,
 };
 
 enum DataOp {
@@ -204,14 +208,11 @@ public:
       size_t maxValue = req.dataType == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
       sgxfuzz_assert(req.size <= sizeof(size_t));
       size_t newData;
-      fillRand(&newData, sizeof(size_t));
+      // assume little endian
+      fillRand(&newData, req.size);
       newData %= (maxValue + 1);
       mutatorJson[JSonPtr / "Data"] = newData;
-      break;
-    }
-    case FUZZ_USER_CHECK_SIZE: {
-      sgxfuzz_assert(req.size <= sizeof(size_t));
-      mutatorJson[JSonPtr / "Data"] = ClUserCheckSize;
+      mutatorJson[JSonPtr / "ByteNum"] = req.size;
       break;
     }
     case FUZZ_RET:
@@ -219,7 +220,9 @@ public:
     case FUZZ_DATA: {
       uint8_t newData[req.size];
       memset(newData, 0, req.size);
-      bool return0 = (rand() % 100) < (ClReturn0Probability * 100);
+      std::bernoulli_distribution return0dist(ClReturn0Probability);
+      std::mt19937 g(std::random_device{}());
+      bool return0 = return0dist(g);
       if (req.dataType == FUZZ_RET and return0) {
         // Do nothing, since already set 0
       } else {
@@ -229,9 +232,11 @@ public:
           EncodeBase64(std::vector<uint8_t>(newData, newData + req.size));
       break;
     }
-    case FUZZ_BOOL: {
-      int randValue = rand() % 100;
-      bool result = randValue < (ClProvideNullPointerProbability * 100);
+    case FUZZ_BOOL_SET_NULL: {
+      std::bernoulli_distribution provideNullPtrDist(
+          ClProvideNullPointerProbability);
+      std::mt19937 g(std::random_device{}());
+      bool result = provideNullPtrDist(g);
       mutatorJson[JSonPtr / "Data"] = result;
       break;
     }
@@ -239,11 +244,8 @@ public:
       ordered_json::array_t callSeq(req.size);
       // array [0,req.size)
       std::iota(callSeq.begin(), callSeq.end(), 0);
-      // Fisher–Yates shuffle
-      for (int i = callSeq.size() - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
-        std::swap(callSeq[i], callSeq[j]);
-      }
+      std::shuffle(callSeq.begin(), callSeq.end(),
+                   std::mt19937{std::random_device{}()});
       mutatorJson[JSonPtr / "Data"] = callSeq;
       break;
     }
@@ -338,19 +340,12 @@ public:
         if (canChangeSize) {
           size_t maxValue = dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
           size_t data = mutatorJson[ptr / "Data"];
-          switch (rand() % 2) {
-          case 0x0:
-            data = (data % maxValue) + 1;
-            break;
-          case 0x1:
-            break;
-          }
+          size_t byteNum = mutatorJson[ptr / "ByteNum"];
+          // assume little endian
+          LLVMFuzzerMutate((uint8_t *)&data, byteNum, byteNum);
+          data %= (maxValue + 1);
           mutatorJson[ptr / "Data"] = data;
         }
-        break;
-      }
-      case FUZZ_USER_CHECK_SIZE: {
-        /* Do nothing */
         break;
       }
       case FUZZ_ARRAY:
@@ -359,7 +354,9 @@ public:
         auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
         uint8_t cByteArr[byteArr.size()];
         memcpy(cByteArr, byteArr.data(), byteArr.size());
-        bool return0 = (rand() % 100) < (ClReturn0Probability * 100);
+        std::bernoulli_distribution return0dist(ClReturn0Probability);
+        std::mt19937 g(std::random_device{}());
+        bool return0 = return0dist(g);
         if (dataTy == FUZZ_RET and return0) {
           memset(cByteArr, 0, byteArr.size());
         } else {
@@ -370,19 +367,18 @@ public:
             std::vector<uint8_t>(cByteArr, cByteArr + byteArr.size()));
         break;
       }
-      case FUZZ_BOOL: {
-        int randValue = rand() % 100;
-        bool result = randValue < (ClProvideNullPointerProbability * 100);
+      case FUZZ_BOOL_SET_NULL: {
+        std::bernoulli_distribution provideNullPtrDist(
+            ClProvideNullPointerProbability);
+        std::mt19937 g(std::random_device{}());
+        bool result = provideNullPtrDist(g);
         mutatorJson[ptr / "Data"] = result;
         break;
       }
       case FUZZ_SEQ: {
         ordered_json::array_t callSeq = mutatorJson[ptr / "Data"];
-        // Fisher–Yates shuffle
-        for (int i = callSeq.size() - 1; i > 0; i--) {
-          int j = rand() % (i + 1);
-          std::swap(callSeq[i], callSeq[j]);
-        }
+        std::shuffle(callSeq.begin(), callSeq.end(),
+                     std::mt19937{std::random_device{}()});
         mutatorJson[ptr / "Data"] = callSeq;
         break;
       }
@@ -452,6 +448,7 @@ public:
         sgxfuzz_assert(reqQueue.empty());
         for (auto paramReq : dq.param2Reqs) {
           auto req = paramReq.second;
+          assert(paramReq.first == req.StrAsParamID);
           nlohmann::ordered_json::json_pointer jsonPtr("/" + req.StrAsParamID);
           switch (req.op) {
           case DATA_CREATE: {
@@ -504,23 +501,32 @@ public:
     } else if (reqQueue.size() > 1) {
       abort();
     }
-    log_trace("reqQueue add %s %s\n", bjDataSha1.c_str(),
-              req.StrAsParamID.c_str());
     DataAndReq &dq = reqQueue[bjDataSha1];
     dq.data = bjData;
+    assert(dq.param2Reqs.count(req.StrAsParamID) == 0);
     dq.param2Reqs[req.StrAsParamID] = req;
   }
 
   template <class T>
   void _getString(uint8_t *&dst, ordered_json &consumerJson,
                   ordered_json::json_pointer ptr) {
-    std::vector<uint8_t> data = DecodeBase64(std::string(consumerJson[ptr]));
-    if (dst == nullptr) {
-      dst = (uint8_t *)managedMalloc(data.size());
+    if (consumerJson[ptr].is_null()) {
+      // No data prepared, get from fixed random pool
+      size_t givedStrLen = ClMaxStringLength;
+      if (dst == nullptr) {
+        dst = (uint8_t *)managedMalloc((givedStrLen + 1) * sizeof(T));
+      }
+      gRandPool.getBytes(dst, givedStrLen * sizeof(T));
+      ((T *)dst)[givedStrLen] = 0;
+    } else {
+      std::vector<uint8_t> data = DecodeBase64(std::string(consumerJson[ptr]));
+      if (dst == nullptr) {
+        dst = (uint8_t *)managedMalloc(data.size());
+      }
+      memcpy(dst, data.data(), data.size());
+      sgxfuzz_assert(data.size() % sizeof(T) == 0 and
+                     (((T *)dst)[data.size() / sizeof(T) - 1] == '\0'));
     }
-    memcpy(dst, data.data(), data.size());
-    sgxfuzz_assert(data.size() % sizeof(T) == 0 and
-                   (((T *)dst)[data.size() / sizeof(T) - 1] == '\0'));
   }
 
   /// @brief get byte array from \c ConsumerJSon, and save it to \p dst. If no
@@ -555,83 +561,95 @@ public:
       // Send request to mutator that we need data for current ID
       SendRequest(consumerData.bjdata,
                   {strAsParamID, DATA_CREATE, byteArrLen, dataTy});
-      std::stringstream ss;
-      ss << "Need mutator create data for current [" << strAsParamID << "]\n";
-      throw std::runtime_error(ss.str());
+      log_debug("Need mutator create data for current [%s]\n",
+                strAsParamID.c_str());
     } else {
       // Already prepared data for current ID
-      FuzzDataTy dataTy = consumerJson[consumerJsonPtr / "DataType"];
+      sgxfuzz_assert(consumerJson[consumerJsonPtr / "DataType"] == dataTy);
       log_trace("Get JSON item [%s]\n", strAsParamID.c_str());
       dump(LOG_LEVEL_TRACE, consumerJson[consumerJsonPtr]);
-      switch (dataTy) {
-      case FUZZ_ARRAY:
-      case FUZZ_DATA:
-      case FUZZ_RET: {
+    }
+    switch (dataTy) {
+    case FUZZ_ARRAY:
+    case FUZZ_DATA:
+    case FUZZ_RET: {
+      if (dst == nullptr) {
+        dst = (uint8_t *)managedMalloc(byteArrLen);
+      }
+      if (consumerJson[consumerJsonPtr].is_null()) {
+        // No data prepared, get from fixed random pool
+        gRandPool.getBytes(dst, byteArrLen);
+      } else {
         std::vector<uint8_t> data =
             DecodeBase64(std::string(consumerJson[consumerJsonPtr / "Data"]));
         size_t preparedDataSize = data.size();
+        memcpy(dst, data.data(), std::min(byteArrLen, preparedDataSize));
+        // Prepared data size may be more or less then needed
         if (preparedDataSize < byteArrLen) {
           size_t extraSizeNeeded = byteArrLen - preparedDataSize;
           // Send request to mutator that prepared data is not enough
           SendRequest(consumerData.bjdata,
                       {strAsParamID, DATA_EXPAND, extraSizeNeeded, dataTy});
-          std::stringstream ss;
-          ss << "Need mutator provide more data [" << extraSizeNeeded
-             << "] for current [" << strAsParamID << "]\n";
-          throw std::runtime_error(ss.str());
-        }
-        if (dst == nullptr) {
-          dst = (uint8_t *)managedMalloc(byteArrLen);
-        }
-        memcpy(dst, data.data(), byteArrLen);
-        if (preparedDataSize > byteArrLen) {
+          log_debug("Need mutator provide more data [%d] for current [%s]\n",
+                    extraSizeNeeded, strAsParamID.c_str());
+          // Get fixed random
+          gRandPool.getBytes(dst + preparedDataSize, extraSizeNeeded);
+        } else if (preparedDataSize > byteArrLen) {
           size_t sizeNeedReduced = preparedDataSize - byteArrLen;
           // Send request to mutator that prepared data is too much
           log_debug("Need mutator provide less data [%d] for current [%s]\n",
                     sizeNeedReduced, strAsParamID.c_str());
           SendRequest(consumerData.bjdata,
                       {strAsParamID, DATA_SHRINK, sizeNeedReduced, dataTy});
-          // we needn't early return in this situation, since we can only use
-          // partial prepared data, then there may be several requests with same
-          // DataID but different paramID in reqQueue
         }
-        break;
       }
-      case FUZZ_WSTRING: {
-        sgxfuzz_assert(byteArrLen == 0);
-        _getString<wchar_t>(dst, consumerJson, consumerJsonPtr / "Data");
-        break;
+      break;
+    }
+    case FUZZ_WSTRING: {
+      sgxfuzz_assert(byteArrLen == 0);
+      _getString<wchar_t>(dst, consumerJson, consumerJsonPtr / "Data");
+      break;
+    }
+    case FUZZ_STRING: {
+      sgxfuzz_assert(byteArrLen == 0);
+      _getString<char>(dst, consumerJson, consumerJsonPtr / "Data");
+      break;
+    }
+    case FUZZ_SIZE:
+    case FUZZ_COUNT: {
+      sgxfuzz_assert((byteArrLen <= sizeof(size_t)));
+      if (dst == nullptr) {
+        dst = (uint8_t *)managedMalloc(byteArrLen);
       }
-      case FUZZ_STRING: {
-        sgxfuzz_assert(byteArrLen == 0);
-        _getString<char>(dst, consumerJson, consumerJsonPtr / "Data");
-        break;
+      size_t data = 0;
+      if (consumerJson[consumerJsonPtr].is_null()) {
+        // No data prepared, get from fixed random pool
+        // assume little endian
+        gRandPool.getBytes(&data, byteArrLen);
+        size_t maxValue = dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
+        data %= (maxValue + 1);
+      } else {
+        data = consumerJson[consumerJsonPtr / "Data"];
       }
-      case FUZZ_SIZE:
-      case FUZZ_USER_CHECK_SIZE:
-      case FUZZ_COUNT: {
-        sgxfuzz_assert((byteArrLen <= sizeof(size_t)));
-        size_t data = consumerJson[consumerJsonPtr / "Data"];
-        if (dst == nullptr) {
-          dst = (uint8_t *)managedMalloc(byteArrLen);
-        }
-        memcpy(dst, &data, byteArrLen);
-        break;
+      memcpy(dst, &data, byteArrLen);
+      break;
+    }
+    case FUZZ_BOOL_SET_NULL: {
+      sgxfuzz_assert((byteArrLen == sizeof(bool)));
+      if (dst == nullptr) {
+        dst = (uint8_t *)managedMalloc(sizeof(bool));
       }
-      case FUZZ_BOOL: {
-        sgxfuzz_assert((byteArrLen == sizeof(bool)));
-        bool data = consumerJson[consumerJsonPtr / "Data"];
-        if (dst == nullptr) {
-          dst = (uint8_t *)managedMalloc(sizeof(bool));
-        }
-        *dst = data ? 1 : 0;
-        break;
+      if (consumerJson[consumerJsonPtr].is_null()) {
+        *dst = 0;
+      } else {
+        *dst = (bool)consumerJson[consumerJsonPtr / "Data"];
       }
-      default: {
-        sgxfuzz_error(true, "Unsupported FUZZ_XXX type\n");
-        break;
-      }
-      }
+      break;
+    }
+    default: {
+      sgxfuzz_error(true, "Unsupported FUZZ_XXX type\n");
+      break;
+    }
     }
     return dst;
   }
@@ -679,19 +697,13 @@ public:
     return std::vector<uint8_t>(byteArr, byteArr + decodeResult - equalSignCnt);
   }
 
-  size_t getUserCheckCount(char *cStrAsParamID) {
-    std::string strAsParamID =
-        std::string(cStrAsParamID) + "_getUserCheckCount";
-    size_t result;
-    getBytes(strAsParamID.c_str(), (uint8_t *)&result, sizeof(size_t),
-             FUZZ_USER_CHECK_SIZE);
-    return result;
-  }
+  size_t getUserCheckCount(char *cStrAsParamID) { return ClUserCheckSize; }
 
   bool hintSetNull(char *cStrAsParamID) {
     std::string strAsParamID = std::string(cStrAsParamID) + "_hintSetNull";
     bool result;
-    getBytes(strAsParamID.c_str(), (uint8_t *)&result, sizeof(bool), FUZZ_BOOL);
+    getBytes(strAsParamID.c_str(), (uint8_t *)&result, sizeof(bool),
+             FUZZ_BOOL_SET_NULL);
     return result;
   }
 
@@ -745,19 +757,21 @@ public:
     return managedStr2CStr(instanceID);
   }
 
-  std::vector<int> getCallSequence(size_t funcNum) {
+  void getCallSequence(std::vector<int> &intCallSeq, size_t funcNum) {
     auto &consumerJson = consumerData.json;
     if (consumerJson["CallSeq"].is_null()) {
       SendRequest(consumerData.bjdata,
                   {"CallSeq", DATA_CREATE, funcNum, FUZZ_SEQ});
-      throw std::runtime_error("Need Call Sequence Data");
+      log_debug("Need Call Sequence Data\n");
+      intCallSeq.resize(funcNum);
+      std::iota(intCallSeq.begin(), intCallSeq.end(), 0);
     } else {
+      sgxfuzz_assert(consumerJson["CallSeq"]["DataType"] == FUZZ_SEQ);
       ordered_json::array_t callSeq = consumerJson["CallSeq"]["Data"];
-      std::vector<int> intCallSeq;
+      intCallSeq.clear();
       for (auto seq : callSeq) {
         intCallSeq.push_back((int)seq);
       }
-      return intCallSeq;
     }
   }
 
@@ -790,7 +804,7 @@ void FuzzDataFactory::dump(log_level ll, ordered_json json,
   if (ll > ClUsedLogLevel)
     return;
   sgxfuzz_log(ll, false, "%s\n%s\n", jsonPtr.to_string().c_str(),
-              json[jsonPtr].dump(4));
+              json[jsonPtr].dump(4).c_str());
 }
 
 void ShowAllECalls() {
@@ -964,13 +978,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   }
 
   sgx_status_t ret;
-  static size_t emitTimes = 0, fullSucceedTimes = 0, succeedTimes = 0;
-  bool hasTest = false;
   std::vector<int> callSeq;
   /// Deserialize data to \c FuzzDataFactory::ConsumerJSon
   data_factory.deserializeToConsumerJson(Data, Size);
 
-  emitTimes++;
   // Initialize Enclave
   ret = sgx_create_enclave(ClEnclaveFileName.c_str(),
                            SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
@@ -981,12 +992,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   if (gFuzzerMode == TEST_ONE || gFuzzerMode == TEST_USER) {
     callSeq = gFuzzerSeq;
   } else {
-    try {
-      callSeq = data_factory.getCallSequence(sgx_fuzzer_ecall_num);
-    } catch (std::runtime_error const &e) {
-      log_debug("%s\n", e.what());
-      goto exit;
-    }
+    data_factory.getCallSequence(callSeq, sgx_fuzzer_ecall_num);
   }
   for (int i : callSeq) {
     sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
@@ -998,27 +1004,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
     log_trace("[TEST] ECall-%d: %s\n", i,
               sgx_fuzzer_ecall_wrapper_name_array[i]);
-    try {
-      ret = sgx_fuzzer_ecall_array[i]();
-    } catch (std::runtime_error const &e) {
-      log_debug("%s\n", e.what());
-      goto exit;
-    }
+    ret = sgx_fuzzer_ecall_array[i]();
     sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
                       ret != SGX_ERROR_ECALL_NOT_ALLOWED,
                   "[FAIL] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
-    hasTest = true;
   }
-  fullSucceedTimes++;
 
-exit:
   /// Clear \c FuzzDataFactory::ConsumerJSon and free temp buffer before leave
   /// current round
   data_factory.clearAtConsumerEnd();
-  if (hasTest)
-    succeedTimes++;
-  log_debug("FullSucceedTimes/SucceedTimes/EmitTimes=%ld/%ld/%ld\n",
-            fullSucceedTimes, succeedTimes, emitTimes);
   return 0;
 }
 

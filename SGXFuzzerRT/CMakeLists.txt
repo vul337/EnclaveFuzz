@@ -29,6 +29,7 @@ set(SOURCE
 include_directories(
     libFuzzer
     ../json/single_include
+    ${CMAKE_CURRENT_BINARY_DIR}/..
     ${LINUX_SGX_MINI}/common/inc)
 
 add_library(

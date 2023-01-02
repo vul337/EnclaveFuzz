@@ -47,9 +47,8 @@ enum GetByteType {
   FUZZ_SIZE,
   FUZZ_COUNT,
   FUZZ_RET,
-  FUZZ_BOOL,
+  FUZZ_BOOL_SET_NULL,
   FUZZ_SEQ,
-  FUZZ_USER_CHECK_SIZE,
 };
 
 void DriverGenerator::initialize(Module &M) {
