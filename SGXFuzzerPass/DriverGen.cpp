@@ -78,6 +78,10 @@ void DriverGenerator::initialize(Module &M) {
   DFManagedMalloc = M.getOrInsertFunction(
       "DFManagedMalloc", Type::getInt8PtrTy(*C), Type::getInt64Ty(*C));
 
+  getPointToCount = M.getOrInsertFunction(
+      "getPointToCount", Type::getInt64Ty(*C), Type::getInt64Ty(*C),
+      Type::getInt64Ty(*C), Type::getInt64Ty(*C));
+
   GStr0 = IRB.CreateGlobalStringPtr("0", "GStr0", 0, this->M);
   GStrField = IRB.CreateGlobalStringPtr("field", "GStrField", 0, this->M);
   GNullInt8Ptr = Constant::getNullValue(Type::getInt8PtrTy(*C));
@@ -316,13 +320,11 @@ Value *DriverGenerator::createParamContent(
                                       ->getPointerElementType(),
                                   co_param_ptr);
           }
-          ptCnt = IRB.CreateUDiv(
-              IRB.CreateMul(IRB.CreateIntCast(size, IRB.getInt64Ty(), false),
-                            IRB.CreateIntCast(count, IRB.getInt64Ty(), false)),
-              eleSize);
-          // Maybe size*count < eleSize, due to problem of Enclave developer
-          ptCnt = IRB.CreateSelect(IRB.CreateICmpSGT(ptCnt, IRB.getInt64(1)),
-                                   ptCnt, IRB.getInt64(1), "ptCnt");
+          ptCnt = IRB.CreateCall(
+              getPointToCount,
+              {IRB.CreateIntCast(size, IRB.getInt64Ty(), false),
+               IRB.CreateIntCast(count, IRB.getInt64Ty(), false), eleSize},
+              "ptCnt");
         }
 
         if (ptCnt == IRB.getInt64(1)) {
@@ -657,10 +659,8 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
                   IRB.CreateIntCast(ocallWapper->getArg(_size["co_param_pos"]),
                                     Type::getInt64Ty(*C), false);
             }
-            ptCnt = IRB.CreateUDiv(IRB.CreateMul(size, count), eleSize);
-            // Maybe size*count < eleSize
-            ptCnt = IRB.CreateSelect(IRB.CreateICmpSGT(ptCnt, IRB.getInt64(1)),
-                                     ptCnt, IRB.getInt64(1), "ptCnt");
+            ptCnt = IRB.CreateCall(getPointToCount, {size, count, eleSize},
+                                   "ptCnt");
           }
 
           if (ptCnt == IRB.getInt64(1)) {

@@ -16,7 +16,6 @@
 #include <openssl/sha.h>
 #include <ostream>
 #include <random>
-#include <regex>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -169,6 +168,13 @@ public:
     }
   }
 
+  bool getBoolFromProb(double probability) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::bernoulli_distribution dist(probability);
+    return dist(gen);
+  }
+
   /// @brief fill random data in memory pointed by \p cStrBuf, and put \c '\0'
   /// in end
   /// @param cStrBuf must be a valid memory area
@@ -182,10 +188,11 @@ public:
   void _insertString(ordered_json &mutatorJson,
                      ordered_json::json_pointer ptr) {
     size_t newStrLen = rand() % (ClMaxStringLength + 1);
-    T newStr[newStrLen + 1];
+    T *newStr = new T[newStrLen + 1];
     fillStrRand(newStr, newStrLen + 1);
     mutatorJson[ptr] = EncodeBase64(std::vector<uint8_t>(
         (uint8_t *)newStr, (uint8_t *)(newStr + newStrLen + 1)));
+    delete[] newStr;
   }
 
   void insertItemInMutatorJSon(RequestInfo req) {
@@ -218,26 +225,20 @@ public:
     case FUZZ_RET:
     case FUZZ_ARRAY:
     case FUZZ_DATA: {
-      uint8_t newData[req.size];
-      memset(newData, 0, req.size);
-      std::bernoulli_distribution return0dist(ClReturn0Probability);
-      std::mt19937 g(std::random_device{}());
-      bool return0 = return0dist(g);
-      if (req.dataType == FUZZ_RET and return0) {
-        // Do nothing, since already set 0
+      uint8_t *newData = new uint8_t[req.size];
+      if (req.dataType == FUZZ_RET and getBoolFromProb(ClReturn0Probability)) {
+        memset(newData, 0, req.size);
       } else {
         fillRand(newData, req.size);
       }
       mutatorJson[JSonPtr / "Data"] =
           EncodeBase64(std::vector<uint8_t>(newData, newData + req.size));
+      delete[] newData;
       break;
     }
     case FUZZ_BOOL_SET_NULL: {
-      std::bernoulli_distribution provideNullPtrDist(
-          ClProvideNullPointerProbability);
-      std::mt19937 g(std::random_device{}());
-      bool result = provideNullPtrDist(g);
-      mutatorJson[JSonPtr / "Data"] = result;
+      mutatorJson[JSonPtr / "Data"] =
+          getBoolFromProb(ClProvideNullPointerProbability);
       break;
     }
     case FUZZ_SEQ: {
@@ -282,10 +283,11 @@ public:
   void AdjustNBytes(std::vector<uint8_t> &byteArr, size_t N, DataOp op) {
     switch (op) {
     case DATA_EXPAND: {
-      uint8_t newData[N];
+      uint8_t *newData = new uint8_t[N];
       fillRand(newData, N);
       auto adjustPt = byteArr.begin() + rand() % (byteArr.size());
       byteArr.insert(adjustPt, newData, newData + N);
+      delete[] newData;
       break;
     }
     case DATA_SHRINK: {
@@ -307,7 +309,7 @@ public:
     sgxfuzz_assert(byteArr.size() % sizeof(T) == 0);
     size_t strLen =
         std::min((byteArr.size() / sizeof(T)) - 1, (size_t)ClMaxStringLength);
-    T str[ClMaxStringLength + 1];
+    T *str = new T[ClMaxStringLength + 1];
     memcpy(str, byteArr.data(), strLen * sizeof(T));
     auto newRawLen = LLVMFuzzerMutate((uint8_t *)str, strLen * sizeof(T),
                                       ClMaxStringLength * sizeof(T));
@@ -317,6 +319,7 @@ public:
     str[newLen] = '\0';
     mutatorJson[ptr] =
         EncodeBase64(std::vector<uint8_t>(str, str + newLen + 1));
+    delete[] str;
   }
 
   void mutateOnMutatorJSon(bool canChangeSize = true) {
@@ -352,12 +355,9 @@ public:
       case FUZZ_DATA:
       case FUZZ_RET: {
         auto byteArr = DecodeBase64(std::string(mutatorJson[ptr / "Data"]));
-        uint8_t cByteArr[byteArr.size()];
+        uint8_t *cByteArr = new uint8_t[byteArr.size()];
         memcpy(cByteArr, byteArr.data(), byteArr.size());
-        std::bernoulli_distribution return0dist(ClReturn0Probability);
-        std::mt19937 g(std::random_device{}());
-        bool return0 = return0dist(g);
-        if (dataTy == FUZZ_RET and return0) {
+        if (dataTy == FUZZ_RET and getBoolFromProb(ClReturn0Probability)) {
           memset(cByteArr, 0, byteArr.size());
         } else {
           LLVMFuzzerMutate(cByteArr, byteArr.size(), byteArr.size());
@@ -365,14 +365,12 @@ public:
         // Fixed-size mutate
         mutatorJson[ptr / "Data"] = EncodeBase64(
             std::vector<uint8_t>(cByteArr, cByteArr + byteArr.size()));
+        delete[] cByteArr;
         break;
       }
       case FUZZ_BOOL_SET_NULL: {
-        std::bernoulli_distribution provideNullPtrDist(
-            ClProvideNullPointerProbability);
-        std::mt19937 g(std::random_device{}());
-        bool result = provideNullPtrDist(g);
-        mutatorJson[ptr / "Data"] = result;
+        mutatorJson[ptr / "Data"] =
+            getBoolFromProb(ClProvideNullPointerProbability);
         break;
       }
       case FUZZ_SEQ: {
@@ -552,7 +550,7 @@ public:
     int times = DataGetTimes[cStrAsParamID]++;
     std::string strAsParamID =
         std::string(cStrAsParamID) + "_" + std::to_string(times);
-    strAsParamID = std::regex_replace(strAsParamID, std::regex("/"), "_");
+    std::replace(strAsParamID.begin(), strAsParamID.end(), '/', '_');
 
     auto consumerJsonPtr =
         nlohmann::ordered_json::json_pointer("/" + strAsParamID);
@@ -733,6 +731,7 @@ public:
 
   void *managedMalloc(size_t size) {
     void *ptr = malloc(size);
+    sgxfuzz_assert(ptr != nullptr);
     // log_debug("malloc %p(%d)\n", ptr, size);
     allocatedMemAreas.push_back((uint8_t *)ptr);
     return ptr;
@@ -840,13 +839,13 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
               ->default_value("enclave.signed.so"),
           "Name of target Enclave file");
   add_opt(
-      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(8),
+      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(65536),
       "Max count of elements for pointer which size is unknown or not fixed, "
       "if set too large, multi-level pointer will consume a large memory");
-  add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(128),
+  add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(65536),
           "Max size of pointer element");
   add_opt("cb_max_str_len",
-          po::value<size_t>(&ClMaxStringLength)->default_value(128),
+          po::value<size_t>(&ClMaxStringLength)->default_value(4096),
           "Max length of string");
   add_opt("cb_filter_out", po::value<std::string>(),
           "Specified ECalls that we don't test");
@@ -1040,4 +1039,12 @@ extern "C" char *DFGetInstanceID(char *origID, unsigned long i) {
 
 extern "C" void *DFManagedMalloc(size_t size) {
   return data_factory.managedMalloc(size);
+}
+
+extern "C" uint64_t getPointToCount(uint64_t size, uint64_t count,
+                                    uint64_t eleSize) {
+  sgxfuzz_assert(eleSize);
+  // Maybe size * count != n * eleSize, due to problem of Enclave developer
+  uint64_t ptCnt = (size * count + eleSize - 1) / eleSize;
+  return std::max(ptCnt, (uint64_t)1);
 }

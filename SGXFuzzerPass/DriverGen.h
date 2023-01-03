@@ -54,7 +54,7 @@ public:
 private:
   FunctionCallee getIndexOfEcallToBeFuzzed, getFuzzDataPtr, getUserCheckCount,
       _strlen, _wcslen, whetherSetNullPointer, DFJoinID, DFGetInstanceID,
-      DFManagedMalloc;
+      DFManagedMalloc, getPointToCount;
   Constant *GStr0 = nullptr, *GStrField = nullptr, *GNullInt8Ptr = nullptr;
   Module *M = nullptr;
   LLVMContext *C = nullptr;
