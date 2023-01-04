@@ -1024,11 +1024,15 @@ SensitiveLeakSanitizer::getDirectAndIndirectCalledFunction(CallInst *CI) {
   SmallVector<Function *> calleeVec;
   Function *callee = getCalledFunctionStripPointerCast(CI);
   if (callee == nullptr) {
-    // it's an indirect call
-    for (auto &indCall : callgraph->getIndCallMap()) {
-      if (indCall.first->getCallSite() == CI) {
-        for (auto &svfCallee : indCall.second) {
-          calleeVec.push_back(svfCallee->getLLVMFun());
+    if (isa<InlineAsm>(CI->getCalledOperand())) {
+      // Do nothing
+    } else {
+      // it's an indirect call
+      for (auto &indCall : callgraph->getIndCallMap()) {
+        if (indCall.first->getCallSite() == CI) {
+          for (auto &svfCallee : indCall.second) {
+            calleeVec.push_back(svfCallee->getLLVMFun());
+          }
         }
       }
     }
@@ -1424,6 +1428,10 @@ void SensitiveLeakSanitizer::propagateShadow(Value *src) {
   if (src->getType()->isPointerTy()) {
     return;
   }
+  auto srcCI = dyn_cast<CallInst>(src);
+  if (srcCI && isa<InlineAsm>(srcCI->getCalledOperand())) {
+    return;
+  }
   // src maybe 'Function Argument'/LoadInst/'Return Value of CallInst'
   for (User *srcUser : getNonCastUsers(src)) {
     if (isa<StoreInst>(srcUser) || isa<CallInst>(srcUser) ||
@@ -1435,7 +1443,9 @@ void SensitiveLeakSanitizer::propagateShadow(Value *src) {
         PoisonSI(src, isSrcPoisoned, SI);
         addPtObj2WorkList(SI->getPointerOperand());
       } else if (CallInst *CI = dyn_cast<CallInst>(srcUser)) {
-        if (MemSetInst *MSI = dyn_cast<MemSetInst>(CI)) {
+        if (isa<IntrinsicInst>(CI) or isa<InlineAsm>(CI->getCalledOperand())) {
+          // Ignore it
+        } else if (MemSetInst *MSI = dyn_cast<MemSetInst>(CI)) {
           if (stripCast(MSI->getArgOperand(1)) == src) {
             PoisonMemsetDst(src, isSrcPoisoned, MSI, MSI->getArgOperand(0),
                             MSI->getArgOperand(2));
@@ -1452,19 +1462,20 @@ void SensitiveLeakSanitizer::propagateShadow(Value *src) {
             addPtObj2WorkList(CI->getArgOperand(0));
           }
         } else {
+          int opPos = getCallInstOperandPosition(CI, src);
+          assert(opPos != -1);
+          PoisonCIOperand(src, isSrcPoisoned, CI, opPos);
           SmallVector<Function *> calleeVec =
               getDirectAndIndirectCalledFunction(CI);
           for (Function *callee : calleeVec) {
-            if (callee->isDeclaration() || isEncryptionFunction(callee))
+            if (callee->isDeclaration() || isEncryptionFunction(callee) ||
+                callee->isVarArg())
               continue;
-            int opPos = getCallInstOperandPosition(CI, src);
-            assert(opPos != -1);
-            PoisonCIOperand(src, isSrcPoisoned, CI, opPos);
-            if (!callee->isVarArg()) {
-              auto arg = callee->getArg(opPos);
-              if (getPointerLevel(arg) == getPointerLevel(src)) {
-                propagateShadow(arg);
-              }
+            auto arg = callee->getArg(opPos);
+            if (getPointerLevel(arg) == getPointerLevel(src) and
+                processedCalleeArg.count(arg) == 0) {
+              processedCalleeArg.emplace(arg);
+              propagateShadow(arg);
             }
           }
         }

@@ -169,6 +169,7 @@ private:
   std::unordered_set<AllocaInst *> shallowUnpoisonedStackObjs;
   std::unordered_set<CallInst *> processedMemTransferInst;
   std::unordered_map<CallInst *, std::unordered_set<int>> poisonedCI;
+  std::unordered_set<Argument *> processedCalleeArg;
   std::unordered_map<Value *, Value *> poisonCheckedValues;
   GlobalVariable *SGXSanEnclaveBaseAddr = nullptr,
                  *SGXSanEnclaveSizeAddr = nullptr,
