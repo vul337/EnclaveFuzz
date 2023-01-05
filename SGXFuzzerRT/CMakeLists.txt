@@ -30,7 +30,8 @@ include_directories(
     libFuzzer
     ../json/single_include
     ${CMAKE_CURRENT_BINARY_DIR}/..
-    ${LINUX_SGX_MINI}/common/inc)
+    ${LINUX_SGX_MINI}/common/inc
+    ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)
 
 add_library(
     SGXFuzzerRT STATIC 

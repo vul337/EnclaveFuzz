@@ -1,14 +1,3 @@
-# Locate LLVM
-set(LLVM_DIR "$ENV{LLVM_DIR}")
-if(NOT LLVM_DIR)
-    set(LLVM_DIR "/usr/lib/llvm-13")
-endif()
-
-message(STATUS "LLVM_DIR: ${LLVM_DIR}")
-list(APPEND CMAKE_PREFIX_PATH "${LLVM_DIR}/lib/cmake/llvm/")
-find_package(LLVM REQUIRED CONFIG)
-message(STATUS "Found LLVM_DIR: ${LLVM_INSTALL_PREFIX}")
-
 # Locate SVF
 set(SVF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../SVF")
 get_filename_component(SVF_DIR ${SVF_DIR} ABSOLUTE)
