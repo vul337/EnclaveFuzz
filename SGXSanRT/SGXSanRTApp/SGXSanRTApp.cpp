@@ -74,6 +74,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   // process siginfo
   void *_page_fault_addr = siginfo->si_addr;
   log_error("#PF Addr: %p\n", _page_fault_addr);
+  sgxsan_backtrace(LOG_LEVEL_ERROR);
   uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
   if (page_fault_addr == 0) {
     log_error("Null-Pointer Dereference\n");
