@@ -336,18 +336,6 @@ public:
     return cStr;
   }
 
-  char *jsonID(char *parentID, char *currentID, char *appendID) {
-    sgxfuzz_assert(parentID and currentID);
-    std::string fullID = std::string(parentID) + "/" + std::string(currentID) +
-                         (appendID ? ("/" + std::string(appendID)) : "");
-    return managedStr2CStr(fullID);
-  }
-
-  char *getInstanceID(char *origID, unsigned long instanceIdx) {
-    auto instanceID = std::string(origID) + "-" + std::to_string(instanceIdx);
-    return managedStr2CStr(instanceID);
-  }
-
   void getCallSequence(std::vector<int> &intCallSeq, size_t funcNum) {
     std::vector<int> callSeq(funcNum);
     std::iota(callSeq.begin(), callSeq.end(), 0);
@@ -559,14 +547,6 @@ uint8_t *get_bytes(size_t byteArrLen, char *cStrAsParamID,
 
 bool is_null_pointer(char *cStrAsParamID) {
   return ClProvideNullPointer ? data_factory.EnableSetNull() : false;
-}
-
-char *DFJoinID(char *parentID, char *currentID, char *appendID) {
-  return data_factory.jsonID(parentID, currentID, appendID);
-}
-
-char *DFGetInstanceID(char *origID, unsigned long i) {
-  return data_factory.getInstanceID(origID, i);
 }
 
 void *DFManagedMalloc(size_t size) { return data_factory.managedMalloc(size); }

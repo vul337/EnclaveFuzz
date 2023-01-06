@@ -69,22 +69,12 @@ void DriverGenerator::initialize(Module &M) {
                                   Type::getInt32PtrTy(*C));
   whetherSetNullPointer = M.getOrInsertFunction(
       "is_null_pointer", Type::getInt1Ty(*C), Type::getInt8PtrTy(*C));
-  DFJoinID = M.getOrInsertFunction(
-      "DFJoinID", Type::getInt8PtrTy(*C), Type::getInt8PtrTy(*C),
-      Type::getInt8PtrTy(*C), Type::getInt8PtrTy(*C));
-  DFGetInstanceID =
-      M.getOrInsertFunction("DFGetInstanceID", Type::getInt8PtrTy(*C),
-                            Type::getInt8PtrTy(*C), Type::getInt64Ty(*C));
   DFManagedMalloc = M.getOrInsertFunction(
       "DFManagedMalloc", Type::getInt8PtrTy(*C), Type::getInt64Ty(*C));
 
   getPointToCount = M.getOrInsertFunction(
       "getPointToCount", Type::getInt64Ty(*C), Type::getInt64Ty(*C),
       Type::getInt64Ty(*C), Type::getInt64Ty(*C));
-
-  GStr0 = IRB.CreateGlobalStringPtr("0", "GStr0", 0, this->M);
-  GStrField = IRB.CreateGlobalStringPtr("field", "GStrField", 0, this->M);
-  GNullInt8Ptr = Constant::getNullValue(Type::getInt8PtrTy(*C));
 
   // read *.edl.json file
   auto fileBuffer = MemoryBuffer::getFile(ClEdlJsonFile);
@@ -205,9 +195,9 @@ GlobalVariable *DriverGenerator::CreateZeroInitizerGlobal(StringRef Name,
 }
 
 Value *DriverGenerator::createParamContent(
-    SmallVector<Type *> types, json::json_pointer jsonPtr, Value *parentID,
-    Value *currentID, std::map<uint64_t, Value *> *paramPtrs,
-    Instruction *insertPt, size_t recursion_depth) {
+    SmallVector<Type *> types, json::json_pointer jsonPtr,
+    std::map<uint64_t, Value *> *paramPtrs, Instruction *insertPt,
+    size_t recursion_depth) {
   recursion_depth++;
   // get index from json pointer
   size_t idx =
@@ -221,12 +211,13 @@ Value *DriverGenerator::createParamContent(
   // get current type
   auto type = types[idx];
   // prepare a pointer to store content
-  IRBuilder<> IRB(&insertPt->getFunction()->front().front());
-  Value *typePtr = IRB.CreateAlloca(type);
-  IRB.SetInsertPoint(insertPt);
+  IRBuilder<> IRB(insertPt);
+  Value *typePtr = IRB.CreatePointerCast(
+      IRB.CreateCall(DFManagedMalloc,
+                     {IRB.getInt64(M->getDataLayout().getTypeAllocSize(type))}),
+      type->getPointerTo(), "typePtr");
   // use json pointer as node ID
-  auto jsonPtrAsID =
-      IRB.CreateCall(DFJoinID, {parentID, currentID, GNullInt8Ptr}, "id");
+  auto jsonPtrAsID = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
   // we have labelled all data belonged to [in]/[out]/[user_check] pointer with
   // same attribute label If it's not labelled, then set default true
   bool feedRandom = whetherFeedRandom(jsonPtr);
@@ -285,9 +276,8 @@ Value *DriverGenerator::createParamContent(
             edlJson[jsonPtr.parent_pointer() / co_param_pos /
                     "isEdlCountAttr"] = true;
             auto co_param_ptr = createParamContent(
-                types, jsonPtr.parent_pointer() / co_param_pos, parentID,
-                IRB.CreateGlobalStringPtr(std::to_string(co_param_pos)),
-                paramPtrs, insertPt, recursion_depth - 1);
+                types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
+                insertPt, recursion_depth - 1);
             IRB.SetInsertPoint(insertPt);
             count = IRB.CreateLoad(co_param_ptr->getType()
                                        ->getScalarType()
@@ -311,9 +301,8 @@ Value *DriverGenerator::createParamContent(
             edlJson[jsonPtr.parent_pointer() / co_param_pos / "isEdlSizeAttr"] =
                 true;
             auto co_param_ptr = createParamContent(
-                types, jsonPtr.parent_pointer() / co_param_pos, parentID,
-                IRB.CreateGlobalStringPtr(std::to_string(co_param_pos)),
-                paramPtrs, insertPt, recursion_depth - 1);
+                types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
+                insertPt, recursion_depth - 1);
             IRB.SetInsertPoint(insertPt);
             size = IRB.CreateLoad(co_param_ptr->getType()
                                       ->getScalarType()
@@ -328,10 +317,8 @@ Value *DriverGenerator::createParamContent(
         }
 
         if (ptCnt == IRB.getInt64(1)) {
-          contentPtr = createParamContent(
-              {eleTy}, jsonPtr / "field" / 0,
-              IRB.CreateCall(DFJoinID, {parentID, currentID, GStrField}), GStr0,
-              nullptr, insertPt, recursion_depth);
+          contentPtr = createParamContent({eleTy}, jsonPtr / "field" / 0,
+                                          nullptr, insertPt, recursion_depth);
         } else {
           assert(M->getDataLayout().getTypeAllocSize(eleTy) == _eleSize);
           contentPtr = IRB.CreatePointerCast(
@@ -345,11 +332,9 @@ Value *DriverGenerator::createParamContent(
             // fall back
             FOR_LOOP_BEG(insertPt, ptCnt)
             auto innerInsertPt = &*IRB.GetInsertPoint();
-            auto elePtr = createParamContent(
-                {eleTy}, jsonPtr / "field" / 0,
-                IRB.CreateCall(DFJoinID, {parentID, currentID, GStrField}),
-                IRB.CreateCall(DFGetInstanceID, {GStr0, phi}), nullptr,
-                innerInsertPt, recursion_depth);
+            auto elePtr =
+                createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
+                                   innerInsertPt, recursion_depth);
             IRB.SetInsertPoint(innerInsertPt);
             dataCopy(IRB.CreateGEP(eleTy, contentPtr, phi), elePtr, eleTy,
                      innerInsertPt);
@@ -383,10 +368,8 @@ Value *DriverGenerator::createParamContent(
         auto elePtr = createParamContent(
             SmallVector<Type *>{structTy->elements().begin(),
                                 structTy->elements().end()},
-            jsonPtr / "field" / index,
-            IRB.CreateCall(DFJoinID, {parentID, currentID, GStrField}),
-            IRB.CreateGlobalStringPtr(std::to_string(index)),
-            &preparedSubFieldParamPtrs, insertPt, recursion_depth);
+            jsonPtr / "field" / index, &preparedSubFieldParamPtrs, insertPt,
+            recursion_depth);
         IRB.SetInsertPoint(insertPt);
         auto eleTy = elePtr->getType()->getPointerElementType();
         dataCopy(IRB.CreateGEP(type, typePtr,
@@ -404,11 +387,8 @@ Value *DriverGenerator::createParamContent(
       // fall back
       FOR_LOOP_BEG(insertPt, eleCnt)
       auto innerInsertPt = &*IRB.GetInsertPoint();
-      auto elePtr = createParamContent(
-          {eleTy}, jsonPtr / "field" / 0,
-          IRB.CreateCall(DFJoinID, {parentID, currentID, GStrField}),
-          IRB.CreateCall(DFGetInstanceID, {GStr0, phi}), nullptr, innerInsertPt,
-          recursion_depth);
+      auto elePtr = createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
+                                       innerInsertPt, recursion_depth);
       IRB.SetInsertPoint(innerInsertPt);
       dataCopy(IRB.CreateGEP(type, typePtr, {IRB.getInt32(0), phi}), elePtr,
                eleTy, innerInsertPt);
@@ -520,12 +500,7 @@ Function *DriverGenerator::createEcallFuzzWrapperFunc(std::string ecallName) {
       // it's a parameter declareted at edl file
       json::json_pointer jsonPtr = json::json_pointer("/trusted") / ecallName /
                                    "parameter" / edlParamNo++;
-      IRBuilder<> IRB(*C);
-      Value *parentID = IRB.CreateGlobalStringPtr(
-                jsonPtr.parent_pointer().to_string(), "", 0, M),
-            *currentID = IRB.CreateGlobalStringPtr(jsonPtr.back(), "", 0, M);
-      createParamContent(paramTypes, jsonPtr, parentID, currentID,
-                         &preparedParamPtrs, retVoidI);
+      createParamContent(paramTypes, jsonPtr, &preparedParamPtrs, retVoidI);
     }
   }
   // 3. prepare Enclave ID parameter
@@ -541,13 +516,8 @@ Function *DriverGenerator::createEcallFuzzWrapperFunc(std::string ecallName) {
         true;
     json::json_pointer jsonPtr =
         json::json_pointer("/trusted") / ecallName / "return";
-    IRBuilder<> IRB(*C);
-    Value *parentID = IRB.CreateGlobalStringPtr(
-              jsonPtr.parent_pointer().to_string(), "", 0, M),
-          *currentID = IRB.CreateGlobalStringPtr(jsonPtr.back(), "", 0, M);
-    auto returnParamPtr =
-        createParamContent({returnParamPtrArg->getType()}, jsonPtr, parentID,
-                           currentID, nullptr, retVoidI);
+    auto returnParamPtr = createParamContent({returnParamPtrArg->getType()},
+                                             jsonPtr, nullptr, retVoidI);
     IRB.SetInsertPoint(retVoidI);
     preparedParams.push_back(IRB.CreateLoad(
         returnParamPtr->getType()->getScalarType()->getPointerElementType(),
@@ -577,13 +547,6 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
     if (auto pointerTy = dyn_cast<PointerType>(arg.getType())) {
       json::json_pointer jsonPtr("/untrusted/" + realOCallName + "/parameter/" +
                                  std::to_string(idx));
-      Value *parentID = nullptr, *currentID = nullptr;
-      {
-        IRBuilder<> IRB(*C);
-        parentID = IRB.CreateGlobalStringPtr(
-            jsonPtr.parent_pointer().to_string(), "", 0, M);
-        currentID = IRB.CreateGlobalStringPtr(jsonPtr.back(), "", 0, M);
-      }
       // TODO: If ocall pointer is [user_check] and point to memory outside
       // Enclave
       if (edlJson[jsonPtr / "out"] == true) {
@@ -599,8 +562,7 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
         insertPt = ptrIsNotNull;
         IRB.SetInsertPoint(insertPt);
 
-        auto jsonPtrAsID =
-            IRB.CreateCall(DFJoinID, {parentID, currentID, GNullInt8Ptr});
+        auto jsonPtrAsID = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
         auto eleTy = pointerTy->getElementType();
         StructType *eleSt = dyn_cast<StructType>(eleTy);
         if (eleSt and eleSt->isOpaque()) {
@@ -664,10 +626,8 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
           }
 
           if (ptCnt == IRB.getInt64(1)) {
-            Value *elePtr = createParamContent(
-                {eleTy}, jsonPtr / "field" / 0,
-                IRB.CreateCall(DFJoinID, {parentID, currentID, GStrField}),
-                GStr0, nullptr, insertPt);
+            Value *elePtr = createParamContent({eleTy}, jsonPtr / "field" / 0,
+                                               nullptr, insertPt);
             IRB.SetInsertPoint(insertPt);
             elePtr = IRB.CreatePointerCast(elePtr, pointerTy);
             dataCopy(&arg, elePtr, eleTy, insertPt);
@@ -676,11 +636,8 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
               // fall back
               FOR_LOOP_BEG(insertPt, ptCnt)
               auto innerInsertPt = &*IRB.GetInsertPoint();
-              auto elePtr = createParamContent(
-                  {eleTy}, jsonPtr / "field" / 0,
-                  IRB.CreateCall(DFJoinID, {parentID, currentID, GStrField}),
-                  IRB.CreateCall(DFGetInstanceID, {GStr0, phi}), nullptr,
-                  innerInsertPt);
+              auto elePtr = createParamContent({eleTy}, jsonPtr / "field" / 0,
+                                               nullptr, innerInsertPt);
               IRB.SetInsertPoint(innerInsertPt);
               dataCopy(
                   IRB.CreateGEP(
@@ -723,13 +680,10 @@ void DriverGenerator::createOcallFunc(std::string realOCallName) {
     retI = retVoidI;
   } else {
     auto jsonPtr = json::json_pointer("/untrusted") / realOCallName / "return";
-    Value *parentID = IRB.CreateGlobalStringPtr(
-              jsonPtr.parent_pointer().to_string(), "", 0, M),
-          *currentID = IRB.CreateGlobalStringPtr(jsonPtr.back(), "", 0, M);
     edlJson[jsonPtr / "out"] = true;
     edlJson[jsonPtr / "isOCallRet"] = true;
-    auto retValuePtr = createParamContent({funcRetType}, jsonPtr, parentID,
-                                          currentID, nullptr, retVoidI);
+    auto retValuePtr =
+        createParamContent({funcRetType}, jsonPtr, nullptr, retVoidI);
     IRB.SetInsertPoint(retVoidI);
     auto retVal = IRB.CreateLoad(
         retValuePtr->getType()->getScalarType()->getPointerElementType(),

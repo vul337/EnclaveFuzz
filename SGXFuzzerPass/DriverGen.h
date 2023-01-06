@@ -30,7 +30,6 @@ public:
   /// @return
   Value *createParamContent(SmallVector<Type *> types,
                             nlohmann::json::json_pointer jsonPtr,
-                            Value *parentID, Value *currentID,
                             std::map<uint64_t, Value *> *paramPtrs,
                             Instruction *insertPt, size_t recursion_depth = 0);
   void fillAtOnce(Value *dstPtr, nlohmann::json::json_pointer jsonPtr,
@@ -53,9 +52,7 @@ public:
 
 private:
   FunctionCallee getIndexOfEcallToBeFuzzed, getFuzzDataPtr, getUserCheckCount,
-      _strlen, _wcslen, whetherSetNullPointer, DFJoinID, DFGetInstanceID,
-      DFManagedMalloc, getPointToCount;
-  Constant *GStr0 = nullptr, *GStrField = nullptr, *GNullInt8Ptr = nullptr;
+      _strlen, _wcslen, whetherSetNullPointer, DFManagedMalloc, getPointToCount;
   Module *M = nullptr;
   LLVMContext *C = nullptr;
   nlohmann::json edlJson;
