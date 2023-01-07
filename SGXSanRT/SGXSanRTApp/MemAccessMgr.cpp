@@ -6,6 +6,11 @@ __thread bool MemAccessMgr::m_inited;
 __thread size_t MemAccessMgr::m_out_enclave_access_cnt;
 __thread size_t MemAccessMgr::m_in_enclave_access_cnt;
 
+extern "C" __attribute__((weak)) uint8_t *DFGetBytesEx(uint8_t *ptr,
+                                                       size_t byteArrLen,
+                                                       char *cStrAsParamID,
+                                                       int dataType);
+
 // C Wrappers
 void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
                                   bool used_to_cmp, char *parent_func) {
@@ -19,6 +24,9 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
           true,
           "Detect Double-Fetch Situation, and modify it with random data\n");
       // TODO: give it a new value
+      if (DFGetBytesEx) {
+        DFGetBytesEx((uint8_t *)ptr, size, nullptr, 2 /* FUZZ_DATA */);
+      }
     }
   }
   MemAccessMgr::add_out_of_enclave_access_cnt();
