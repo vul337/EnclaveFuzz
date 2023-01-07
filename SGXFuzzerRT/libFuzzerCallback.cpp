@@ -540,6 +540,11 @@ size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
   return data_factory.getUserCheckCount();
 }
 
+uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
+                      FuzzDataTy dataType) {
+  return data_factory.getBytes(ptr, byteArrLen, dataType);
+}
+
 uint8_t *DFGetBytes(size_t byteArrLen, char *cStrAsParamID,
                     FuzzDataTy dataType) {
   return data_factory.getBytes(nullptr, byteArrLen, dataType);
