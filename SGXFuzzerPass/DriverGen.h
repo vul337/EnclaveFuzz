@@ -51,8 +51,8 @@ public:
   bool runOnModule(Module &M);
 
 private:
-  FunctionCallee getIndexOfEcallToBeFuzzed, getFuzzDataPtr, getUserCheckCount,
-      _strlen, _wcslen, whetherSetNullPointer, DFManagedMalloc, getPointToCount;
+  FunctionCallee getIndexOfEcallToBeFuzzed, DFGetBytes, DFGetUserCheckCount,
+      _strlen, _wcslen, DFEnableSetNull, DFManagedMalloc, getPointToCount;
   Module *M = nullptr;
   LLVMContext *C = nullptr;
   nlohmann::json edlJson;

@@ -536,16 +536,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 }
 
 // DriverGen Callbacks
-size_t get_count(size_t eleSize, char *cStrAsParamID) {
+size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
   return data_factory.getUserCheckCount();
 }
 
-uint8_t *get_bytes(size_t byteArrLen, char *cStrAsParamID,
-                   FuzzDataTy dataType) {
+uint8_t *DFGetBytes(size_t byteArrLen, char *cStrAsParamID,
+                    FuzzDataTy dataType) {
   return data_factory.getBytes(nullptr, byteArrLen, dataType);
 }
 
-bool is_null_pointer(char *cStrAsParamID) {
+bool DFEnableSetNull(char *cStrAsParamID) {
   return ClProvideNullPointer ? data_factory.EnableSetNull() : false;
 }
 

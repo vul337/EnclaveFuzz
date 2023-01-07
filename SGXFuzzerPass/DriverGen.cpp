@@ -57,18 +57,18 @@ void DriverGenerator::initialize(Module &M) {
   IRBuilder<> IRB(*C);
 
   // add function declaration
-  getFuzzDataPtr = M.getOrInsertFunction(
-      "get_bytes", Type::getInt8PtrTy(*C), Type::getInt64Ty(*C),
+  DFGetBytes = M.getOrInsertFunction(
+      "DFGetBytes", Type::getInt8PtrTy(*C), Type::getInt64Ty(*C),
       Type::getInt8PtrTy(*C), Type::getInt32Ty(*C));
-  getUserCheckCount = M.getOrInsertFunction("get_count", Type::getInt64Ty(*C),
-                                            Type::getInt64Ty(*C) /* ele size */,
-                                            Type::getInt8PtrTy(*C));
+  DFGetUserCheckCount = M.getOrInsertFunction(
+      "DFGetUserCheckCount", Type::getInt64Ty(*C),
+      Type::getInt64Ty(*C) /* ele size */, Type::getInt8PtrTy(*C));
   _strlen = M.getOrInsertFunction("strlen", Type::getInt64Ty(*C),
                                   Type::getInt8PtrTy(*C));
   _wcslen = M.getOrInsertFunction("wcslen", Type::getInt64Ty(*C),
                                   Type::getInt32PtrTy(*C));
-  whetherSetNullPointer = M.getOrInsertFunction(
-      "is_null_pointer", Type::getInt1Ty(*C), Type::getInt8PtrTy(*C));
+  DFEnableSetNull = M.getOrInsertFunction(
+      "DFEnableSetNull", Type::getInt1Ty(*C), Type::getInt8PtrTy(*C));
   DFManagedMalloc = M.getOrInsertFunction(
       "DFManagedMalloc", Type::getInt8PtrTy(*C), Type::getInt64Ty(*C));
 
@@ -245,7 +245,7 @@ Value *DriverGenerator::createParamContent(
         // [string/wstring] must exist with [in]
         assert(eleTy->isIntegerTy() and edlJson[jsonPtr / "in"] == true);
         contentPtr = IRB.CreatePointerCast(
-            IRB.CreateCall(getFuzzDataPtr,
+            IRB.CreateCall(DFGetBytes,
                            {IRB.getInt64(0), jsonPtrAsID,
                             IRB.getInt32(edlJson[jsonPtr / "string"] == true
                                              ? FUZZ_STRING
@@ -264,7 +264,7 @@ Value *DriverGenerator::createParamContent(
           }
           ptCnt = IRB.getInt64(_c_array_count);
         } else if (edlJson[jsonPtr / "user_check"] == true) {
-          ptCnt = IRB.CreateCall(getUserCheckCount, {eleSize, jsonPtrAsID});
+          ptCnt = IRB.CreateCall(DFGetUserCheckCount, {eleSize, jsonPtrAsID});
         } else {
           Value *count = nullptr, *size = nullptr;
           if (edlJson[jsonPtr / "count"].is_null()) {
@@ -351,8 +351,7 @@ Value *DriverGenerator::createParamContent(
         // we call function to query whether fill pointer with meaningful
         // address or not
         Instruction *term = SplitBlockAndInsertIfThen(
-            IRB.CreateCall(whetherSetNullPointer, jsonPtrAsID), insertPt,
-            false);
+            IRB.CreateCall(DFEnableSetNull, jsonPtrAsID), insertPt, false);
         IRB.SetInsertPoint(term);
         IRB.CreateStore(Constant::getNullValue(pointerTy), typePtr);
       }
@@ -426,8 +425,8 @@ void DriverGenerator::fillAtOnce(Value *dstPtr, json::json_pointer jsonPtr,
   if (arrCnt) {
     tySize = IRB.CreateMul(tySize, arrCnt);
   }
-  Value *fuzzDataPtr = IRB.CreateCall(
-      getFuzzDataPtr, {tySize, jsonPtrAsID, IRB.getInt32(byteType)});
+  Value *fuzzDataPtr =
+      IRB.CreateCall(DFGetBytes, {tySize, jsonPtrAsID, IRB.getInt32(byteType)});
   dataCopy(dstPtr, fuzzDataPtr, type, insertPt, arrCnt);
 }
 
@@ -577,7 +576,7 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
           // [string/wstring] must exist with [in]
           assert(eleTy->isIntegerTy() and edlJson[jsonPtr / "in"] == true);
           Value *fuzzDataPtr = IRB.CreatePointerCast(
-              IRB.CreateCall(getFuzzDataPtr,
+              IRB.CreateCall(DFGetBytes,
                              {IRB.getInt64(0), jsonPtrAsID,
                               IRB.getInt32(edlJson[jsonPtr / "string"] == true
                                                ? FUZZ_STRING
