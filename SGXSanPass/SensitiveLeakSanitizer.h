@@ -209,6 +209,5 @@ private:
   size_t propagateCnt = 0;
   std::string ExtAPIJsonFile;
   ShadowMapping Mapping;
-  static std::regex nonAlphanumeric, nonBlank;
 };
 } // namespace llvm

@@ -30,9 +30,6 @@ static cl::opt<unsigned int> ClMaxDeepObjPNNestedLevel(
 // #define SHOW_WORK_OBJ_PTS
 const uint8_t kSGXSanSensitiveObjData = 0x20;
 
-std::regex SensitiveLeakSanitizer::nonAlphanumeric("[^0-9a-zA-Z]");
-std::regex SensitiveLeakSanitizer::nonBlank("^\\S+$");
-
 Value *SensitiveLeakSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
   // as shadow memory only map elrange, let Shadow - EnclaveBase
   // EnclaveBase have to be initialied before here
@@ -420,11 +417,13 @@ bool SensitiveLeakSanitizer::ContainWordExactly(std::string str,
   else if (str == "")
     return false;
   // filter out non-alphanumeric word
+  static std::regex nonAlphanumeric("[^0-9a-zA-Z]");
   if (std::regex_search(word, nonAlphanumeric)) {
     errs() << "[ERROR] Word contain non-alphanumeric\n";
     abort();
   }
   // filter out non-word str
+  static std::regex nonBlank("^\\S+$");
   if (not std::regex_match(str, nonBlank)) {
     errs() << "[ERROR] str isn't a valid word\n";
     abort();
@@ -1472,7 +1471,7 @@ void SensitiveLeakSanitizer::propagateShadow(Value *src) {
                 callee->isVarArg())
               continue;
             auto arg = callee->getArg(opPos);
-            if (getPointerLevel(arg) == getPointerLevel(src) and
+            if (getPointerLevel(arg) == 0 and
                 processedCalleeArg.count(arg) == 0) {
               processedCalleeArg.emplace(arg);
               propagateShadow(arg);
