@@ -14,8 +14,13 @@ PATCH_DIR="$(realpath ${SGXSAN_DIR}/SGXSanRT/linux-sgx-mini/)"
 LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/..)
 PREFIX="${PREFIX:-${SGXSAN_DIR}/install}"
 
+MODE=${MODE:="RELEASE"}
+SDK_COV=${SDK_COV:="TRUE"}
+SILENT=${SILENT:="TRUE"}
+
 echo "-- MODE: ${MODE}"
 echo "-- PREFIX: ${PREFIX}"
+echo "-- SDK_COV: ${SDK_COV}"
 
 MAKE=make
 CP=cp
@@ -32,6 +37,16 @@ if [[ "${MODE}" = "DEBUG" ]]
 then
     ADD_LLVM_FLAGS+=" -g -O0"
     ADD_MAKE_FLAGS+=" DEBUG=1"
+fi
+
+if [[ "${SDK_COV}" = "TRUE" ]]
+then
+    ADD_LLVM_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp"
+fi
+
+if [[ "${SILENT}" = "TRUE" ]]
+then
+    ADD_MAKE_FLAGS+=" -s"
 fi
 
 echo "-- ADD_LLVM_FLAGS: ${ADD_LLVM_FLAGS}"
@@ -57,7 +72,7 @@ fi
 echo "== Get libsgx_trts_sim.a =="
 cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/trtssim
 ${MAKE} clean -s
-${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} linux/libsgx_trts_sim.a ${PREFIX}/lib64
 ${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr \
     --redefine-sym atexit=_deleted_atexit \
@@ -73,19 +88,19 @@ ${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr \
 # get libsgx_tservice_sim.a
 cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/tservice_sim
 ${MAKE} clean -s
-${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} libsgx_tservice_sim.a ${PREFIX}/lib64
 
 # get libsgx_tsafecrt.a
 cd ${LINUX_SGX_SRC_DIR}/sdk/tsafecrt
 ${MAKE} clean -s
-${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} libsgx_tsafecrt.a ${PREFIX}/lib64
 
 #get libsgx_tcrypto.a
 cd ${LINUX_SGX_SRC_DIR}/sdk/tlibcrypto
 ${MAKE} clean -s
-${MAKE} "$@" -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
 ${CP} libsgx_tcrypto.a ${PREFIX}/lib64
 
 #get libsgx_urts_sim.so

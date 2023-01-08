@@ -332,14 +332,19 @@ __sanitizer_cov_pcs_unregister(const uintptr_t *pcs_beg);
 uptr gEnclaveDSOSanCovCntrsStart = 0, gEnclaveDSOSanCovCntrsStop = 0,
      gEnclaveDSOSanCovPCsStart = 0, gEnclaveDSOSanCovPCsStop = 0;
 
+bool gHasShowHook8bit = false, gHasShowHookPCs = false;
+
 extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
                                                            uint8_t *Stop) {
   if (gEnclaveDSOSanCovCntrsStart == (uptr)Start) {
     return;
   }
-  log_debug("Hook __sanitizer_cov_8bit_counters_init of Enclave, %ld inline "
-            "8-bit counts [%p, %p)\n",
-            (uptr)Stop - (uptr)Start, Start, Stop);
+  if (gHasShowHook8bit == false) {
+    log_always("Hook __sanitizer_cov_8bit_counters_init of Enclave, %ld inline "
+               "8-bit counts [%p, %p) (First time)\n",
+               (uptr)Stop - (uptr)Start, Start, Stop);
+    gHasShowHook8bit = true;
+  }
   gEnclaveDSOSanCovCntrsStart = (uptr)Start;
   gEnclaveDSOSanCovCntrsStop = (uptr)Stop;
   __sanitizer_cov_8bit_counters_init(Start, Stop);
@@ -356,9 +361,13 @@ extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
   }
   gEnclaveDSOSanCovPCsStart = (uptr)pcs_beg;
   gEnclaveDSOSanCovPCsStop = (uptr)pcs_end;
-  log_debug("Hook __sanitizer_cov_pcs_init of Enclave, %ld PCs [%p, %p)\n",
-            (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
-            pcs_end);
+  if (gHasShowHookPCs == false) {
+    log_always("Hook __sanitizer_cov_pcs_init of Enclave, %ld PCs [%p, %p) "
+               "(First time)\n",
+               (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
+               pcs_end);
+    gHasShowHookPCs = true;
+  }
   __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
 }
 
