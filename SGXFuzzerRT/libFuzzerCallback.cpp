@@ -1,6 +1,8 @@
 #include "libFuzzerCallback.h"
+#include "FuzzDataType.h"
 #include "FuzzedDataProvider.h"
 #include "RandPool.h"
+#include "magic_enum.hpp"
 #include <array>
 #include <assert.h>
 #include <boost/algorithm/string.hpp>
@@ -12,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <openssl/evp.h>
@@ -24,25 +27,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+#ifdef KAFL_FUZZER
+extern "C" {
+#include "nyx_agent.h"
+}
+#endif
+
+#define X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS 47
+#define ADDR_SPACE_BITS X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS
 
 using ordered_json = nlohmann::ordered_json;
 namespace po = boost::program_options;
+namespace fs = std::filesystem;
 
 RandPool gRandPool;
 
-sgx_enclave_id_t global_eid = 0;
+sgx_enclave_id_t __hidden_sgxfuzzer_harness_global_eid = 0;
 std::string ClEnclaveFileName;
-size_t ClMaxStrlen;
-size_t ClMaxCount;
-size_t ClMaxSize;
-int ClUsedLogLevel;
-bool ClProvideNullPointer;
-double ClProvideNullPointerProbability;
-double ClReturn0Probability;
+size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
+int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
+double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
+    ClModifyDoubleFetchValueProb, ClZoomRate;
+bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack,
+    ClCmpFuncNameInTOCTOU;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER };
@@ -51,9 +66,9 @@ static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
 
 // Passed from DriverGen IR pass
-extern sgx_status_t (*sgx_fuzzer_ecall_array[])();
-extern int sgx_fuzzer_ecall_num;
-extern char *sgx_fuzzer_ecall_wrapper_name_array[];
+extern sgx_status_t (*gFuzzECallArray[])();
+extern int gFuzzECallNum;
+extern char *gFuzzECallNameArray[];
 
 // log util
 static const char *log_level_to_prefix[] = {
@@ -94,62 +109,62 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
     return;
 
   // get prefix
-  std::string prefix = "";
   if (with_prefix) {
-    prefix += std::string(log_level_to_prefix[level]) + "[" +
-              time_in_HH_MM_SS_MMM() + "] ";
+    std::string prefix = std::string(log_level_to_prefix[level]) + "[" +
+                         time_in_HH_MM_SS_MMM() + "] ";
+#ifdef KAFL_FUZZER
+    hprintf("%s", prefix.c_str());
+#else
+    std::cerr << prefix;
+#endif
   }
-  std::cerr << prefix;
 
+#ifdef KAFL_FUZZER
+  char buf[BUFSIZ];
+  va_list ap;
+  va_start(ap, format);
+  vsnprintf(buf, BUFSIZ, format, ap);
+  va_end(ap);
+  hprintf("%s", buf);
+#else
   va_list ap;
   va_start(ap, format);
   vfprintf(stderr, format, ap);
   va_end(ap);
+#endif
 }
 
+#ifndef KAFL_FUZZER
+// libFuzzer API
+extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
+#endif
+extern "C" __attribute__((weak)) bool AddrIsInHeapQuarantine(uint64_t addr);
 // DataFactory Util
-enum FuzzDataTy {
-  FUZZ_STRING,
-  FUZZ_WSTRING,
-  FUZZ_DATA,
-  FUZZ_ARRAY,
-  FUZZ_SIZE,
-  FUZZ_COUNT,
-  FUZZ_RET,
-  FUZZ_BOOL_SET_NULL,
-  FUZZ_SEQ,
-};
-
 class FuzzDataFactory {
 public:
   /// @brief fill random data in memory pointed by \p dst
   /// @param dst must be a valid memory area
   /// @param size memory area size
-  void fillRand(void *dst, size_t size) {
-    size_t step_times = size / sizeof(int), remained = size % sizeof(int);
-    int *ptr_i32 = (int *)dst;
-    for (size_t step = 0; step < step_times; step++) {
-      ptr_i32[step] = rand();
-    }
-    if (remained > 0) {
-      uint8_t *ptr_remained =
-          (uint8_t *)((uint64_t)dst + step_times * sizeof(int));
-      int rand_res = rand();
-      for (size_t i = 0; i < remained; i++) {
-        ptr_remained[i] = (rand_res >> (i * 8)) & 0xFF;
-      }
-    }
+  void fillRand(uint8_t *dst, size_t size) {
+    std::random_device rd;
+    std::independent_bits_engine<std::mt19937, CHAR_BIT, unsigned short> ibe(
+        rd());
+    std::generate(dst, dst + size, std::ref(ibe));
   }
 
   void NeedMoreFuzzData(size_t size) { mExpectedFuzzDataSize += size; }
 
+#ifndef KAFL_FUZZER
   size_t mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
     size_t NewSize = std::min(std::max(mExpectedFuzzDataSize, Size), MaxSize);
     sgxfuzz_assert(NewSize >= Size);
-    fillRand(Data + Size, NewSize - Size);
+    if (NewSize > Size) {
+      fillRand(Data + Size, NewSize - Size);
+    }
     LLVMFuzzerMutate(Data, NewSize, MaxSize);
     return NewSize;
   }
+#endif
 
   uint8_t *getBytes(uint8_t *dst, size_t bytesNum, FuzzDataTy dataTy) {
     if (bytesNum == 0 and dataTy != FUZZ_STRING and dataTy != FUZZ_WSTRING) {
@@ -158,121 +173,72 @@ public:
     }
 
     switch (dataTy) {
+    case FUZZ_P_DOUBLE: {
+      sgxfuzz_assert(sizeof(double) == bytesNum);
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc(bytesNum);
+      *((double *)dst) = getFloatingPointInRange<double>(
+          0.0, std::numeric_limits<double>::max());
+      break;
+    }
     case FUZZ_ARRAY:
     case FUZZ_DATA: {
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
-      size_t wrCnt = 0;
-      if (provider->remaining_bytes() > 0) {
-        wrCnt = provider->ConsumeData(dst, bytesNum);
-      }
-      if (wrCnt < bytesNum) {
-        gRandPool.getBytes(dst, bytesNum - wrCnt);
-        NeedMoreFuzzData(bytesNum - wrCnt);
-      }
+      FillByteArray(dst, bytesNum);
+      break;
+    }
+    case FUZZ_DATA_OR_PTR: {
+      sgxfuzz_assert(bytesNum == sizeof(void *));
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc(bytesNum);
+      FillByteArray(dst, bytesNum);
+      *(uint64_t *)dst %= ((uint64_t)1 << ADDR_SPACE_BITS);
       break;
     }
     case FUZZ_RET: {
-      bool return0;
-      if (provider->remaining_bytes() > 0) {
-        double prob = 1 - provider->ConsumeProbability<double>();
-        return0 = prob < ClReturn0Probability;
-      } else {
-        NeedMoreFuzzData(sizeof(uint64_t));
-        return0 = false;
-      }
+      double prob = getProbability<double>();
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
-      if (return0) {
+      if (prob < ClReturn0Prob) {
         memset(dst, 0, bytesNum);
       } else {
-        size_t wrCnt = 0;
-        if (provider->remaining_bytes() > 0) {
-          wrCnt = provider->ConsumeData(dst, bytesNum);
-        }
-        if (wrCnt < bytesNum) {
-          gRandPool.getBytes(dst, bytesNum - wrCnt);
-          NeedMoreFuzzData(bytesNum - wrCnt);
-        }
+        FillByteArray(dst, bytesNum);
       }
       break;
     }
     case FUZZ_WSTRING: {
-      // Get string length
-      size_t givedStrlen;
-      if (provider->remaining_bytes() > 0) {
-        givedStrlen = provider->ConsumeIntegralInRange<size_t>(0, ClMaxStrlen);
-      } else {
-        givedStrlen = ClMaxStrlen;
-        NeedMoreFuzzData(sizeof(size_t));
+      size_t givedStrlen = 1;
+      if (not ClEnableNaiveHarness) {
+        givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
       }
-      // Get string
-      if (provider->remaining_bytes() > 0) {
-        auto wstr =
-            provider->ConsumeBytes<uint8_t>(givedStrlen * sizeof(wchar_t));
-        if (wstr.size() < givedStrlen * sizeof(wchar_t)) {
-          NeedMoreFuzzData(givedStrlen * sizeof(wchar_t) - wstr.size());
-        }
-        size_t wstrlen = (wstr.size() + sizeof(wchar_t) - 1) / sizeof(wchar_t);
-        if (dst == nullptr) {
-          dst = (uint8_t *)managedMalloc((wstrlen + 1) * sizeof(wchar_t));
-        }
-        memcpy(dst, wstr.data(), wstr.size());
-        ((wchar_t *)dst)[wstrlen] = 0;
-      } else {
-        if (dst == nullptr) {
-          dst = (uint8_t *)managedMalloc((givedStrlen + 1) * sizeof(wchar_t));
-        }
-        gRandPool.getBytes(dst, givedStrlen * sizeof(wchar_t));
-        ((wchar_t *)dst)[givedStrlen] = 0;
-        NeedMoreFuzzData(givedStrlen * sizeof(wchar_t));
-      }
+      if (bytesNum != 0)
+        givedStrlen %= (bytesNum + 1);
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc((givedStrlen + 1) * sizeof(wchar_t));
+      FillByteArray(dst, givedStrlen * sizeof(wchar_t));
+      ((wchar_t *)dst)[givedStrlen] = 0;
       break;
     }
     case FUZZ_STRING: {
-      // Get string length
-      size_t givedStrlen;
-      if (provider->remaining_bytes() > 0) {
-        givedStrlen = provider->ConsumeIntegralInRange<size_t>(0, ClMaxStrlen);
-      } else {
-        givedStrlen = ClMaxStrlen;
-        NeedMoreFuzzData(sizeof(size_t));
+      size_t givedStrlen = 1;
+      if (not ClEnableNaiveHarness) {
+        givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
       }
-      // Get string
-      if (provider->remaining_bytes() > 0) {
-        std::string str = provider->ConsumeBytesAsString(givedStrlen);
-        if (str.size() < givedStrlen) {
-          NeedMoreFuzzData(givedStrlen - str.size());
-        }
-        if (dst == nullptr)
-          dst = (uint8_t *)managedMalloc(str.size() + 1);
-        memcpy(dst, str.data(), str.size());
-        ((char *)dst)[str.size()] = 0;
-      } else {
-        // If data remained is not enough, get from fixed random pool
-        if (dst == nullptr)
-          dst = (uint8_t *)managedMalloc(givedStrlen + 1);
-        gRandPool.getBytes(dst, givedStrlen);
-        ((char *)dst)[givedStrlen] = 0;
-        NeedMoreFuzzData(givedStrlen);
-      }
+      if (bytesNum != 0)
+        givedStrlen %= (bytesNum + 1);
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc((givedStrlen + 1) * sizeof(char));
+      FillByteArray(dst, givedStrlen * sizeof(char));
+      ((char *)dst)[givedStrlen] = 0;
       break;
     }
     case FUZZ_SIZE:
     case FUZZ_COUNT: {
       sgxfuzz_assert((bytesNum <= sizeof(size_t)));
-      size_t data = 0;
-      if (provider->remaining_bytes() > 0) {
-        data = provider->ConsumeIntegralInRange<size_t>(
-            0, dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount);
-      } else {
-        // No data prepared, get from fixed random pool
-        // assume little endian
-        gRandPool.getBytes(&data, sizeof(size_t));
-        size_t maxValue = (dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount);
-        data %= (maxValue + 1);
-        NeedMoreFuzzData(sizeof(size_t));
-      }
+      size_t MaxVal = dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
+      size_t data = getIntergerInRange<size_t>(1, MaxVal);
+      data = std::round(zoom(data, MaxVal, ClZoomRate, 1.0));
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
       memcpy(dst, &data, bytesNum);
@@ -284,36 +250,90 @@ public:
     return dst;
   }
 
-  size_t getUserCheckCount() {
-    size_t res;
-    if (provider->remaining_bytes() > 0) {
-      res = provider->ConsumeIntegralInRange<size_t>(0, ClMaxCount);
-    } else {
-      res = ClMaxCount;
-      NeedMoreFuzzData(sizeof(size_t));
-    }
+  // (c,c) -> (a,a)
+  double zoom(double x, double a, double b, double c = 0) {
+    return a - std::pow(std::pow(a - c, b) - std::pow(x - c, b), 1.0 / b);
+  }
+
+  size_t getUserCheckCount(size_t eleSize) {
+    sgxfuzz_assert(eleSize);
+    size_t res = getIntergerInRange<size_t>(1, ClMaxCount);
+    res = zoom(res, ClMaxCount, ClZoomRate, 1.0);
     return res;
   }
 
   bool EnableSetNull() {
-    if (provider->remaining_bytes() > 0) {
-      auto prob = 1.0 - provider->ConsumeProbability<double>();
-      return prob <= ClProvideNullPointerProbability;
-    } else {
-      NeedMoreFuzzData(sizeof(uint64_t));
-      return false;
-    }
+    double prob = getProbability<double>();
+    return prob < ClProvideNullPointerProb;
   }
 
   void init(const uint8_t *Data, size_t Size) {
+    if (provider) {
+      // Remove old
+      delete provider;
+    }
     provider = new FuzzedDataProvider(Data, Size);
     mExpectedFuzzDataSize = Size;
+    mRandPoolBytesOffset = 0;
+  }
+
+  template <class T> T getProbability() {
+    if (provider and provider->remaining_bytes() > 0) {
+      return 1.0 - provider->ConsumeProbability<T>();
+    } else {
+      NeedMoreFuzzData((sizeof(T) <= sizeof(uint32_t)) ? sizeof(uint32_t)
+                                                       : sizeof(uint64_t));
+      return gRandPool.getProbability<T>(mRandPoolBytesOffset++);
+    }
+  }
+
+  template <class T> T getInterger() {
+    if (provider and provider->remaining_bytes() > 0) {
+      return provider->ConsumeIntegral<T>();
+    } else {
+      NeedMoreFuzzData(sizeof(T));
+      return gRandPool.getInterger<T>(mRandPoolBytesOffset++);
+    }
+  }
+
+  template <class T> T getIntergerInRange(T min, T max) {
+    if (provider and provider->remaining_bytes() > 0) {
+      return provider->ConsumeIntegralInRange<T>(min, max);
+    } else {
+      NeedMoreFuzzData(sizeof(T));
+      return gRandPool.getIntergerInRange<T>(min, max, mRandPoolBytesOffset++);
+    }
+  }
+
+  template <typename T> T getFloatingPointInRange(T min, T max) {
+    if (provider and provider->remaining_bytes() > 0) {
+      return provider->ConsumeFloatingPointInRange<T>(min, max);
+    } else {
+      NeedMoreFuzzData(sizeof(T));
+      return gRandPool.getFloatingPointInRange<T>(min, max,
+                                                  mRandPoolBytesOffset++);
+    }
+  }
+  bool FillByteArray(uint8_t *bytes, size_t size) {
+    size_t wrCnt = 0;
+    if (provider and provider->remaining_bytes() > 0) {
+      wrCnt = provider->ConsumeData(bytes, size);
+    }
+    if (wrCnt < size) {
+      gRandPool.getBytes(bytes + wrCnt, size - wrCnt, mRandPoolBytesOffset++);
+      NeedMoreFuzzData(size - wrCnt);
+    }
+    return true;
   }
 
   void clear() {
-    delete provider;
+    // Don't delete provider here, since later sgx_destroy_enclave may use it
     for (auto memArea : allocatedMemAreas) {
       // log_debug("free %p\n", memArea);
+      if (AddrIsInHeapQuarantine && AddrIsInHeapQuarantine((uint64_t)memArea)) {
+        // It may be freed by ECall
+        continue;
+      }
       free(memArea);
     }
     allocatedMemAreas.clear();
@@ -329,6 +349,16 @@ public:
     return ptr;
   }
 
+  void *managedCalloc(size_t count, size_t size) {
+    if (count * size == 0)
+      return nullptr;
+    void *ptr = calloc(count, size);
+    sgxfuzz_assert(ptr != nullptr);
+    // log_debug("calloc %p(%d * %d)\n", ptr, count, size);
+    allocatedMemAreas.push_back((uint8_t *)ptr);
+    return ptr;
+  }
+
   char *managedStr2CStr(std::string str) {
     char *cStr = (char *)managedMalloc(str.length() + 1);
     memcpy(cStr, str.c_str(), str.length());
@@ -337,41 +367,57 @@ public:
   }
 
   void getCallSequence(std::vector<int> &intCallSeq, size_t funcNum) {
-    std::vector<int> callSeq(funcNum);
-    std::iota(callSeq.begin(), callSeq.end(), 0);
-    while (provider->remaining_bytes() > 0 and callSeq.size() > 0) {
-      int idx = provider->ConsumeIntegralInRange<int>(0, callSeq.size() - 1);
-      intCallSeq.push_back(callSeq[idx]);
-      callSeq.erase(callSeq.begin() + idx);
-    }
-    for (auto id : callSeq) {
-      NeedMoreFuzzData(sizeof(int));
-      intCallSeq.push_back(id);
+    // Get CallSeqSize
+    size_t CallSeqSize = getIntergerInRange<size_t>(1, ClMaxCallSeqSize);
+    // Get CallSeq
+    for (size_t i = 0; i < CallSeqSize; i++) {
+      int idx = getIntergerInRange<int>(0, funcNum - 1);
+      intCallSeq.push_back(idx);
     }
   }
 
+  void AddNotModifyOCallRetSpecs(std::string ID) {
+    mNotModifyOCallRetSpecs.emplace(ID);
+  }
+
+  bool EnableModifyOCallRet(char *cParamID) {
+    std::string ParamID(cParamID);
+    if (mNotModifyOCallRetSpecs.count(ParamID)) {
+      return false;
+    }
+    double prob = getProbability<double>();
+    return prob < ClModifyOCallRetProb;
+  }
+
+  bool EnableModifyDoubleFetchValue() {
+    double prob = getProbability<double>();
+    return prob < ClModifyDoubleFetchValueProb;
+  }
+  size_t GetExpectedFuzzDataSize() { return mExpectedFuzzDataSize; }
+
+  bool EnableSanCheckDie() { return ClEnableSanCheckDie; }
+
 private:
-  FuzzedDataProvider *provider;
+  FuzzedDataProvider *provider = nullptr;
   std::vector<uint8_t *> allocatedMemAreas;
-  size_t mExpectedFuzzDataSize;
+  size_t mExpectedFuzzDataSize, mRandPoolBytesOffset = 0;
+  std::unordered_set<std::string> mNotModifyOCallRetSpecs;
 };
 FuzzDataFactory data_factory;
 
 void ShowAllECalls() {
-  log_always("[Init] Num of ECall: %d\n", sgx_fuzzer_ecall_num);
+  log_always("[Init] Num of ECall: %d\n", gFuzzECallNum);
   std::string ecalls;
-  for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-    ecalls += std::string("  " + std::to_string(i) + " - " +
-                          sgx_fuzzer_ecall_wrapper_name_array[i]) +
-              "\n";
+  for (int i = 0; i < gFuzzECallNum; i++) {
+    ecalls +=
+        std::string("  " + std::to_string(i) + " - " + gFuzzECallNameArray[i]) +
+        "\n";
   }
   log_always("ECalls:\n%s\n", ecalls.c_str());
 }
 
 // libFuzzer Callbacks
-extern "C" {
-
-int LLVMFuzzerInitialize(int *argc, char ***argv) {
+extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   (void)argc;
   (void)argv;
 
@@ -383,37 +429,57 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   // Declare the supported options.
   po::options_description desc("LibFuzzerCallback's inner options");
   auto add_opt = desc.add_options();
-  add_opt("cb_help", "produce help message");
-  add_opt("cb_enclave_file_name",
+  add_opt("cb_help", "Produce help message");
+  add_opt("cb_enclave",
           po::value<std::string>(&ClEnclaveFileName)
               ->default_value("enclave.signed.so"),
           "Name of target Enclave file");
-  add_opt(
-      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(4096),
-      "Max count of elements for pointer which size is unknown or not fixed, "
-      "if set too large, multi-level pointer will consume a large memory");
-  add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(65536),
+  add_opt("cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(32),
+          "Max count of elements for pointer");
+  add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(512),
           "Max size of pointer element");
-  add_opt("cb_max_str_len",
-          po::value<size_t>(&ClMaxStrlen)->default_value(4096),
-          "Max length of string");
-  add_opt("cb_filter_out", po::value<std::string>(),
-          "Specified ECalls that we don't test");
-  add_opt("sgxfuzz_test_user",
-          po::value<std::vector<std::string>>()->multitoken(),
-          "test a number of APIs user specified");
+  add_opt("cb_max_strlen", po::value<size_t>(&ClMaxStrlen)->default_value(128),
+          "Max length of string (no tail 0)");
+  add_opt("cb_filter_out", po::value<std::string>(), "Don't test these ECalls");
+  add_opt("sgxfuzz_test_user", po::value<std::string>(), "Test these ECalls");
   add_opt("cb_log_level", po::value<int>(&ClUsedLogLevel)->default_value(2),
           "0-Always, 1-Error, 2-Warning(Default), 3-Debug, 4-Trace");
-  add_opt("cb_provide_nullptr",
-          po::value<bool>(&ClProvideNullPointer)->default_value(true),
-          "Provide NULL for fuzzed pointer parameter");
-  add_opt(
-      "cb_provide_nullptr_probability",
-      po::value<double>(&ClProvideNullPointerProbability)->default_value(0.01),
-      "The minimum granularity is 0.01 (1%)");
-  add_opt("cb_return0_probability",
-          po::value<double>(&ClReturn0Probability)->default_value(0.01),
-          "The minimum granularity is 0.01 (1%)");
+  add_opt("cb_nullptr_prob",
+          po::value<double>(&ClProvideNullPointerProb)->default_value(0.01),
+          "Probability to provide null as fuzz data to pointer");
+  add_opt("cb_return0_prob",
+          po::value<double>(&ClReturn0Prob)->default_value(0.01),
+          "Probability to return all 0 in OCall return");
+  add_opt("cb_ocall_ret_through", po::value<std::string>(),
+          "Not modify OCall return value specified by ID, ID[,...] , e.g. "
+          "/untrusted/ocall_current_time/parameter/0[,...]");
+  add_opt("cb_ecall_queue_size",
+          po::value<size_t>(&ClMaxCallSeqSize)->default_value(20),
+          "Max ECall queue size");
+  add_opt("cb_modify_ocall_ret_prob",
+          po::value<double>(&ClModifyOCallRetProb)->default_value(0.5),
+          "Probability to modify OCall return");
+  add_opt("cb_modify_double_fetch_value_prob",
+          po::value<double>(&ClModifyDoubleFetchValueProb)->default_value(0.5),
+          "Probability to modify value when detect double fetch");
+  add_opt("cb_zoom_rate", po::value<double>(&ClZoomRate)->default_value(1),
+          "Give more or less probability to small count than big count, "
+          "rate > 1 => zoom out, 0 < rate < 1 => zoom in");
+  add_opt("cb_max_payload_size",
+          po::value<size_t>(&ClMaxPayloadSize)->default_value(10000000),
+          "Allocate buffer with cb_max_payload_size, to prepare fuzz data");
+  add_opt("cb_enable_san_check_die",
+          po::value<bool>(&ClEnableSanCheckDie)->default_value(true),
+          "Enable Die when sanitizer check");
+  add_opt("cb_naive_harness",
+          po::value<bool>(&ClEnableNaiveHarness)->default_value(false),
+          "Enable naive harness");
+  add_opt("cb_enable_collect_stack",
+          po::value<bool>(&ClEnableCollectStack)->default_value(false),
+          "Enable collect stack");
+  add_opt("cb_cmp_func_name_in_toctou",
+          po::value<bool>(&ClCmpFuncNameInTOCTOU)->default_value(false),
+          "Compare function name when checking TOCTOU");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -429,21 +495,18 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   if (vm.count("cb_help")) {
     std::stringstream ss;
     ss << desc << "\n";
-    log_always(ss.str().c_str());
+    log_always("%s", ss.str().c_str());
     exit(0);
   }
 
   if (vm.count("sgxfuzz_test_user")) {
     gFuzzMode = TEST_USER;
-    std::vector<std::string> indicesVec =
-        vm["sgxfuzz_test_user"].as<std::vector<std::string>>();
-    for (auto indices : indicesVec) {
-      std::vector<std::string> indexVec;
-      boost::split(indexVec, indices, [](char c) { return c == ','; });
-      for (auto index : indexVec) {
-        boost::trim(index);
-        if (index == "")
-          continue;
+    std::string indexList = vm["sgxfuzz_test_user"].as<std::string>();
+    std::vector<std::string> indexVec;
+    boost::split(indexVec, indexList, [](char c) { return c == ','; });
+    for (auto index : indexVec) {
+      boost::trim(index);
+      if (index != "") {
         gFuzzerSeq.push_back(std::stoi(index, 0, 0));
       }
     }
@@ -462,20 +525,19 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
                  [](char c) { return c == ','; });
 
     std::map<std::string, int> wrapperName2Idx;
-    for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-      wrapperName2Idx[sgx_fuzzer_ecall_wrapper_name_array[i]] = i;
+    for (int i = 0; i < gFuzzECallNum; i++) {
+      wrapperName2Idx[gFuzzECallNameArray[i]] = i;
     }
 
     for (auto fiterOutECall : fiterOutECallVec) {
       boost::trim(fiterOutECall);
-      if (fiterOutECall == "") {
-        continue;
-      }
-      std::string fuzzWrapperPrefix = "fuzz_";
-      if (wrapperName2Idx.count(fuzzWrapperPrefix + fiterOutECall)) {
-        size_t fiterOutECallIdx =
-            wrapperName2Idx[fuzzWrapperPrefix + fiterOutECall];
-        gFilterOutIndices.push_back(fiterOutECallIdx);
+      if (fiterOutECall != "") {
+        std::string fuzzWrapperPrefix = "fuzz_";
+        if (wrapperName2Idx.count(fuzzWrapperPrefix + fiterOutECall)) {
+          size_t fiterOutECallIdx =
+              wrapperName2Idx[fuzzWrapperPrefix + fiterOutECall];
+          gFilterOutIndices.push_back(fiterOutECallIdx);
+        }
       }
     }
     log_always("Filter out:");
@@ -484,82 +546,289 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
     }
     log_always_np("\n");
   }
+
+  if (vm.count("cb_ocall_ret_through")) {
+    std::string NotModifyOCallRetSpecList =
+        vm["cb_ocall_ret_through"].as<std::string>();
+    std::vector<std::string> NotModifyOCallRetSpecVec;
+    boost::split(NotModifyOCallRetSpecVec, NotModifyOCallRetSpecList,
+                 [](char c) { return c == ','; });
+
+    for (auto NotModifyOCallRetSpec : NotModifyOCallRetSpecVec) {
+      boost::trim(NotModifyOCallRetSpec);
+      if (NotModifyOCallRetSpec != "") {
+        data_factory.AddNotModifyOCallRetSpecs(NotModifyOCallRetSpec);
+      }
+    }
+  }
+
   sgxfuzz_assert(ClUsedLogLevel <= 4);
+  sgxfuzz_assert(ClMaxCallSeqSize >= 1);
+  sgxfuzz_assert(ClZoomRate > 0 and ClZoomRate < 50);
   return 0;
 }
 
+#ifndef KAFL_FUZZER
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                           size_t MaxSize, unsigned int Seed) {
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
-void LLVMFuzzerEarlyAfterRunOne() {
+extern "C" void LLVMFuzzerEarlyAfterRunOne() {
   // Destroy Enclave
-  sgxfuzz_error(sgx_destroy_enclave(global_eid) != SGX_SUCCESS,
+  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
+                    SGX_SUCCESS,
                 "[FAIL] Enclave destroy");
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
+#endif
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+  log_always("Start LLVMFuzzerTestOneInput\n");
+#ifndef KAFL_FUZZER
+  // Remove last round environment remain
+  if (SGXFuzzerEnvClearBeforeTest) {
+    sgxfuzz_assert(SGXFuzzerEnvClearBeforeTest() == 0);
+  }
+#endif
   data_factory.init(Data, Size);
 
+  sgx_status_t ret = SGX_ERROR_UNEXPECTED;
+#ifndef KAFL_FUZZER
   // Initialize Enclave
-  sgx_status_t ret = sgx_create_enclave(
-      ClEnclaveFileName.c_str(), SGX_DEBUG_FLAG /* Debug Support: set to 1 */,
-      NULL, NULL, &global_eid, NULL);
+  ret = sgx_create_enclave(ClEnclaveFileName.c_str(),
+                           SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
+                           NULL, &__hidden_sgxfuzzer_harness_global_eid, NULL);
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
+  // Reinit after create
+  data_factory.init(Data, Size);
 
+#endif
   // Test body
   std::vector<int> callSeq;
   if (gFuzzMode == TEST_USER) {
     callSeq = gFuzzerSeq;
   } else {
-    data_factory.getCallSequence(callSeq, sgx_fuzzer_ecall_num);
+    data_factory.getCallSequence(callSeq, gFuzzECallNum);
   }
   for (int i : callSeq) {
-    sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
+    sgxfuzz_assert(i < gFuzzECallNum);
     if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
         gFilterOutIndices.end()) {
       // Filter it out
       continue;
     }
 
-    log_trace("[TEST] ECall-%d: %s\n", i,
-              sgx_fuzzer_ecall_wrapper_name_array[i]);
-    ret = sgx_fuzzer_ecall_array[i]();
+    log_always("Try %s\n", gFuzzECallNameArray[i]);
+    ret = gFuzzECallArray[i]();
     sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
                       ret != SGX_ERROR_ECALL_NOT_ALLOWED,
-                  "[FAIL] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
+                  "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
   }
 
+#ifdef KAFL_FUZZER
+  bool isStarve = false;
+  if (data_factory.GetExpectedFuzzDataSize() > Size) {
+    log_always("Expected size:%d, given size: %d\n",
+               data_factory.GetExpectedFuzzDataSize(), Size);
+    isStarve = true;
+  }
+  kAFL_hypercall(HYPERCALL_KAFL_RELEASE, isStarve);
+  log_error("After release, shouldn't reach here\n");
+#endif
   data_factory.clear();
+
+#ifdef KAFL_FUZZER
+  // Destroy Enclave
+  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
+                    SGX_SUCCESS,
+                "[FAIL] Enclave destroy");
+#endif
   return 0;
 }
 
 // DriverGen Callbacks
-size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
-  return data_factory.getUserCheckCount();
+extern "C" size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
+  return data_factory.getUserCheckCount(eleSize);
 }
 
-uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
-                      FuzzDataTy dataType) {
+extern "C" uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen,
+                                 char *cStrAsParamID, FuzzDataTy dataType) {
   return data_factory.getBytes(ptr, byteArrLen, dataType);
 }
 
-uint8_t *DFGetBytes(size_t byteArrLen, char *cStrAsParamID,
-                    FuzzDataTy dataType) {
-  return data_factory.getBytes(nullptr, byteArrLen, dataType);
+extern "C" uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen,
+                               char *cStrAsParamID, FuzzDataTy dataType) {
+  return data_factory.getBytes(ptr, byteArrLen, dataType);
 }
 
-bool DFEnableSetNull(char *cStrAsParamID) {
-  return ClProvideNullPointer ? data_factory.EnableSetNull() : false;
+extern "C" bool DFEnableSetNull(char *cStrAsParamID) {
+  return data_factory.EnableSetNull();
 }
 
-void *DFManagedMalloc(size_t size) { return data_factory.managedMalloc(size); }
+extern "C" void *DFManagedMalloc(size_t size) {
+  return data_factory.managedMalloc(size);
+}
+extern "C" void *DFManagedCalloc(size_t count, size_t size) {
+  return data_factory.managedCalloc(count, size);
+}
 
-uint64_t getPointToCount(uint64_t size, uint64_t count, uint64_t eleSize) {
-  sgxfuzz_assert(eleSize);
+extern "C" uint64_t DFGetPtToCntECall(uint64_t size, uint64_t count,
+                                      uint64_t eleSize) {
+  sgxfuzz_assert(size and count and eleSize);
   // Maybe size * count != n * eleSize, due to problem of Enclave developer
   uint64_t ptCnt = (size * count + eleSize - 1) / eleSize;
-  return std::max(ptCnt, (uint64_t)1);
+  return ptCnt;
 }
+
+extern "C" uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count,
+                                      uint64_t eleSize) {
+  sgxfuzz_assert(size and count and eleSize);
+  // Maybe size * count != n * eleSize, due to problem of Enclave developer
+  uint64_t ptCnt = (size * count) / eleSize;
+  return ptCnt;
 }
+
+extern "C" bool DFEnableModifyOCallRet(char *cParamID) {
+  return data_factory.EnableModifyOCallRet(cParamID);
+}
+
+extern "C" bool DFEnableModifyDoubleFetchValue() {
+  return data_factory.EnableModifyDoubleFetchValue();
+}
+
+extern "C" int DFGetInt32() { return data_factory.getInterger<int>(); }
+
+extern "C" bool DFEnableSanCheckDie() {
+  return data_factory.EnableSanCheckDie();
+}
+
+extern "C" bool DFEnableCollectStack() { return ClEnableCollectStack; }
+extern "C" bool DFCmpFuncNameInTOCTOU() { return ClCmpFuncNameInTOCTOU; }
+
+#ifdef KAFL_FUZZER
+extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }
+extern "C" void FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv) {
+  ucontext_t *uc = (ucontext_t *)priv;
+  uint64_t reason = 0x8000000000000000ULL | uc->uc_mcontext.gregs[REG_RIP] |
+                    ((uint64_t)siginfo->si_signo << 47);
+  kAFL_hypercall(HYPERCALL_KAFL_PANIC, reason);
+}
+
+int agent_init(int verbose) {
+  // Handshake with front end
+  kAFL_hypercall(HYPERCALL_KAFL_ACQUIRE, 0);
+  kAFL_hypercall(HYPERCALL_KAFL_RELEASE, 0);
+
+  get_nyx_cpu_type();
+
+  // Get host config
+  host_config_t host_config;
+  kAFL_hypercall(HYPERCALL_KAFL_GET_HOST_CONFIG, (uintptr_t)&host_config);
+
+  if (verbose) {
+    fprintf(stderr, "GET_HOST_CONFIG\n");
+    fprintf(stderr, "\thost magic:  0x%x, version: 0x%x\n",
+            host_config.host_magic, host_config.host_version);
+    fprintf(stderr, "\tbitmap size: 0x%x, ijon:    0x%x\n",
+            host_config.bitmap_size, host_config.ijon_bitmap_size);
+    fprintf(stderr, "\tpayload size: %u KB\n",
+            host_config.payload_buffer_size / 1024);
+    fprintf(stderr, "\tworker id: %d\n", host_config.worker_id);
+  }
+
+  if (host_config.host_magic != NYX_HOST_MAGIC) {
+    hprintf("HOST_MAGIC mismatch: %08x != %08x\n", host_config.host_magic,
+            NYX_HOST_MAGIC);
+    habort((char *)"HOST_MAGIC mismatch!");
+    return -1;
+  }
+
+  if (host_config.host_version != NYX_HOST_VERSION) {
+    hprintf("HOST_VERSION mismatch: %08x != %08x\n", host_config.host_version,
+            NYX_HOST_VERSION);
+    habort((char *)"HOST_VERSION mismatch!");
+    return -1;
+  }
+
+  if (host_config.payload_buffer_size > ClMaxPayloadSize) {
+    hprintf("Fuzzer payload size too large: %lu > %lu\n",
+            host_config.payload_buffer_size, ClMaxPayloadSize);
+    habort((char *)"Host payload size too large!");
+    return -1;
+  }
+
+  agent_config_t agent_config = {0};
+  agent_config.agent_magic = NYX_AGENT_MAGIC;
+  agent_config.agent_version = NYX_AGENT_VERSION;
+  // agent_config.agent_timeout_detection = 0; // timeout by host
+  // agent_config.agent_tracing = 0; // trace by host
+  // agent_config.agent_ijon_tracing = 0; // no IJON
+  agent_config.agent_non_reload_mode = 0; // no persistent mode
+  // agent_config.trace_buffer_vaddr = 0xdeadbeef;
+  // agent_config.ijon_trace_buffer_vaddr = 0xdeadbeef;
+  agent_config.coverage_bitmap_size = host_config.bitmap_size;
+  // agent_config.input_buffer_size;
+  // agent_config.dump_payloads; // set by hypervisor (??)
+
+  kAFL_hypercall(HYPERCALL_KAFL_SET_AGENT_CONFIG, (uintptr_t)&agent_config);
+
+  return 0;
+}
+
+extern "C" void GetEnclaveDSORange(uintptr_t *start, uintptr_t *end);
+int main(int argc, char **argv) {
+  LLVMFuzzerInitialize(&argc, &argv);
+  agent_init(1);
+
+  // Register payload buffer
+  kAFL_payload *pbuf =
+      (kAFL_payload *)malloc_resident_pages(ClMaxPayloadSize / PAGE_SIZE);
+  assert(pbuf);
+  kAFL_hypercall(HYPERCALL_KAFL_GET_PAYLOAD, (uint64_t)pbuf);
+
+  int status = 0;
+  pid_t pid = -1;
+  while (1) {
+    hprintf("[IMPORTANT] Parent Process Loop\n");
+    pid = fork();
+    assert(pid != -1);
+
+    if (!pid) {
+      log_always("Start FuzzerTestOneInput\n");
+
+      // Initialize Enclave
+      sgx_status_t ret = sgx_create_enclave(
+          ClEnclaveFileName.c_str(),
+          SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL, NULL,
+          &__hidden_sgxfuzzer_harness_global_eid, NULL);
+      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
+
+      uintptr_t EnclaveStart, EnclaveEnd;
+      GetEnclaveDSORange(&EnclaveStart, &EnclaveEnd);
+      hrange_submit(0, EnclaveStart, EnclaveEnd);
+      hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
+              EnclaveEnd);
+
+      kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
+      log_always("Data %p %d\n", pbuf->data, pbuf->size);
+      LLVMFuzzerTestOneInput(pbuf->data, pbuf->size);
+      return -1;
+    } else if (pid > 0) {
+      waitpid(pid, &status, WUNTRACED);
+      if (WIFEXITED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Exit: %d\n",
+                WEXITSTATUS(status));
+      } else if (WIFSIGNALED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Signal: %d\n",
+                WTERMSIG(status));
+      } else if (WIFSTOPPED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Stop: %d\n", WSTOPSIG(status));
+      } else {
+        hprintf("[IMPORTANT] Test Child Process Exit Unexpectedly\n");
+      }
+      kAFL_hypercall(HYPERCALL_KAFL_RELEASE, 0);
+    }
+  }
+}
+#endif

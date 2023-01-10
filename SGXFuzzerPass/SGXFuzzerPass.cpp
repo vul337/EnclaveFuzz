@@ -19,7 +19,6 @@ public:
 
   bool runOnModule(Module &M) override {
     // run DriverGenerator
-    dbgs() << "== DriverGenerator: " << M.getName() << " ==\n";
     DriverGenerator gen;
     return gen.runOnModule(M);
   }

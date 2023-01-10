@@ -7,14 +7,18 @@ import json
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('object', metavar="<xxx.o>")
+    parser = argparse.ArgumentParser(prefix_chars="+")
     parser.add_argument(
-        '-o', '--output', metavar="<e.g. target.json>", required=True)
-    args = parser.parse_args()
+        "+o",
+        "++output_dir",
+        required=True,
+    )
+    args = parser.parse_args(getScriptArgs())
 
-    object_abs = os.path.abspath(args.object)
-    output_abs = os.path.abspath(args.output)
+    object = getCurrentProgram()
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
+    output_abs = os.path.abspath(os.path.join(args.output_dir, str(object.getExecutablePath()).replace("/","_").replace(".","_")))
 
     target_json = {}
     if os.path.exists(output_abs):
@@ -24,19 +28,16 @@ def main():
             except json.decoder.JSONDecodeError:
                 pass
 
-    res = subprocess.run(
-        ["nm", "-C", "--defined-only", object_abs], capture_output=True)
     funcs = []
-    for line in res.stdout.decode("utf-8").splitlines():
-        match = re.match(r"\w+\s+([a-zA-Z])\s+(.*)", line)
-        assert match
-        if match.group(1) == "T" or match.group(1) == "t":
-            funcs.append(match.group(2))
+    for func in object.getFunctionManager().getFunctions(True):
+        if not func.isThunk():
+            func_name = func.getName()
+            funcs.append(func_name)
+            # print("**** " + func_name)
 
-    target_json[args.object] = funcs
+    target_json[object.getExecutablePath()] = funcs
     with open(output_abs, "w") as target_file:
         json.dump(target_json, target_file)
 
 
-if __name__ == "__main__":
-    main()
+main()

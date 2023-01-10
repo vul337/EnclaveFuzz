@@ -125,7 +125,7 @@ public:
                              std::pair<bool *, size_t> *sensitiveIndicator);
   SensitiveLevel getSensitiveLevel(StringRef str);
   StringRef getObjMeaningfulName(SVF::ObjVar *objPN);
-  static bool isTBridgeFunc(Function &F);
+  bool isTBridgeFunc(Function &F);
   // update SVF's ExtAPI.json
   void updateSVFExtAPI();
 
@@ -209,5 +209,6 @@ private:
   size_t propagateCnt = 0;
   std::string ExtAPIJsonFile;
   ShadowMapping Mapping;
+  SGXSanInstVisitor mInstVisitor;
 };
 } // namespace llvm

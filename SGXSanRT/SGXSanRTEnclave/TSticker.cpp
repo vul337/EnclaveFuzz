@@ -38,19 +38,21 @@ extern "C" sgx_status_t tsticker_ecall(const sgx_enclave_id_t eid,
   return result;
 }
 
-// gAlreadyAsanInited should reside in Enclave image, since we should set it to
-// false whenever we load Enclave image and call __asan_init
-bool gAlreadyAsanInited = false;
 /// @brief Must called before SanitizerCoverage's ctors, since in this function
 /// I hook callbacks in these ctors.
 extern "C" void __asan_init() {
+  // gAlreadyAsanInited should reside in Enclave image, since we should set it
+  // to false whenever we load Enclave image and call __asan_init
+  static bool gAlreadyAsanInited = false;
   if (gAlreadyAsanInited == false) {
     register_sgxsan_sigaction();
+#ifndef KAFL_FUZZER
     // We already initialized shadow memory in host ctor
     if (hook_enclave() != 0) {
       abort();
     }
-    PoisonEnclaveDSOCodeSegment();
+#endif
+    gEnclaveInfo.PoisonEnclaveDSOCode();
     gAlreadyAsanInited = true;
   }
 }
@@ -71,3 +73,11 @@ extern "C" bool check_ecall(ECallCheckType ty, uint32_t targetECallIdx,
   }
   }
 }
+
+#ifndef KAFL_FUZZER
+extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
+extern "C" void TSticker__llvm_profile_write_file() {
+  if (__llvm_profile_write_file)
+    __llvm_profile_write_file();
+}
+#endif

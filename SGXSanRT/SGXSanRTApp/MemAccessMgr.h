@@ -19,6 +19,8 @@ struct FetchInfo {
   bool toCmp = false;
 };
 
+extern "C" __attribute__((weak)) bool DFCmpFuncNameInTOCTOU();
+
 class MemAccessMgr {
 public:
   /* Statistics each ECall */
@@ -52,8 +54,17 @@ public:
 #endif
   }
 
-  static void active() { m_active = true; }
-  static void deactive() { m_active = false; }
+  static void active() {
+    if (m_inited) {
+      m_active = true;
+    }
+  }
+
+  static void deactive() {
+    if (m_inited) {
+      m_active = false;
+    }
+  }
 
   // fetch must be a LoadInst
   static bool double_fetch_detect(const void *ptr, size_t size,
@@ -61,9 +72,8 @@ public:
     sgxsan_assert(ptr && size && sgx_is_outside_enclave(ptr, size));
     // there may be ocall and ocall return before enter first ecall, or in
     // hooked mem intrinsics
-    if (!m_active)
+    if (!m_active or !m_inited)
       return false;
-    sgxsan_assert(m_inited);
     if (used_to_cmp) {
       // it's a fetch used to compare, maybe used to 'check'
       while (m_control_fetchs.size() >= CONTROL_FETCH_QUEUE_MAX_SIZE) {
@@ -85,10 +95,12 @@ public:
         // if parent function name is not known, assume at same function and
         // only check overlap
         bool at_same_func = true;
-        if (funcName)
-          at_same_func = strncmp(control_fetch.funcName, funcName,
-                                 std::min((size_t)FUNC_NAME_MAX_LEN,
-                                          strlen(funcName))) == 0;
+        if (DFCmpFuncNameInTOCTOU and DFCmpFuncNameInTOCTOU()) {
+          if (funcName)
+            at_same_func = strncmp(control_fetch.funcName, funcName,
+                                   std::min((size_t)FUNC_NAME_MAX_LEN,
+                                            strlen(funcName))) == 0;
+        }
         bool is_overlap =
             RangesOverlap((const char *)control_fetch.addr, control_fetch.size,
                           (const char *)ptr, size);

@@ -17,7 +17,6 @@
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "AddressSanitizer.h"
-#include "PassUtil.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -98,6 +97,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "sgxsan"
 const uint8_t kSGXSanInEnclaveMagic = 0x40;
+const uint8_t kSGXSanL1Filter = 0x8F;
 
 static const uint64_t kDefaultShadowScale = 3;
 static const uint64_t kDefaultShadowOffset32 = 1ULL << 29;
@@ -184,6 +184,10 @@ const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
 static const unsigned kAllocaRzSize = 32;
 
 // Command-line flags.
+
+static cl::opt<bool> ClInEnclave("in-enclave",
+                                 cl::desc("in Enclave or Host App"), cl::Hidden,
+                                 cl::init(true));
 
 static cl::opt<bool>
     ClEnableKasan("sgxsan-kernel",
@@ -1753,24 +1757,27 @@ Instruction *AddressSanitizer::generateCrashCode(Instruction *InsertBefore,
                                                  Value *Addr, bool IsWrite,
                                                  size_t AccessSizeIndex,
                                                  Value *SizeArgument,
-                                                 uint32_t Exp) {
+                                                 uint32_t Exp,
+                                                 const char *msg) {
   IRBuilder<> IRB(InsertBefore);
   Value *ExpVal = Exp == 0 ? nullptr : ConstantInt::get(IRB.getInt32Ty(), Exp);
   CallInst *Call = nullptr;
   if (SizeArgument) {
     if (Exp == 0)
-      Call = IRB.CreateCall(AsanErrorCallbackSized[IsWrite][0],
-                            {Addr, SizeArgument});
+      Call =
+          IRB.CreateCall(AsanErrorCallbackSized[IsWrite][0],
+                         {Addr, SizeArgument, IRB.CreateGlobalStringPtr(msg)});
     else
-      Call = IRB.CreateCall(AsanErrorCallbackSized[IsWrite][1],
-                            {Addr, SizeArgument, ExpVal});
+      Call = IRB.CreateCall(
+          AsanErrorCallbackSized[IsWrite][1],
+          {Addr, SizeArgument, ExpVal, IRB.CreateGlobalStringPtr(msg)});
   } else {
     if (Exp == 0)
-      Call =
-          IRB.CreateCall(AsanErrorCallback[IsWrite][0][AccessSizeIndex], Addr);
+      Call = IRB.CreateCall(AsanErrorCallback[IsWrite][0][AccessSizeIndex],
+                            {Addr, IRB.CreateGlobalStringPtr(msg)});
     else
       Call = IRB.CreateCall(AsanErrorCallback[IsWrite][1][AccessSizeIndex],
-                            {Addr, ExpVal});
+                            {Addr, ExpVal, IRB.CreateGlobalStringPtr(msg)});
   }
 
   Call->setCannotMerge();
@@ -1845,112 +1852,214 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                       globalFuncName, ConstantInt::get(IRB.getInt32Ty(), Exp)});
     return;
   }
+
   // <Below is pseudo-code>
   // Cmp1_BB:
   // get ShadowByte
   // cmp ShadowByte == IN_ENCLAVE_FLAG
-  // branch InEnclaveAccess_BB, Cmp2_BB
+  // branch Access_BB, Cmp2_BB (Replace InEnclaveAccess_BB with Access_BB for
+  // faster)
   //
   // Cmp2_BB:
-  // IsInEnclave = and ShadowByte, IN_ENCLAVE_FLAG
-  // cmp IsInEnclave == 0
-  // branch OutEnclaveAccess_BB, SlowPath1_BB
-  //
-  // SlowPath1_BB:
-  // ShadowByte = and ShadowByte, 0x8F
   // cmp ShadowByte == 0
-  // branch InEnclaveAccess_BB, SlowPath2_BB
-  //
-  // SlowPath2_BB:
-  // cmp LastAccessByte >= ShadowByte
-  // branch Crash_BB, InEnclaveAccess_BB
-  //
-  // Crash_BB:
-  // Report Error and Crash
+  // branch OutEnclaveAccess_BB, Cmp3_BB
   //
   // OutEnclaveAccess_BB:
-  // MemAccessMgr Statistics;
+  // MemAccessMgrOutEnclaveAccess();
   // branch Access_BB;
   //
-  // InEnclaveAccess_BB:
-  // MemAccessMgr Statistics;
+  // Cmp3_BB:
+  // InOutEnclaveStatus = and ShadowByte, IN_ENCLAVE_FLAG
+  // cmp InOutEnclaveStatus == IN_ENCLAVE_FLAG
+  // branch InEnclaveSlowPath1_BB, Cmp4_BB
+  //
+  // Cmp4_BB:
+  // cmp InOutEnclaveStatus == 0
+  // branch OutEnclaveSlowPath1_BB, MixedAccessCrash_BB
+  //
+  // InEnclaveSlowPath1_BB:
+  // MemAccessMgrInEnclaveAccess(); (Remove for faster)
+  // ShadowByte = and ShadowByte, kSGXSanL1Filter
+  // cmp ShadowByte == 0
+  // branch Access_BB, InEnclaveSlowPath2_BB
+  //
+  // InEnclaveSlowPath2_BB:
+  // cmp LastAccessByte >= ShadowByte
+  // branch EnclaveOOBCrash_BB, Access_BB
+  //
+  // OutEnclaveSlowPath1_BB:
+  // MemAccessMgrOutEnclaveAccess();
+  // ShadowByte = and ShadowByte, L1Filter
+  // cmp ShadowByte == 0
+  // branch Access_BB, OutEnclaveSlowPath2_BB
+  //
+  // OutEnclaveSlowPath2_BB:
+  // cmp LastAccessByte >= ShadowByte
+  // branch HostOOBCrash_BB, Access_BB
+  //
+  // MixedAccessCrash_BB:
+  // Report Mixed Access Error and Crash
+  //
+  // EnclaveOOBCrash_BB:
+  // Report Enclave OOB Error and Crash
+  //
+  // HostOOBCrash_BB:
+  // Report Host OOB Error and Crash
+  //
+  // InEnclaveAccess_BB: (Removed for faster)
+  // MemAccessMgrInEnclaveAccess();
   // branch Access_BB;
   //
   // Access_BB:
 
-  BasicBlock *Cmp1_BB = nullptr, *Cmp2_BB = nullptr, *SlowPath1_BB = nullptr,
-             *Crash_BB = nullptr, *OutEnclaveAccess_BB = nullptr,
-             *InEnclaveAccess_BB = nullptr, *Access_BB = nullptr;
+  BasicBlock *Cmp1_BB = nullptr, *Cmp2_BB = nullptr, *Cmp3_BB = nullptr,
+             *Cmp4_BB = nullptr, *InEnclaveSlowPath1_BB = nullptr,
+             *InEnclaveSlowPath2_BB = nullptr,
+             *OutEnclaveSlowPath1_BB = nullptr,
+             *OutEnclaveSlowPath2_BB = nullptr, *MixedAccessCrash_BB = nullptr,
+             *EnclaveOOBCrash_BB = nullptr, *HostOOBCrash_BB = nullptr,
+             *OutEnclaveAccess_BB = nullptr, *InEnclaveAccess_BB = nullptr,
+             *Access_BB = nullptr;
+
+  /* Prepare BB firstly */
   Cmp1_BB = InsertBefore->getParent();
   Access_BB = SplitBlock(Cmp1_BB, InsertBefore);
   Function *curFunc = Cmp1_BB->getParent();
-  InEnclaveAccess_BB =
-      BasicBlock::Create(*C, "InEnclaveAccess_BB", curFunc, Access_BB);
-  OutEnclaveAccess_BB = BasicBlock::Create(*C, "OutEnclaveAccess_BB", curFunc,
-                                           InEnclaveAccess_BB);
-  Crash_BB = BasicBlock::Create(*C, "Crash_BB", curFunc, OutEnclaveAccess_BB);
-  SlowPath1_BB = BasicBlock::Create(*C, "SlowPath1_BB", curFunc, Crash_BB);
-  Cmp2_BB = BasicBlock::Create(*C, "Cmp2_BB", curFunc, SlowPath1_BB);
+  // InEnclaveAccess_BB =
+  //     BasicBlock::Create(*C, "InEnclaveAccess_BB", curFunc, Access_BB);
+  HostOOBCrash_BB =
+      BasicBlock::Create(*C, "HostOOBCrash_BB", curFunc, Access_BB);
+  EnclaveOOBCrash_BB =
+      BasicBlock::Create(*C, "EnclaveOOBCrash_BB", curFunc, HostOOBCrash_BB);
+  MixedAccessCrash_BB = BasicBlock::Create(*C, "MixedAccessCrash_BB", curFunc,
+                                           EnclaveOOBCrash_BB);
+  OutEnclaveSlowPath2_BB = BasicBlock::Create(*C, "OutEnclaveSlowPath2_BB",
+                                              curFunc, MixedAccessCrash_BB);
+  OutEnclaveSlowPath1_BB = BasicBlock::Create(*C, "OutEnclaveSlowPath1_BB",
+                                              curFunc, OutEnclaveSlowPath2_BB);
+  InEnclaveSlowPath2_BB = BasicBlock::Create(*C, "InEnclaveSlowPath2_BB",
+                                             curFunc, OutEnclaveSlowPath1_BB);
+  InEnclaveSlowPath1_BB = BasicBlock::Create(*C, "InEnclaveSlowPath1_BB",
+                                             curFunc, InEnclaveSlowPath2_BB);
+  Cmp4_BB = BasicBlock::Create(*C, "Cmp4_BB", curFunc, InEnclaveSlowPath1_BB);
+  Cmp3_BB = BasicBlock::Create(*C, "Cmp3_BB", curFunc, Cmp4_BB);
+  OutEnclaveAccess_BB =
+      BasicBlock::Create(*C, "OutEnclaveAccess_BB", curFunc, Cmp3_BB);
+  Cmp2_BB = BasicBlock::Create(*C, "Cmp2_BB", curFunc, OutEnclaveAccess_BB);
 
+  /* Cmp1_BB */
   Instruction *Cmp1_BBTerm = Cmp1_BB->getTerminator();
   IRB.SetInsertPoint(Cmp1_BBTerm);
+  // Get ShadowValue
   Type *ShadowTy =
       IntegerType::get(*C, std::max(8U, TypeSize >> Mapping.Scale));
   Type *ShadowPtrTy = PointerType::get(ShadowTy, 0);
   Value *ShadowPtr = memToShadow(AddrLong, IRB);
-  Value *CmpVal = Constant::getNullValue(ShadowTy);
+  Value *NullVal = Constant::getNullValue(ShadowTy);
   Value *InEnclaveFlag =
       (ShadowTy == Type::getInt16Ty(*C))
           ? IRB.getInt16((kSGXSanInEnclaveMagic << 8) + kSGXSanInEnclaveMagic)
           : IRB.getInt8(kSGXSanInEnclaveMagic);
   Value *ShadowValue =
       IRB.CreateLoad(ShadowTy, IRB.CreateIntToPtr(ShadowPtr, ShadowPtrTy));
-
+  // CMP, NE faster then EQ (Not + NE)
   Value *Cmp = IRB.CreateICmpNE(ShadowValue, InEnclaveFlag);
   size_t Granularity = 1ULL << Mapping.Scale;
   Instruction *CrashTerm = nullptr;
-
-  IRB.CreateCondBr(Cmp, Cmp2_BB, InEnclaveAccess_BB,
+  IRB.CreateCondBr(Cmp, Cmp2_BB, Access_BB,
                    MDBuilder(*C).createBranchWeights(1, 100000));
   Cmp1_BBTerm->eraseFromParent();
 
+  /* Cmp2_BB */
   IRB.SetInsertPoint(Cmp2_BB);
-  Value *IsInEnclave =
-      IRB.CreateICmpNE(IRB.CreateAnd(ShadowValue, InEnclaveFlag), CmpVal);
-  IRB.CreateCondBr(IsInEnclave, SlowPath1_BB, OutEnclaveAccess_BB,
-                   MDBuilder(*C).createBranchWeights(100000, 1));
-
-  IRB.SetInsertPoint(SlowPath1_BB);
-  // filte out sensitive poison value, then sensitive partial valid object oob
-  // access can be detected
-  ShadowValue = IRB.CreateAnd(ShadowValue, ShadowTy == Type::getInt16Ty(*C)
-                                               ? IRB.getInt16(0x8F8F)
-                                               : IRB.getInt8(0x8F));
-  Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
-
-  // If access less then 8 bytes (i.e. 1 shadow bytes), we need SlowPath2_BB to
-  // check
-  if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
-    // We use branch weights for the slow path check, to indicate that the slow
-    // path is rarely taken. This seems to be the case for SPEC benchmarks.
-    BasicBlock *SlowPath2_BB =
-        BasicBlock::Create(*C, "SlowPath2_BB", curFunc, Crash_BB);
-    IRB.CreateCondBr(Cmp, SlowPath2_BB, InEnclaveAccess_BB,
-                     MDBuilder(*C).createBranchWeights(1, 100000));
-
-    IRB.SetInsertPoint(SlowPath2_BB);
-    Cmp = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
-  }
-  IRB.CreateCondBr(Cmp, Crash_BB, InEnclaveAccess_BB,
+  Value *SVNot0 = IRB.CreateICmpNE(ShadowValue, NullVal);
+  IRB.CreateCondBr(SVNot0, Cmp3_BB, OutEnclaveAccess_BB,
                    MDBuilder(*C).createBranchWeights(1, 100000));
 
-  IRB.SetInsertPoint(Crash_BB);
+  /* Cmp3_BB */
+  IRB.SetInsertPoint(Cmp3_BB);
+  Value *InOutEnclaveStatus = IRB.CreateAnd(ShadowValue, InEnclaveFlag);
+  IRB.CreateCondBr(IRB.CreateICmpNE(InOutEnclaveStatus, InEnclaveFlag), Cmp4_BB,
+                   InEnclaveSlowPath1_BB);
+
+  /* Cmp4_BB */
+  IRB.SetInsertPoint(Cmp4_BB);
+  IRB.CreateCondBr(IRB.CreateICmpNE(InOutEnclaveStatus, NullVal),
+                   MixedAccessCrash_BB, OutEnclaveSlowPath1_BB);
+
+  /* InEnclaveSlowPath1_BB */
+  IRB.SetInsertPoint(InEnclaveSlowPath1_BB);
+  // IRB.CreateCall(MemAccessMgrInEnclaveAccess);
+  // filte out sensitive poison value, then sensitive partial valid object oob
+  // access can be detected
+  Value *IEL1ShadowValue = IRB.CreateAnd(
+      ShadowValue, ShadowTy == Type::getInt16Ty(*C)
+                       ? IRB.getInt16((kSGXSanL1Filter << 8) + kSGXSanL1Filter)
+                       : IRB.getInt8(kSGXSanL1Filter));
+  IRB.CreateCondBr(IRB.CreateICmpNE(IEL1ShadowValue, NullVal),
+                   InEnclaveSlowPath2_BB, Access_BB,
+                   MDBuilder(*C).createBranchWeights(1, 100000));
+
+  /* InEnclaveSlowPath2_BB */
+  IRB.SetInsertPoint(InEnclaveSlowPath2_BB);
+  if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
+    IRB.CreateCondBr(createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize),
+                     EnclaveOOBCrash_BB, Access_BB,
+                     MDBuilder(*C).createBranchWeights(1, 100000));
+  } else {
+    IRB.CreateBr(EnclaveOOBCrash_BB);
+  }
+
+  /* OutEnclaveSlowPath1_BB */
+  IRB.SetInsertPoint(OutEnclaveSlowPath1_BB);
+  IRB.CreateCall(MemAccessMgrOutEnclaveAccess,
+                 {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
+                  ConstantInt::get(IntptrTy, (TypeSize >> 3)),
+                  IRB.getInt1(IsWrite), IRB.getInt1(hasCmpUser(OrigIns)),
+                  globalFuncName});
+  Value *OEL1ShadowValue = IRB.CreateAnd(
+      ShadowValue, ShadowTy == Type::getInt16Ty(*C)
+                       ? IRB.getInt16((kSGXSanL1Filter << 8) + kSGXSanL1Filter)
+                       : IRB.getInt8(kSGXSanL1Filter));
+  IRB.CreateCondBr(IRB.CreateICmpNE(OEL1ShadowValue, NullVal),
+                   OutEnclaveSlowPath2_BB, Access_BB,
+                   MDBuilder(*C).createBranchWeights(1, 100000));
+
+  /* OutEnclaveSlowPath2_BB */
+  IRB.SetInsertPoint(OutEnclaveSlowPath2_BB);
+  if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
+    IRB.CreateCondBr(createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize),
+                     HostOOBCrash_BB, Access_BB,
+                     MDBuilder(*C).createBranchWeights(1, 100000));
+  } else {
+    IRB.CreateBr(HostOOBCrash_BB);
+  }
+
+  /* MixedAccessCrash_BB */
+  IRB.SetInsertPoint(MixedAccessCrash_BB);
   CrashTerm = IRB.CreateUnreachable();
+  Instruction *MixedAccessCrash =
+      generateCrashCode(CrashTerm, AddrLong, IsWrite, AccessSizeIndex,
+                        SizeArgument, Exp, "Mixed Access");
+  MixedAccessCrash->setDebugLoc(OrigIns->getDebugLoc());
 
-  Instruction *Crash = generateCrashCode(CrashTerm, AddrLong, IsWrite,
-                                         AccessSizeIndex, SizeArgument, Exp);
-  Crash->setDebugLoc(OrigIns->getDebugLoc());
+  /* EnclaveOOBCrash_BB */
+  IRB.SetInsertPoint(EnclaveOOBCrash_BB);
+  CrashTerm = IRB.CreateUnreachable();
+  Instruction *EnclaveOOBCrash =
+      generateCrashCode(CrashTerm, AddrLong, IsWrite, AccessSizeIndex,
+                        SizeArgument, Exp, "Enclave OOB");
+  EnclaveOOBCrash->setDebugLoc(OrigIns->getDebugLoc());
 
+  /* HostOOBCrash_BB */
+  IRB.SetInsertPoint(HostOOBCrash_BB);
+  CrashTerm = IRB.CreateUnreachable();
+  Instruction *HostOOBCrash =
+      generateCrashCode(CrashTerm, AddrLong, IsWrite, AccessSizeIndex,
+                        SizeArgument, Exp, "Host OOB");
+  HostOOBCrash->setDebugLoc(OrigIns->getDebugLoc());
+
+  /* OutEnclaveAccess_BB */
   IRB.SetInsertPoint(OutEnclaveAccess_BB);
   IRB.CreateCall(MemAccessMgrOutEnclaveAccess,
                  {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
@@ -1959,9 +2068,10 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                   globalFuncName});
   IRB.CreateBr(Access_BB);
 
-  IRB.SetInsertPoint(InEnclaveAccess_BB);
-  IRB.CreateCall(MemAccessMgrInEnclaveAccess);
-  IRB.CreateBr(Access_BB);
+  /* InEnclaveAccess_BB */
+  // IRB.SetInsertPoint(InEnclaveAccess_BB);
+  // IRB.CreateCall(MemAccessMgrInEnclaveAccess);
+  // IRB.CreateBr(Access_BB);
 }
 
 // Instrument unusual size or unusual alignment.
@@ -2831,8 +2941,9 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
                                       Type::getInt8PtrTy(*C)};
       SmallVector<Type *, 5> Args3 = {IntptrTy, Type::getInt1Ty(*C),
                                       Type::getInt8PtrTy(*C)};
-      SmallVector<Type *, 3> Args2 = {IntptrTy, IntptrTy};
-      SmallVector<Type *, 2> Args1{1, IntptrTy};
+      SmallVector<Type *, 3> Args2 = {IntptrTy, IntptrTy,
+                                      Type::getInt8PtrTy(*C)};
+      SmallVector<Type *, 2> Args1{IntptrTy, Type::getInt8PtrTy(*C)};
       if (Exp) {
         Type *ExpType = Type::getInt32Ty(*C);
         Args4.push_back(ExpType);
@@ -3099,6 +3210,7 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   bool UseCalls = (ClInstrumentationWithCallsThreshold >= 0 &&
                    OperandsToInstrument.size() + IntrinToInstrument.size() >
                        (unsigned)ClInstrumentationWithCallsThreshold);
+  UseCalls = true;
   const DataLayout &DL = F.getParent()->getDataLayout();
   ObjectSizeOpts ObjSizeOpts;
   ObjSizeOpts.RoundToAlign = true;
@@ -3664,7 +3776,10 @@ void FunctionStackPoisoner::processStaticAllocas() {
 
   auto ShadowAfterScope = GetShadowBytesAfterScope(SVD, L);
   for (auto &byte : ShadowAfterScope) {
-    byte = (byte & 0x8F) | kSGXSanInEnclaveMagic;
+    byte &= kSGXSanL1Filter;
+    if (ClInEnclave) {
+      byte |= kSGXSanInEnclaveMagic;
+    }
   }
 
   // Poison the stack red zones at the entry.
@@ -3676,7 +3791,10 @@ void FunctionStackPoisoner::processStaticAllocas() {
   if (!StaticAllocaPoisonCallVec.empty()) {
     auto ShadowInScope = GetShadowBytes(SVD, L);
     for (auto &byte : ShadowInScope) {
-      byte = (byte & 0x8F) | kSGXSanInEnclaveMagic;
+      byte &= kSGXSanL1Filter;
+      if (ClInEnclave) {
+        byte |= kSGXSanInEnclaveMagic;
+      }
     }
 
     // Poison static allocas near lifetime intrinsics.
@@ -3883,7 +4001,7 @@ void AddressSanitizer::instrumentTDECallMgr(Function *ecallWrapper) {
   IRB.CreateCall(TDECallConstructor);
 
   for (auto RetInst :
-       SGXSanInstVisitor::visitFunction(*ecallWrapper).BroadReturnInstVec) {
+       mInstVisitor.visitFunction(*ecallWrapper).BroadReturnInstVec) {
     IRB.SetInsertPoint(RetInst);
     IRB.CreateCall(TDECallDestructor);
   }
@@ -3912,7 +4030,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
   IRB.CreateCall(PushOCAllocStack);
 
   for (auto RetInst :
-       SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec) {
+       mInstVisitor.visitFunction(OcallWrapper).BroadReturnInstVec) {
     IRB.SetInsertPoint(RetInst);
     IRB.CreateCall(PopOCAllocStack);
     IRB.CreateCall(MemAccessMgrActive);

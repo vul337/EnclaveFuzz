@@ -16,8 +16,10 @@ DEFINE_BACK_END(realloc) = __libc_realloc;
 DEFINE_BACK_END(malloc_usable_size) = nullptr;
 #undef DEFINE_BACK_END
 
-bool alreadyUpdateBackEndHeapAllocator = false;
+SGXSanHeapBacktrace *gHeapBT = nullptr;
+QuarantineCache *gQCache = nullptr;
 void updateBackEndHeapAllocator() {
+  static bool alreadyUpdateBackEndHeapAllocator = false;
   // since we also update it in SGXSan ctor, so this statement only will be
   // triggered before SGXSan's ctor, and only one main thread exists, thus,
   // needn't consider multi-thread situation
@@ -31,18 +33,22 @@ void updateBackEndHeapAllocator() {
   GET_BACK_END(realloc);
   GET_BACK_END(malloc_usable_size);
 #undef GET_BACK_END
+  // Never free, since they are still used when exit()
+  void *p = BACKEND_MALLOC(sizeof(SGXSanHeapBacktrace));
+  gHeapBT = new (p) SGXSanHeapBacktrace();
+  p = BACKEND_MALLOC(sizeof(QuarantineCache));
+  gQCache = new (p) QuarantineCache();
   alreadyUpdateBackEndHeapAllocator = true;
 }
-
-static QuarantineCache QCache;
-QuarantineCache *gQCache = &QCache;
 
 static pthread_mutex_t heap_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
 const size_t kHeapObjectChunkMagic = 0xDEADBEEF;
 
+#ifndef KAFL_FUZZER
 std::set<uptr, std::less<uptr>, ContainerAllocator<uptr>> gHeapObjs;
 static pthread_mutex_t gHeapObjsUpdateMutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 struct chunk {
   size_t magic; // ensure queried user_beg is correct
@@ -80,10 +86,10 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
 
 void *MALLOC(size_t size) {
   updateBackEndHeapAllocator();
-  if (size == 0) {
-    sgxsan_warning(true, "Malloc 0 size\n");
-    // return nullptr;
-  }
+  // if (size == 0) {
+  //   sgxsan_warning(true, "Malloc 0 size\n");
+  //   return nullptr;
+  // }
 
   if (not asan_inited) {
     auto p = BACKEND_MALLOC(size);
@@ -125,6 +131,7 @@ void *MALLOC(size_t size) {
   m->alloc_beg = alloc_beg;
   m->alloc_size = allocated_size;
   m->user_size = size;
+  gHeapBT->StoreMallocBT(user_beg);
   log_trace("\n");
   log_trace("[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg,
             user_end, alloc_end);
@@ -134,11 +141,13 @@ void *MALLOC(size_t size) {
   PoisonShadow(user_beg, size, kAsanNotPoisonedMagic);
   uptr right_redzone_beg = RoundUpTo(user_end, alignment);
   PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg,
-               kAsanHeapRightRedzoneMagic);
+               kAsanHeapLeftRedzoneMagic);
 
+#ifndef KAFL_FUZZER
   if (RunInEnclave) {
     void *callPt = __builtin_return_address(0);
-    if (isInEnclaveDSORange((uptr)callPt, 1) and MemAccessMgrInited()) {
+    if (gEnclaveInfo.isInEnclaveDSORange((uptr)callPt, 1) and
+        MemAccessMgrInited()) {
       pthread_mutex_lock(&gHeapObjsUpdateMutex);
       bool successInsert;
       std::tie(std::ignore, successInsert) = gHeapObjs.emplace(user_beg);
@@ -148,8 +157,13 @@ void *MALLOC(size_t size) {
       pthread_mutex_unlock(&gHeapObjsUpdateMutex);
     }
   }
+#endif
 
   return (void *)user_beg;
+}
+
+extern "C" bool AddrIsInHeapQuarantine(uptr addr) {
+  return L1F(*(uint8_t *)MEM_TO_SHADOW(addr)) == kAsanHeapFreeMagic;
 }
 
 void FREE(void *ptr) {
@@ -173,9 +187,10 @@ void FREE(void *ptr) {
     goto fallback;
   }
 
-  if (*(uint8_t *)MEM_TO_SHADOW(user_beg) == kAsanHeapFreeMagic) {
+  if (AddrIsInMem(user_beg) and
+      L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
     GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
+    ReportDoubleFree(pc, bp, sp, user_beg);
   }
   sgxsan_assert(IsAligned(user_beg, alignment));
 
@@ -190,11 +205,13 @@ void FREE(void *ptr) {
   qe.user_beg = user_beg;
   qe.user_size = m->user_size;
 
+#ifndef KAFL_FUZZER
   pthread_mutex_lock(&gHeapObjsUpdateMutex);
   if (gHeapObjs.count(user_beg)) {
     gHeapObjs.erase(user_beg);
   }
   pthread_mutex_unlock(&gHeapObjsUpdateMutex);
+#endif
 
   gQCache->put(qe);
   goto exit;
@@ -214,11 +231,15 @@ void *CALLOC(size_t n_elements, size_t elem_size) {
   }
 
   size_t req = n_elements * elem_size;
-  if (req == 0) {
-    sgxsan_warning(true, "Calloc 0 size\n");
+  // if (req == 0) {
+  //   sgxsan_warning(true, "Calloc 0 size\n");
+  //   return nullptr;
+  // }
+  if (req / n_elements != elem_size) {
+    // mul overflow
+    sgxsan_warning(true, "Multiple Overflow in calloc\n");
     return nullptr;
   }
-  sgxsan_assert(req / n_elements == elem_size);
   void *mem = MALLOC(req);
   if (mem != nullptr) {
     memset(mem, 0, req);
@@ -252,7 +273,7 @@ void *REALLOC(void *oldmem, size_t bytes) {
   return mem;
 }
 
-size_t MALLOC_USABLE_SIZE(void *mem) {
+size_t MALLOC_USABLE_SIZE(void *mem) throw() {
   updateBackEndHeapAllocator();
   chunk *m = (chunk *)((uptr)mem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
@@ -260,6 +281,7 @@ size_t MALLOC_USABLE_SIZE(void *mem) {
 }
 
 void ClearHeapObject() {
+#ifndef KAFL_FUZZER
   pthread_mutex_lock(&gHeapObjsUpdateMutex);
   for (auto user_beg : gHeapObjs) {
     if ((void *)user_beg == nullptr)
@@ -271,16 +293,26 @@ void ClearHeapObject() {
       abort();
     }
 
-    if (*(uint8_t *)MEM_TO_SHADOW(user_beg) == kAsanHeapFreeMagic) {
+    if (AddrIsInMem(user_beg) and
+        L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
       GET_CALLER_PC_BP_SP;
-      ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
+      ReportDoubleFree(pc, bp, sp, user_beg);
     }
     sgxsan_assert(IsAligned(user_beg, alignment));
 
     PoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
-                 kAsanHeapFreeMagic);
+                 kAsanHeapLeftRedzoneMagic);
     BACKEND_FREE((void *)m->alloc_beg);
   }
   gHeapObjs.clear();
   pthread_mutex_unlock(&gHeapObjsUpdateMutex);
+#endif
+}
+
+void QuarantineCache::show() {
+  for (auto &qe : *m_queue) {
+    log_always("[SHOW] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg,
+               qe.user_beg, qe.user_beg + qe.user_size,
+               qe.alloc_beg + qe.alloc_size);
+  }
 }

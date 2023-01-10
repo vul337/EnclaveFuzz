@@ -1,11 +1,12 @@
 #pragma once
 
+#include "LLVMStructTypeSerialize.h"
+#include "nlohmann/json.hpp"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
@@ -74,8 +75,6 @@ static inline std::string toString(Value *val) {
   return ss.str();
 }
 
-static inline void dump(Value *val) { dbgs() << toString(val) << "\n\n"; }
-
 static inline SmallVector<User *> getNonCastUsers(Value *value) {
   SmallVector<User *> users;
   for (User *user : value->users()) {
@@ -122,7 +121,7 @@ struct VisitInfo {
 
 class SGXSanInstVisitor {
 public:
-  static VisitInfo &visitBasicBlock(BasicBlock &BB) {
+  VisitInfo &visitBasicBlock(BasicBlock &BB) {
     if (BasicBlockVisitInfoMap.count(&BB) == 0) {
       VisitInfo &info = BasicBlockVisitInfoMap[&BB];
       for (auto &I : BB) {
@@ -159,7 +158,7 @@ public:
     return BasicBlockVisitInfoMap[&BB];
   }
 
-  static VisitInfo &visitFunction(Function &F) {
+  VisitInfo &visitFunction(Function &F) {
     if (FunctionVisitInfoMap.count(&F) == 0) {
       auto &FVisitInfo = FunctionVisitInfoMap[&F];
       for (auto &BB : F) {
@@ -178,7 +177,7 @@ public:
     return FunctionVisitInfoMap[&F];
   }
 
-  static VisitInfo &visitModule(Module &M) {
+  VisitInfo &visitModule(Module &M) {
     if (ModuleVisitInfoMap.count(&M) == 0) {
       auto &MVisitInfo = ModuleVisitInfoMap[&M];
       for (auto &F : M) {
@@ -198,9 +197,24 @@ public:
   }
 
 private:
-  static std::map<BasicBlock *, VisitInfo> BasicBlockVisitInfoMap;
-  static std::map<Function *, VisitInfo> FunctionVisitInfoMap;
-  static std::map<Module *, VisitInfo> ModuleVisitInfoMap;
+  std::map<BasicBlock *, VisitInfo> BasicBlockVisitInfoMap;
+  std::map<Function *, VisitInfo> FunctionVisitInfoMap;
+  std::map<Module *, VisitInfo> ModuleVisitInfoMap;
 };
 
 } // namespace llvm
+
+void dump(nlohmann::ordered_json json);
+void dump(nlohmann::ordered_json json,
+          nlohmann::ordered_json::json_pointer ptr);
+
+void dump(nlohmann::json json);
+void dump(nlohmann::json json, nlohmann::json::json_pointer ptr);
+
+void dump(llvm::Value *val);
+
+std::vector<std::string> GetFileNames(std::filesystem::path dir,
+                                      std::string substr);
+std::vector<std::string> RecGetFilePaths(std::filesystem::path dir,
+                                         std::string substr);
+std::string ReadFile(std::string fileName);

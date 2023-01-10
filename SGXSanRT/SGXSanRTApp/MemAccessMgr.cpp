@@ -6,6 +6,7 @@ __thread bool MemAccessMgr::m_inited;
 __thread size_t MemAccessMgr::m_out_enclave_access_cnt;
 __thread size_t MemAccessMgr::m_in_enclave_access_cnt;
 
+extern "C" __attribute__((weak)) bool DFEnableModifyDoubleFetchValue();
 extern "C" __attribute__((weak)) uint8_t *DFGetBytesEx(uint8_t *ptr,
                                                        size_t byteArrLen,
                                                        char *cStrAsParamID,
@@ -20,12 +21,21 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
     auto res =
         MemAccessMgr::double_fetch_detect(ptr, size, used_to_cmp, parent_func);
     if (res) {
-      sgxsan_warning(
-          true,
-          "Detect Double-Fetch Situation, and modify it with random data\n");
-      // TODO: give it a new value
-      if (DFGetBytesEx) {
-        DFGetBytesEx((uint8_t *)ptr, size, nullptr, 2 /* FUZZ_DATA */);
+      if (DFEnableModifyDoubleFetchValue && DFGetBytesEx &&
+          DFEnableModifyDoubleFetchValue()) {
+        sgxsan_warning(
+            true,
+            "Detect Double-Fetch Situation, and modify it with fuzz data\n");
+        if (size == sizeof(void *)) {
+          // It may be a pointer
+          DFGetBytesEx((uint8_t *)ptr, size, nullptr,
+                       10 /* FUZZ_DATA_OR_PTR */);
+        } else {
+          DFGetBytesEx((uint8_t *)ptr, size, nullptr, 2 /* FUZZ_DATA */);
+        }
+      } else {
+        sgxsan_warning(true,
+                       "Detect Double-Fetch Situation, but don't modify it\n");
       }
     }
   }
