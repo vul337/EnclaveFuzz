@@ -1,0 +1,12 @@
+27804219 exec in 86400*1 s
+
+27803791 [SGXSan] ALWAYS: Enter ecall_add_item
+27803791 [SGXSan] ALWAYS: Enter ecall_change_master_password
+27803791 [SGXSan] ALWAYS: Enter ecall_create_wallet
+27803791 [SGXSan] ALWAYS: Enter ecall_remove_item
+27803792 [SGXSan] ALWAYS: Enter ecall_show_wallet
+
+cov 51.5%
+
+33% time is dlopen
+14% time is from_bjdata

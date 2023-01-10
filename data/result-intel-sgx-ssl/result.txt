@@ -1,0 +1,6 @@
+36937 in 86400 * 1 s
+
+96935 [SGXSan] ALWAYS: Enter new_thread_func
+36937 [SGXSan] ALWAYS: Enter t_sgxssl_call_apis
+
+cov 18.40%
