@@ -125,20 +125,11 @@ public:
   /// @brief fill random data in memory pointed by \p dst
   /// @param dst must be a valid memory area
   /// @param size memory area size
-  void fillRand(void *dst, size_t size) {
-    size_t step_times = size / sizeof(int), remained = size % sizeof(int);
-    int *ptr_i32 = (int *)dst;
-    for (size_t step = 0; step < step_times; step++) {
-      ptr_i32[step] = rand();
-    }
-    if (remained > 0) {
-      uint8_t *ptr_remained =
-          (uint8_t *)((uint64_t)dst + step_times * sizeof(int));
-      int rand_res = rand();
-      for (size_t i = 0; i < remained; i++) {
-        ptr_remained[i] = (rand_res >> (i * 8)) & 0xFF;
-      }
-    }
+  void fillRand(uint8_t *dst, size_t size) {
+    std::random_device rd;
+    std::independent_bits_engine<std::mt19937, CHAR_BIT, unsigned short> ibe(
+        rd());
+    std::generate(dst, dst + size, std::ref(ibe));
   }
 
   void NeedMoreFuzzData(size_t size) { mExpectedFuzzDataSize += size; }
@@ -146,7 +137,9 @@ public:
   size_t mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
     size_t NewSize = std::min(std::max(mExpectedFuzzDataSize, Size), MaxSize);
     sgxfuzz_assert(NewSize >= Size);
-    fillRand(Data + Size, NewSize - Size);
+    if (NewSize > Size) {
+      fillRand(Data + Size, NewSize - Size);
+    }
     LLVMFuzzerMutate(Data, NewSize, MaxSize);
     return NewSize;
   }
@@ -167,7 +160,7 @@ public:
         wrCnt = provider->ConsumeData(dst, bytesNum);
       }
       if (wrCnt < bytesNum) {
-        gRandPool.getBytes(dst, bytesNum - wrCnt);
+        gRandPool.getBytes(dst, bytesNum - wrCnt, mRandPoolBytesOffset++);
         NeedMoreFuzzData(bytesNum - wrCnt);
       }
       break;
@@ -191,7 +184,7 @@ public:
           wrCnt = provider->ConsumeData(dst, bytesNum);
         }
         if (wrCnt < bytesNum) {
-          gRandPool.getBytes(dst, bytesNum - wrCnt);
+          gRandPool.getBytes(dst, bytesNum - wrCnt, mRandPoolBytesOffset++);
           NeedMoreFuzzData(bytesNum - wrCnt);
         }
       }
@@ -223,7 +216,8 @@ public:
         if (dst == nullptr) {
           dst = (uint8_t *)managedMalloc((givedStrlen + 1) * sizeof(wchar_t));
         }
-        gRandPool.getBytes(dst, givedStrlen * sizeof(wchar_t));
+        gRandPool.getBytes(dst, givedStrlen * sizeof(wchar_t),
+                           mRandPoolBytesOffset++);
         ((wchar_t *)dst)[givedStrlen] = 0;
         NeedMoreFuzzData(givedStrlen * sizeof(wchar_t));
       }
@@ -252,7 +246,7 @@ public:
         // If data remained is not enough, get from fixed random pool
         if (dst == nullptr)
           dst = (uint8_t *)managedMalloc(givedStrlen + 1);
-        gRandPool.getBytes(dst, givedStrlen);
+        gRandPool.getBytes(dst, givedStrlen, mRandPoolBytesOffset++);
         ((char *)dst)[givedStrlen] = 0;
         NeedMoreFuzzData(givedStrlen);
       }
@@ -268,7 +262,7 @@ public:
       } else {
         // No data prepared, get from fixed random pool
         // assume little endian
-        gRandPool.getBytes(&data, sizeof(size_t));
+        gRandPool.getBytes(&data, sizeof(size_t), mRandPoolBytesOffset++);
         size_t maxValue = (dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount);
         data %= (maxValue + 1);
         NeedMoreFuzzData(sizeof(size_t));
@@ -308,6 +302,7 @@ public:
   void init(const uint8_t *Data, size_t Size) {
     provider = new FuzzedDataProvider(Data, Size);
     mExpectedFuzzDataSize = Size;
+    mRandPoolBytesOffset = 0;
   }
 
   void clear() {
@@ -353,7 +348,7 @@ public:
 private:
   FuzzedDataProvider *provider;
   std::vector<uint8_t *> allocatedMemAreas;
-  size_t mExpectedFuzzDataSize;
+  size_t mExpectedFuzzDataSize, mRandPoolBytesOffset;
 };
 FuzzDataFactory data_factory;
 
