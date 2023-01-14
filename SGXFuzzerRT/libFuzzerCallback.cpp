@@ -1,6 +1,8 @@
 #include "libFuzzerCallback.h"
+#include "FuzzDataType.h"
 #include "FuzzedDataProvider.h"
 #include "RandPool.h"
+#include "magic_enum.hpp"
 #include <array>
 #include <assert.h>
 #include <boost/algorithm/string.hpp>
@@ -49,6 +51,7 @@ enum FuzzMode { TEST_RANDOM, TEST_USER };
 static std::vector<int> gFuzzerSeq;
 static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
+static std::unordered_map<std::string, FuzzDataTy> gSpecDataID2Type;
 
 // Passed from DriverGen IR pass
 extern sgx_status_t (*sgx_fuzzer_ecall_array[])();
@@ -108,18 +111,6 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
 }
 
 // DataFactory Util
-enum FuzzDataTy {
-  FUZZ_STRING,
-  FUZZ_WSTRING,
-  FUZZ_DATA,
-  FUZZ_ARRAY,
-  FUZZ_SIZE,
-  FUZZ_COUNT,
-  FUZZ_RET,
-  FUZZ_BOOL_SET_NULL,
-  FUZZ_SEQ,
-};
-
 class FuzzDataFactory {
 public:
   /// @brief fill random data in memory pointed by \p dst
@@ -151,6 +142,21 @@ public:
     }
 
     switch (dataTy) {
+    case FUZZ_P_DOUBLE: {
+      sgxfuzz_assert(sizeof(double) == bytesNum);
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc(bytesNum);
+      if (provider->remaining_bytes() > 0) {
+        provider->ConsumeFloatingPointInRange<double>(
+            0, std::numeric_limits<double>::max());
+      } else {
+        gRandPool.getBytes(dst, bytesNum, mRandPoolBytesOffset++);
+        NeedMoreFuzzData(sizeof(uint64_t));
+        double *dst_double = (double *)dst;
+        *dst_double = std::fabs(*dst_double);
+      }
+      break;
+    }
     case FUZZ_ARRAY:
     case FUZZ_DATA: {
       if (dst == nullptr)
@@ -409,6 +415,9 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_return0_probability",
           po::value<double>(&ClReturn0Probability)->default_value(0.01),
           "The minimum granularity is 0.01 (1%)");
+  add_opt("cb_data_type", po::value<std::string>(),
+          "EDL_JSON_PTR_ID=FUZZ_XXX,... , e.g. "
+          "/untrusted/ocall_current_time/parameter/0=FUZZ_P_DOUBLE,...");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -479,6 +488,26 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
     }
     log_always_np("\n");
   }
+
+  if (vm.count("cb_data_type")) {
+    std::string dataTySpecList = vm["cb_data_type"].as<std::string>();
+    std::vector<std::string> dataTySpecVec;
+    boost::split(dataTySpecVec, dataTySpecList,
+                 [](char c) { return c == ','; });
+
+    for (auto dataTySpec : dataTySpecVec) {
+      boost::trim(dataTySpec);
+      if (dataTySpec == "")
+        continue;
+      std::vector<std::string> pair;
+      boost::split(pair, dataTySpec, [](char c) { return c == '='; });
+      auto dataType = magic_enum::enum_cast<FuzzDataTy>(pair[1]);
+      if (dataType.has_value()) {
+        gSpecDataID2Type[pair[0]] = dataType.value();
+      }
+    }
+  }
+
   sgxfuzz_assert(ClUsedLogLevel <= 4);
   return 0;
 }
@@ -542,6 +571,12 @@ uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
 
 uint8_t *DFGetBytes(size_t byteArrLen, char *cStrAsParamID,
                     FuzzDataTy dataType) {
+  std::string ParamID(cStrAsParamID);
+  // std::replace(ParamID.begin(), ParamID.end(), '/', '_');
+  if (gSpecDataID2Type.count(ParamID)) {
+    // Override DataType by user specified
+    dataType = gSpecDataID2Type[ParamID];
+  }
   return data_factory.getBytes(nullptr, byteArrLen, dataType);
 }
 

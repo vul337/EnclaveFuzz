@@ -1,4 +1,5 @@
 #include "DriverGen.h"
+#include "FuzzDataType.h"
 #include "PassUtil.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/DataLayout.h"
@@ -38,18 +39,6 @@ static cl::opt<std::string>
                          cl::desc("Prefix of wrapper of OCall, in which we "
                                   "call real OCall and modify return values"),
                          cl::Hidden);
-
-enum GetByteType {
-  FUZZ_STRING,
-  FUZZ_WSTRING,
-  FUZZ_DATA,
-  FUZZ_ARRAY,
-  FUZZ_SIZE,
-  FUZZ_COUNT,
-  FUZZ_RET,
-  FUZZ_BOOL_SET_NULL,
-  FUZZ_SEQ,
-};
 
 void DriverGenerator::initialize(Module &M) {
   this->M = &M;
@@ -415,13 +404,13 @@ void DriverGenerator::fillAtOnce(Value *dstPtr, json::json_pointer jsonPtr,
   size_t _tySize = M->getDataLayout().getTypeAllocSize(type);
   assert(_tySize > 0);
   Value *tySize = IRB.getInt64(_tySize);
-  GetByteType byteType = edlJson[jsonPtr / "isEdlSizeAttr"] == true ? FUZZ_SIZE
-                         : edlJson[jsonPtr / "isEdlCountAttr"] == true
-                             ? FUZZ_COUNT
-                         : edlJson[jsonPtr / "isOCallRet"] == true ? FUZZ_RET
-                         : (isa<ArrayType>(type) or arrCnt)        ? FUZZ_ARRAY
-                         : isa<StructType>(type)                   ? FUZZ_DATA
-                                                                   : FUZZ_DATA;
+  FuzzDataTy byteType = edlJson[jsonPtr / "isEdlSizeAttr"] == true ? FUZZ_SIZE
+                        : edlJson[jsonPtr / "isEdlCountAttr"] == true
+                            ? FUZZ_COUNT
+                        : edlJson[jsonPtr / "isOCallRet"] == true ? FUZZ_RET
+                        : (isa<ArrayType>(type) or arrCnt)        ? FUZZ_ARRAY
+                        : isa<StructType>(type)                   ? FUZZ_DATA
+                                                                  : FUZZ_DATA;
   if (arrCnt) {
     tySize = IRB.CreateMul(tySize, arrCnt);
   }
