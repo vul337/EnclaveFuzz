@@ -29,6 +29,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using ordered_json = nlohmann::ordered_json;
@@ -52,6 +54,7 @@ static std::vector<int> gFuzzerSeq;
 static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
 static std::unordered_map<std::string, FuzzDataTy> gSpecDataID2Type;
+static std::unordered_set<std::string> gNotModifyOCallRetSpecs;
 
 // Passed from DriverGen IR pass
 extern sgx_status_t (*sgx_fuzzer_ecall_array[])();
@@ -418,6 +421,9 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_data_type", po::value<std::string>(),
           "EDL_JSON_PTR_ID=FUZZ_XXX,... , e.g. "
           "/untrusted/ocall_current_time/parameter/0=FUZZ_P_DOUBLE,...");
+  add_opt("cb_not_modify_ocall_ret", po::value<std::string>(),
+          "EDL_JSON_PTR_ID,... , e.g. "
+          "/untrusted/ocall_current_time/parameter/0,...");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -508,6 +514,21 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
     }
   }
 
+  if (vm.count("cb_not_modify_ocall_ret")) {
+    std::string NotModifyOCallRetSpecList =
+        vm["cb_not_modify_ocall_ret"].as<std::string>();
+    std::vector<std::string> NotModifyOCallRetSpecVec;
+    boost::split(NotModifyOCallRetSpecVec, NotModifyOCallRetSpecList,
+                 [](char c) { return c == ','; });
+
+    for (auto NotModifyOCallRetSpec : NotModifyOCallRetSpecVec) {
+      boost::trim(NotModifyOCallRetSpec);
+      if (NotModifyOCallRetSpec == "")
+        continue;
+      gNotModifyOCallRetSpecs.emplace(NotModifyOCallRetSpec);
+    }
+  }
+
   sgxfuzz_assert(ClUsedLogLevel <= 4);
   return 0;
 }
@@ -591,5 +612,13 @@ uint64_t getPointToCount(uint64_t size, uint64_t count, uint64_t eleSize) {
   // Maybe size * count != n * eleSize, due to problem of Enclave developer
   uint64_t ptCnt = (size * count + eleSize - 1) / eleSize;
   return std::max(ptCnt, (uint64_t)1);
+}
+
+bool DFEnableModifyOCallRet(char *cParamID) {
+  std::string ParamID(cParamID);
+  if (gNotModifyOCallRetSpecs.count(ParamID)) {
+    return false;
+  }
+  return true;
 }
 }

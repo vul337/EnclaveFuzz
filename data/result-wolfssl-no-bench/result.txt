@@ -1,0 +1,26 @@
+113053396 24H*Core
+
+1308.49 exec/s
+
+113053396 Enter enc_wolfSSL_CTX_free
+113053396 Enter enc_wolfSSL_CTX_load_verify_buffer
+113053396 Enter enc_wolfSSL_CTX_new
+113053396 Enter enc_wolfSSL_CTX_set_cipher_list
+113053396 Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+113053396 Enter enc_wolfSSL_CTX_use_certificate_buffer
+113053396 Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+113053396 Enter enc_wolfSSL_Cleanup
+113053396 Enter enc_wolfSSL_Debugging_OFF
+113053396 Enter enc_wolfSSL_Debugging_ON
+113053396 Enter enc_wolfSSL_Init
+113053396 Enter enc_wolfSSL_connect
+113053396 Enter enc_wolfSSL_free
+113053396 Enter enc_wolfSSL_get_error
+113053396 Enter enc_wolfSSL_new
+113053396 Enter enc_wolfSSL_read
+113053396 Enter enc_wolfSSL_set_fd
+113053396 Enter enc_wolfSSL_write
+113053396 Enter enc_wolfTLSv1_2_client_method
+113053396 Enter enc_wolfTLSv1_2_server_method
+
+cov 0.85%

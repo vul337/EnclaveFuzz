@@ -1,0 +1,26 @@
+286 in 24H
+
+263 [SGXSan] ALWAYS: Enter enc_wolfSSL_Cleanup
+264 [SGXSan] ALWAYS: Enter enc_wolfSSL_connect
+264 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_free
+259 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_load_verify_buffer
+261 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_new
+260 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_set_cipher_list
+260 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_buffer
+260 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+256 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+265 [SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_OFF
+263 [SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_ON
+263 [SGXSan] ALWAYS: Enter enc_wolfSSL_free
+261 [SGXSan] ALWAYS: Enter enc_wolfSSL_get_error
+260 [SGXSan] ALWAYS: Enter enc_wolfSSL_Init
+265 [SGXSan] ALWAYS: Enter enc_wolfSSL_new
+263 [SGXSan] ALWAYS: Enter enc_wolfSSL_read
+260 [SGXSan] ALWAYS: Enter enc_wolfSSL_set_fd
+267 [SGXSan] ALWAYS: Enter enc_wolfSSL_write
+259 [SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_client_method
+262 [SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
+286 [SGXSan] ALWAYS: Enter wc_benchmark_test
+259 [SGXSan] ALWAYS: Enter wc_test
+
+cov 44.49%c

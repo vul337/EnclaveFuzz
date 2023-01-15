@@ -52,7 +52,8 @@ public:
 
 private:
   FunctionCallee getIndexOfEcallToBeFuzzed, DFGetBytes, DFGetUserCheckCount,
-      _strlen, _wcslen, DFEnableSetNull, DFManagedMalloc, getPointToCount;
+      _strlen, _wcslen, DFEnableSetNull, DFManagedMalloc,
+      DFEnableModifyOCallRet, getPointToCount;
   Module *M = nullptr;
   LLVMContext *C = nullptr;
   nlohmann::json edlJson;

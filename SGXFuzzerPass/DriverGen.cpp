@@ -65,6 +65,9 @@ void DriverGenerator::initialize(Module &M) {
       "getPointToCount", Type::getInt64Ty(*C), Type::getInt64Ty(*C),
       Type::getInt64Ty(*C), Type::getInt64Ty(*C));
 
+  DFEnableModifyOCallRet = M.getOrInsertFunction(
+      "DFEnableModifyOCallRet", Type::getInt1Ty(*C), Type::getInt8PtrTy(*C));
+
   // read *.edl.json file
   auto fileBuffer = MemoryBuffer::getFile(ClEdlJsonFile);
   if (auto EC = fileBuffer.getError()) {
@@ -542,15 +545,18 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
         inheritDirectionAttr(jsonPtr, 0);
         IRBuilder<> IRB(insertPt);
 
-        // Avoid ocall parameter is a null pointer
+        auto jsonPtrAsID = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
+
+        // Only OCall parameter is not a nullptr and allowed to modify
         auto ptrIsNotNull = SplitBlockAndInsertIfThen(
-            IRB.CreateICmpNE(IRB.CreatePtrToInt(&arg, IRB.getInt64Ty()),
-                             ConstantInt::getNullValue(IRB.getInt64Ty())),
+            IRB.CreateLogicalAnd(
+                IRB.CreateICmpNE(IRB.CreatePtrToInt(&arg, IRB.getInt64Ty()),
+                                 ConstantInt::getNullValue(IRB.getInt64Ty())),
+                IRB.CreateCall(DFEnableModifyOCallRet, {jsonPtrAsID})),
             insertPt, false);
         insertPt = ptrIsNotNull;
         IRB.SetInsertPoint(insertPt);
 
-        auto jsonPtrAsID = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
         auto eleTy = pointerTy->getElementType();
         StructType *eleSt = dyn_cast<StructType>(eleTy);
         if (eleSt and eleSt->isOpaque()) {
@@ -651,7 +657,7 @@ void DriverGenerator::createOcallFunc(std::string realOCallName) {
       ClOCallWrapperPrefix + realOCallName, realOCall->getFunctionType());
   Function *ocallWrapper = cast<Function>(ocallWrapperCallee.getCallee());
   auto EntryBB = BasicBlock::Create(*C, "", ocallWrapper);
-  // create return instruction
+  // create return void instruction as insert point
   IRBuilder<> IRB(EntryBB);
   auto retVoidI = IRB.CreateRetVoid();
 
@@ -661,7 +667,8 @@ void DriverGenerator::createOcallFunc(std::string realOCallName) {
     args.push_back(&arg);
   }
   IRB.SetInsertPoint(retVoidI);
-  IRB.CreateCall(realOCall->getFunctionType(), realOCall, args);
+  auto RealOCallRet =
+      IRB.CreateCall(realOCall->getFunctionType(), realOCall, args);
   auto funcRetType = ocallWrapper->getReturnType();
   ReturnInst *retI = nullptr;
   if (funcRetType->isVoidTy()) {
@@ -670,13 +677,27 @@ void DriverGenerator::createOcallFunc(std::string realOCallName) {
     auto jsonPtr = json::json_pointer("/untrusted") / realOCallName / "return";
     edlJson[jsonPtr / "out"] = true;
     edlJson[jsonPtr / "isOCallRet"] = true;
-    auto retValuePtr =
-        createParamContent({funcRetType}, jsonPtr, nullptr, retVoidI);
     IRB.SetInsertPoint(retVoidI);
+    auto JsonPtrStr = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
+    auto EnableModifyOCallRet =
+        IRB.CreateCall(DFEnableModifyOCallRet, {JsonPtrStr});
+    Instruction *ModifyOCallRetTerm =
+        SplitBlockAndInsertIfThen(EnableModifyOCallRet, retVoidI, false);
+
+    // Construct ModifyOCallRet BB
+    auto retValuePtr =
+        createParamContent({funcRetType}, jsonPtr, nullptr, ModifyOCallRetTerm);
+    IRB.SetInsertPoint(ModifyOCallRetTerm);
     auto retVal = IRB.CreateLoad(
         retValuePtr->getType()->getScalarType()->getPointerElementType(),
         retValuePtr);
-    retI = IRB.CreateRet(retVal);
+
+    // Set return value
+    IRB.SetInsertPoint(retVoidI);
+    auto phi = IRB.CreatePHI(funcRetType, 2, "phi");
+    phi->addIncoming(RealOCallRet, EnableModifyOCallRet->getParent());
+    phi->addIncoming(retVal, ModifyOCallRetTerm->getParent());
+    retI = IRB.CreateRet(phi);
     retVoidI->eraseFromParent();
   }
   retVoidI = nullptr;
