@@ -1,0 +1,515 @@
+WARNING: Failed to find function "__sanitizer_acquire_crash_state".
+WARNING: Failed to find function "__sanitizer_print_stack_trace".
+WARNING: Failed to find function "__sanitizer_set_death_callback".
+[2023-01-15 19:35:11.247] [Init] Num of ECall: 22
+[2023-01-15 19:35:11.247] ECalls:
+  0 - fuzz_enc_wolfSSL_CTX_free
+  1 - fuzz_enc_wolfSSL_CTX_load_verify_buffer
+  2 - fuzz_enc_wolfSSL_CTX_new
+  3 - fuzz_enc_wolfSSL_CTX_set_cipher_list
+  4 - fuzz_enc_wolfSSL_CTX_use_PrivateKey_buffer
+  5 - fuzz_enc_wolfSSL_CTX_use_certificate_buffer
+  6 - fuzz_enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+  7 - fuzz_enc_wolfSSL_Cleanup
+  8 - fuzz_enc_wolfSSL_Debugging_OFF
+  9 - fuzz_enc_wolfSSL_Debugging_ON
+  10 - fuzz_enc_wolfSSL_Init
+  11 - fuzz_enc_wolfSSL_connect
+  12 - fuzz_enc_wolfSSL_free
+  13 - fuzz_enc_wolfSSL_get_error
+  14 - fuzz_enc_wolfSSL_new
+  15 - fuzz_enc_wolfSSL_read
+  16 - fuzz_enc_wolfSSL_set_fd
+  17 - fuzz_enc_wolfSSL_write
+  18 - fuzz_enc_wolfTLSv1_2_client_method
+  19 - fuzz_enc_wolfTLSv1_2_server_method
+  20 - fuzz_wc_benchmark_test
+  21 - fuzz_wc_test
+
+INFO: found LLVMFuzzerCustomMutator (0x44ac30). Disabling -len_control by default.
+INFO: libFuzzer ignores flags that start with '--'
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 1849595235
+INFO: Loaded 1 modules   (291 inline 8-bit counters): 291 [0x4cb7e8, 0x4cb90b), 
+INFO: Loaded 1 PC tables (291 PCs): 291 [0x4cb910,0x4ccb40), 
+INFO:        0 files found in /tmp/libFuzzerTemp.FuzzWithFork422940.dir/C203
+[SGXSan] ALWAYS: Hook __sanitizer_cov_8bit_counters_init of Enclave, 21636 inline 8-bit counts [0x7f24181c19c0, 0x7f24181c6e44) (First time)
+[SGXSan] ALWAYS: Hook __sanitizer_cov_pcs_init of Enclave, 21636 PCs [0x7f24181c6e48, 0x7f241821b688) (First time)
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_free
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_load_verify_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_set_cipher_list
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Cleanup
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_OFF
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_ON
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Init
+[SGXSan] ALWAYS: Enter enc_wolfSSL_connect
+[SGXSan] ALWAYS: Enter enc_wolfSSL_free
+[SGXSan] ALWAYS: Enter enc_wolfSSL_get_error
+[SGXSan] ALWAYS: Enter enc_wolfSSL_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_read
+[SGXSan] ALWAYS: Enter enc_wolfSSL_set_fd
+[SGXSan] ALWAYS: Enter enc_wolfSSL_write
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_client_method
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
+[SGXSan] ALWAYS: Enter wc_benchmark_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+wolfCrypt Benchmark (block bytes 1048576, min 1.0 sec each)
+RNG                 15 MB took 1.176 seconds,   12.758 MB/s
+AES-128-CBC-enc     35 MB took 1.073 seconds,   32.618 MB/s
+AES-128-CBC-dec     30 MB took 1.014 seconds,   29.586 MB/s
+AES-192-CBC-enc     25 MB took 1.302 seconds,   19.202 MB/s
+AES-192-CBC-dec     15 MB took 1.040 seconds,   14.417 MB/s
+AES-256-CBC-enc     15 MB took 1.093 seconds,   13.720 MB/s
+AES-256-CBC-dec     15 MB took 1.150 seconds,   13.038 MB/s
+AES-128-GCM-enc     15 MB took 1.113 seconds,   13.477 MB/s
+AES-128-GCM-dec     25 MB took 1.209 seconds,   20.684 MB/s
+AES-192-GCM-enc     25 MB took 1.221 seconds,   20.479 MB/s
+AES-192-GCM-dec     25 MB took 1.203 seconds,   20.787 MB/s
+AES-256-GCM-enc     20 MB took 1.036 seconds,   19.301 MB/s
+AES-256-GCM-dec     20 MB took 1.058 seconds,   18.899 MB/s
+GMAC Table 4-bit    67 MB took 1.004 seconds,   66.707 MB/s
+RABBIT              90 MB took 1.011 seconds,   88.984 MB/s
+3DES                10 MB took 1.283 seconds,    7.794 MB/s
+MD5                300 MB took 1.006 seconds,  298.314 MB/s
+SHA                125 MB took 1.011 seconds,  123.673 MB/s
+SHA-256             30 MB took 1.009 seconds,   29.724 MB/s
+HMAC-MD5           300 MB took 1.015 seconds,  295.435 MB/s
+HMAC-SHA           130 MB took 1.021 seconds,  127.345 MB/s
+HMAC-SHA256         30 MB took 1.000 seconds,   29.989 MB/s
+PBKDF2               4 KB took 1.003 seconds,    3.613 KB/s
+RSA     2048 public       1400 ops took 1.027 sec, avg 0.734 ms, 1363.026 ops/sec
+RSA     2048 private       100 ops took 3.789 sec, avg 37.887 ms, 26.395 ops/sec
+DH      2048 key gen        63 ops took 1.006 sec, avg 15.971 ms, 62.614 ops/sec
+DH      2048 agree         100 ops took 1.579 sec, avg 15.790 ms, 63.332 ops/sec
+ECC   [      SECP256R1]   256 key gen      1379 ops took 1.000 sec, avg 0.725 ms, 1378.658 ops/sec
+ECDHE [      SECP256R1]   256 agree         900 ops took 1.008 sec, avg 1.120 ms, 892.816 ops/sec
+ECDSA [      SECP256R1]   256 sign         1200 ops took 1.007 sec, avg 0.839 ms, 1191.886 ops/sec
+ECDSA [      SECP256R1]   256 verify        900 ops took 1.053 sec, avg 1.170 ms, 854.559 ops/sec
+Benchmark complete
+[SGXSan] ALWAYS: Enter wc_test
+INFO: seed corpus: files: 4 min: 370191b max: 370191b total: 1480764b rss: 43Mb
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+error    test passed!
+MEMORY   test passed!
+base64   test passed!
+asn      test passed!
+RANDOM   test passed!
+MD5      test passed!
+MD4      test passed!
+SHA      test passed!
+SHA-256  test passed!
+Hash     test passed!
+HMAC-MD5 test passed!
+HMAC-SHA test passed!
+HMAC-SHA256 test passed!
+GMAC     test passed!
+HC-128   test passed!
+Rabbit   test passed!
+DES      test passed!
+DES3     test passed!
+AES      test passed!
+AES192   test passed!
+AES256   test passed!
+AES-GCM  test passed!
+RSA      test passed!
+DH       test passed!
+DSA      test passed!
+PWDBASED test passed!
+ECC      test passed!
+ECC buffer test passed!
+logging  test passed!
+mutex    test passed!
+memcb    test passed!
+Test complete
+[SGXSan] ALWAYS: Enter enc_wolfSSL_new
+[SGXSan] ALWAYS: Enter wc_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+error    test passed!
+MEMORY   test passed!
+base64   test passed!
+asn      test passed!
+RANDOM   test passed!
+MD5      test passed!
+MD4      test passed!
+SHA      test passed!
+SHA-256  test passed!
+Hash     test passed!
+HMAC-MD5 test passed!
+HMAC-SHA test passed!
+HMAC-SHA256 test passed!
+GMAC     test passed!
+HC-128   test passed!
+Rabbit   test passed!
+DES      test passed!
+DES3     test passed!
+AES      test passed!
+AES192   test passed!
+AES256   test passed!
+AES-GCM  test passed!
+RSA      test passed!
+DH       test passed!
+DSA      test passed!
+PWDBASED test passed!
+ECC      test passed!
+ECC buffer test passed!
+logging  test passed!
+mutex    test passed!
+memcb    test failed!
+ error = -13803
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+[SGXSan] ALWAYS: Enter enc_wolfSSL_write
+[SGXSan] ALWAYS: Enter enc_wolfSSL_get_error
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_load_verify_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_buffer
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_ON
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Cleanup
+[SGXSan] ALWAYS: Enter enc_wolfSSL_connect
+[SGXSan] ALWAYS: Enter wc_benchmark_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+wolfCrypt Benchmark (block bytes 1048576, min 1.0 sec each)
+RNG                 15 MB took 1.184 seconds,   12.666 MB/s
+AES-128-CBC-enc     35 MB took 1.073 seconds,   32.612 MB/s
+AES-128-CBC-dec     35 MB took 1.157 seconds,   30.245 MB/s
+AES-192-CBC-enc     30 MB took 1.081 seconds,   27.756 MB/s
+AES-192-CBC-dec     30 MB took 1.170 seconds,   25.647 MB/s
+AES-256-CBC-enc     25 MB took 1.020 seconds,   24.499 MB/s
+AES-256-CBC-dec     25 MB took 1.064 seconds,   23.497 MB/s
+AES-128-GCM-enc     25 MB took 1.059 seconds,   23.603 MB/s
+AES-128-GCM-dec     25 MB took 1.088 seconds,   22.972 MB/s
+AES-192-GCM-enc     25 MB took 1.204 seconds,   20.761 MB/s
+AES-192-GCM-dec     25 MB took 1.205 seconds,   20.739 MB/s
+AES-256-GCM-enc     20 MB took 1.025 seconds,   19.509 MB/s
+AES-256-GCM-dec     20 MB took 1.053 seconds,   18.998 MB/s
+GMAC Table 4-bit    67 MB took 1.006 seconds,   66.590 MB/s
+RABBIT              90 MB took 1.015 seconds,   88.697 MB/s
+3DES                10 MB took 1.113 seconds,    8.987 MB/s
+MD5                300 MB took 1.013 seconds,  296.263 MB/s
+SHA                130 MB took 1.033 seconds,  125.896 MB/s
+SHA-256             30 MB took 1.008 seconds,   29.765 MB/s
+HMAC-MD5           300 MB took 1.015 seconds,  295.537 MB/s
+HMAC-SHA           125 MB took 1.004 seconds,  124.456 MB/s
+HMAC-SHA256         30 MB took 1.008 seconds,   29.760 MB/s
+PBKDF2               4 KB took 1.008 seconds,    3.628 KB/s
+RSA     2048 public       1400 ops took 1.027 sec, avg 0.734 ms, 1362.977 ops/sec
+RSA     2048 private       100 ops took 3.757 sec, avg 37.574 ms, 26.614 ops/sec
+DH      2048 key gen        64 ops took 1.004 sec, avg 15.693 ms, 63.722 ops/sec
+DH      2048 agree         100 ops took 1.592 sec, avg 15.922 ms, 62.807 ops/sec
+ECC   [      SECP256R1]   256 key gen      1381 ops took 1.000 sec, avg 0.724 ms, 1380.914 ops/sec
+ECDHE [      SECP256R1]   256 agree        1000 ops took 1.098 sec, avg 1.098 ms, 911.077 ops/sec
+ECDSA [      SECP256R1]   256 sign         1200 ops took 1.014 sec, avg 0.845 ms, 1183.348 ops/sec
+ECDSA [      SECP256R1]   256 verify        900 ops took 1.059 sec, avg 1.176 ms, 850.114 ops/sec
+Benchmark complete
+[SGXSan] ALWAYS: Enter enc_wolfSSL_free
+[SGXSan] ALWAYS: Enter enc_wolfSSL_set_fd
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_client_method
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Init
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_set_cipher_list
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_OFF
+[SGXSan] ALWAYS: Enter enc_wolfSSL_read
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_free
+#2	pulse  ft: 6300 exec/s: 0 rss: 49Mb
+Slowest unit: 42 s:
+artifact_prefix='./crashes/'; Test unit written to ./crashes/slow-unit-ddd80d5e9861e976679df15b45e797151fd301fa
+[SGXSan] ALWAYS: Enter enc_wolfSSL_new
+[SGXSan] ALWAYS: Enter wc_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+error    test passed!
+MEMORY   test passed!
+base64   test passed!
+asn      test passed!
+RANDOM   test passed!
+MD5      test passed!
+MD4      test passed!
+SHA      test passed!
+SHA-256  test passed!
+Hash     test passed!
+HMAC-MD5 test passed!
+HMAC-SHA test passed!
+HMAC-SHA256 test passed!
+GMAC     test passed!
+HC-128   test passed!
+Rabbit   test passed!
+DES      test passed!
+DES3     test passed!
+AES      test passed!
+AES192   test passed!
+AES256   test passed!
+AES-GCM  test passed!
+RSA      test passed!
+DH       test passed!
+DSA      test passed!
+PWDBASED test passed!
+ECC      test passed!
+ECC buffer test passed!
+logging  test passed!
+mutex    test passed!
+memcb    test failed!
+ error = -13803
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+[SGXSan] ALWAYS: Enter enc_wolfSSL_write
+[SGXSan] ALWAYS: Enter enc_wolfSSL_get_error
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_load_verify_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_buffer
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_ON
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Cleanup
+[SGXSan] ALWAYS: Enter enc_wolfSSL_connect
+[SGXSan] ALWAYS: Enter wc_benchmark_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+wolfCrypt Benchmark (block bytes 1048576, min 1.0 sec each)
+RNG                 15 MB took 1.184 seconds,   12.666 MB/s
+AES-128-CBC-enc     35 MB took 1.078 seconds,   32.467 MB/s
+AES-128-CBC-dec     30 MB took 1.006 seconds,   29.827 MB/s
+AES-192-CBC-enc     30 MB took 1.084 seconds,   27.672 MB/s
+AES-192-CBC-dec     30 MB took 1.169 seconds,   25.668 MB/s
+AES-256-CBC-enc     25 MB took 1.010 seconds,   24.764 MB/s
+AES-256-CBC-dec     25 MB took 1.076 seconds,   23.243 MB/s
+AES-128-GCM-enc     25 MB took 1.063 seconds,   23.523 MB/s
+AES-128-GCM-dec     25 MB took 1.080 seconds,   23.141 MB/s
+AES-192-GCM-enc     25 MB took 1.205 seconds,   20.746 MB/s
+AES-192-GCM-dec     25 MB took 1.203 seconds,   20.787 MB/s
+AES-256-GCM-enc     20 MB took 1.041 seconds,   19.213 MB/s
+AES-256-GCM-dec     20 MB took 1.046 seconds,   19.114 MB/s
+GMAC Table 4-bit    68 MB took 1.006 seconds,   67.580 MB/s
+RABBIT              90 MB took 1.007 seconds,   89.347 MB/s
+3DES                10 MB took 1.114 seconds,    8.976 MB/s
+MD5                300 MB took 1.009 seconds,  297.284 MB/s
+SHA                130 MB took 1.037 seconds,  125.382 MB/s
+SHA-256             30 MB took 1.008 seconds,   29.768 MB/s
+HMAC-MD5           300 MB took 1.015 seconds,  295.642 MB/s
+HMAC-SHA           125 MB took 1.018 seconds,  122.762 MB/s
+HMAC-SHA256         30 MB took 1.015 seconds,   29.557 MB/s
+PBKDF2               4 KB took 1.006 seconds,    3.635 KB/s
+RSA     2048 public       1400 ops took 1.019 sec, avg 0.728 ms, 1374.446 ops/sec
+RSA     2048 private       100 ops took 3.774 sec, avg 37.743 ms, 26.495 ops/sec
+DH      2048 key gen        64 ops took 1.004 sec, avg 15.691 ms, 63.729 ops/sec
+DH      2048 agree         100 ops took 1.575 sec, avg 15.745 ms, 63.511 ops/sec
+ECC   [      SECP256R1]   256 key gen      1360 ops took 1.000 sec, avg 0.735 ms, 1359.959 ops/sec
+ECDHE [      SECP256R1]   256 agree        1000 ops took 1.102 sec, avg 1.102 ms, 907.089 ops/sec
+ECDSA [      SECP256R1]   256 sign         1200 ops took 1.002 sec, avg 0.835 ms, 1197.060 ops/sec
+ECDSA [      SECP256R1]   256 verify        900 ops took 1.035 sec, avg 1.150 ms, 869.803 ops/sec
+Benchmark complete
+[SGXSan] ALWAYS: Enter enc_wolfSSL_free
+[SGXSan] ALWAYS: Enter enc_wolfSSL_set_fd
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_client_method
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Init
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_set_cipher_list
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_OFF
+[SGXSan] ALWAYS: Enter enc_wolfSSL_read
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_free
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_ON
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_free
+[SGXSan] ALWAYS: Enter enc_wolfSSL_get_error
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_OFF
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_load_verify_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_buffer
+[SGXSan] ALWAYS: Enter wc_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+error    test passed!
+MEMORY   test passed!
+base64   test passed!
+asn      test passed!
+RANDOM   test passed!
+MD5      test passed!
+MD4      test passed!
+SHA      test passed!
+SHA-256  test passed!
+Hash     test passed!
+HMAC-MD5 test passed!
+HMAC-SHA test passed!
+HMAC-SHA256 test passed!
+GMAC     test passed!
+HC-128   test passed!
+Rabbit   test passed!
+DES      test passed!
+DES3     test passed!
+AES      test passed!
+AES192   test passed!
+AES256   test passed!
+AES-GCM  test passed!
+RSA      test passed!
+DH       test passed!
+DSA      test passed!
+PWDBASED test passed!
+ECC      test passed!
+ECC buffer test passed!
+logging  test passed!
+mutex    test passed!
+memcb    test failed!
+ error = -13803
+[SGXSan] ALWAYS: Enter wc_benchmark_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+wolfCrypt Benchmark (block bytes 1048576, min 1.0 sec each)
+RNG                 15 MB took 1.166 seconds,   12.863 MB/s
+AES-128-CBC-enc     35 MB took 1.059 seconds,   33.065 MB/s
+AES-128-CBC-dec     35 MB took 1.147 seconds,   30.512 MB/s
+AES-192-CBC-enc     30 MB took 1.054 seconds,   28.466 MB/s
+AES-192-CBC-dec     30 MB took 1.124 seconds,   26.684 MB/s
+AES-256-CBC-enc     30 MB took 1.186 seconds,   25.286 MB/s
+AES-256-CBC-dec     25 MB took 1.036 seconds,   24.133 MB/s
+AES-128-GCM-enc     25 MB took 1.048 seconds,   23.849 MB/s
+AES-128-GCM-dec     25 MB took 1.065 seconds,   23.484 MB/s
+AES-192-GCM-enc     25 MB took 1.171 seconds,   21.357 MB/s
+AES-192-GCM-dec     25 MB took 1.199 seconds,   20.845 MB/s
+AES-256-GCM-enc     20 MB took 1.017 seconds,   19.668 MB/s
+AES-256-GCM-dec     20 MB took 1.029 seconds,   19.431 MB/s
+GMAC Table 4-bit    69 MB took 1.013 seconds,   68.110 MB/s
+RABBIT              90 MB took 1.000 seconds,   89.965 MB/s
+3DES                10 MB took 1.086 seconds,    9.207 MB/s
+MD5                305 MB took 1.012 seconds,  301.447 MB/s
+SHA                130 MB took 1.014 seconds,  128.207 MB/s
+SHA-256             35 MB took 1.152 seconds,   30.380 MB/s
+HMAC-MD5           300 MB took 1.008 seconds,  297.740 MB/s
+HMAC-SHA           130 MB took 1.017 seconds,  127.804 MB/s
+HMAC-SHA256         35 MB took 1.158 seconds,   30.222 MB/s
+PBKDF2               4 KB took 1.005 seconds,    3.702 KB/s
+RSA     2048 public       1500 ops took 1.068 sec, avg 0.712 ms, 1404.172 ops/sec
+RSA     2048 private       100 ops took 3.679 sec, avg 36.786 ms, 27.184 ops/sec
+DH      2048 key gen        66 ops took 1.009 sec, avg 15.290 ms, 65.402 ops/sec
+DH      2048 agree         100 ops took 1.555 sec, avg 15.552 ms, 64.300 ops/sec
+ECC   [      SECP256R1]   256 key gen      1407 ops took 1.000 sec, avg 0.711 ms, 1406.806 ops/sec
+ECDHE [      SECP256R1]   256 agree        1000 ops took 1.095 sec, avg 1.095 ms, 913.592 ops/sec
+ECDSA [      SECP256R1]   256 sign         1200 ops took 1.001 sec, avg 0.834 ms, 1199.235 ops/sec
+ECDSA [      SECP256R1]   256 verify        900 ops took 1.038 sec, avg 1.154 ms, 866.847 ops/sec
+Benchmark complete
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Cleanup
+[SGXSan] ALWAYS: Enter enc_wolfSSL_write
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_set_cipher_list
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_read
+[SGXSan] ALWAYS: Enter enc_wolfSSL_free
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_client_method
+[SGXSan] ALWAYS: Enter enc_wolfSSL_connect
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Init
+[SGXSan] ALWAYS: Enter enc_wolfSSL_set_fd
+#4	pulse  cov: 6300 ft: 6300 corp: 1/361Kb exec/s: 0 rss: 63Mb
+[SGXSan] ALWAYS: Enter enc_wolfSSL_connect
+[SGXSan] ALWAYS: Enter enc_wolfSSL_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_new
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_free
+[SGXSan] ALWAYS: Enter enc_wolfSSL_write
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_load_verify_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_client_method
+[SGXSan] ALWAYS: Enter wc_benchmark_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+wolfCrypt Benchmark (block bytes 1048576, min 1.0 sec each)
+RNG                 15 MB took 1.149 seconds,   13.050 MB/s
+AES-128-CBC-enc     35 MB took 1.067 seconds,   32.817 MB/s
+AES-128-CBC-dec     35 MB took 1.145 seconds,   30.567 MB/s
+AES-192-CBC-enc     30 MB took 1.053 seconds,   28.499 MB/s
+AES-192-CBC-dec     30 MB took 1.145 seconds,   26.190 MB/s
+AES-256-CBC-enc     30 MB took 1.177 seconds,   25.490 MB/s
+AES-256-CBC-dec     25 MB took 1.043 seconds,   23.960 MB/s
+AES-128-GCM-enc     25 MB took 1.038 seconds,   24.082 MB/s
+AES-128-GCM-dec     25 MB took 1.072 seconds,   23.317 MB/s
+AES-192-GCM-enc     25 MB took 1.179 seconds,   21.196 MB/s
+AES-192-GCM-dec     25 MB took 1.188 seconds,   21.039 MB/s
+AES-256-GCM-enc     20 MB took 1.012 seconds,   19.770 MB/s
+AES-256-GCM-dec     20 MB took 1.027 seconds,   19.468 MB/s
+GMAC Table 4-bit    68 MB took 1.003 seconds,   67.805 MB/s
+RABBIT              95 MB took 1.038 seconds,   91.540 MB/s
+3DES                10 MB took 1.090 seconds,    9.173 MB/s
+MD5                305 MB took 1.005 seconds,  303.558 MB/s
+SHA                130 MB took 1.010 seconds,  128.743 MB/s
+SHA-256             35 MB took 1.150 seconds,   30.433 MB/s
+HMAC-MD5           305 MB took 1.001 seconds,  304.690 MB/s
+HMAC-SHA           130 MB took 1.018 seconds,  127.722 MB/s
+HMAC-SHA256         35 MB took 1.155 seconds,   30.294 MB/s
+PBKDF2               4 KB took 1.008 seconds,    3.688 KB/s
+RSA     2048 public       1400 ops took 1.015 sec, avg 0.725 ms, 1379.021 ops/sec
+RSA     2048 private       100 ops took 3.651 sec, avg 36.515 ms, 27.386 ops/sec
+DH      2048 key gen        65 ops took 1.013 sec, avg 15.589 ms, 64.149 ops/sec
+DH      2048 agree         100 ops took 1.543 sec, avg 15.430 ms, 64.811 ops/sec
+ECC   [      SECP256R1]   256 key gen      1413 ops took 1.000 sec, avg 0.708 ms, 1412.703 ops/sec
+ECDHE [      SECP256R1]   256 agree        1000 ops took 1.086 sec, avg 1.086 ms, 921.164 ops/sec
+ECDSA [      SECP256R1]   256 sign         1200 ops took 1.008 sec, avg 0.840 ms, 1190.715 ops/sec
+ECDSA [      SECP256R1]   256 verify        900 ops took 1.050 sec, avg 1.166 ms, 857.318 ops/sec
+Benchmark complete
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_set_cipher_list
+[SGXSan] ALWAYS: Enter enc_wolfSSL_get_error
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Init
+[SGXSan] ALWAYS: Enter enc_wolfSSL_free
+[SGXSan] ALWAYS: Enter wc_test
+------------------------------------------------------------------------------
+ wolfSSL version 5.1.0
+------------------------------------------------------------------------------
+error    test passed!
+MEMORY   test passed!
+base64   test passed!
+asn      test passed!
+RANDOM   test passed!
+MD5      test passed!
+MD4      test passed!
+SHA      test passed!
+SHA-256  test passed!
+Hash     test passed!
+HMAC-MD5 test passed!
+HMAC-SHA test passed!
+HMAC-SHA256 test passed!
+GMAC     test passed!
+HC-128   test passed!
+Rabbit   test passed!
+DES      test passed!
+DES3     test passed!
+AES      test passed!
+AES192   test passed!
+AES256   test passed!
+AES-GCM  test passed!
+RSA      test passed!
+DH       test passed!
+DSA      test passed!
+PWDBASED test passed!
+ECC      test passed!
+ECC buffer test passed!
+logging  test passed!
+mutex    test passed!
+memcb    test failed!
+ error = -13803
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_ON
+[SGXSan] ALWAYS: Enter enc_wolfSSL_read
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_OFF
+[SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
+[SGXSan] ALWAYS: Enter enc_wolfSSL_set_fd
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_buffer
+[SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+[SGXSan] ALWAYS: Enter enc_wolfSSL_Cleanup
+#5	INITED cov: 6301 ft: 6306 corp: 2/723Kb exec/s: 0 rss: 69Mb
+#5	DONE   cov: 6301 ft: 6306 corp: 2/723Kb lim: 370191 exec/s: 0 rss: 69Mb
+Done 5 runs in 211 second(s)
+stat::number_of_executed_units: 5
+stat::average_exec_per_sec:     0
+stat::new_units_added:          0
+stat::slowest_unit_time_sec:    42
+stat::peak_rss_mb:              69

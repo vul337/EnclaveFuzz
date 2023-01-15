@@ -1,0 +1,25 @@
+1995 24H*Core
+
+
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_Cleanup
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_connect
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_free
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_load_verify_buffer
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_new
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_set_cipher_list
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_buffer
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_certificate_chain_buffer_format
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_CTX_use_PrivateKey_buffer
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_OFF
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_Debugging_ON
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_free
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_get_error
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_Init
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_new
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_read
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_set_fd
+1995 [SGXSan] ALWAYS: Enter enc_wolfSSL_write
+1995 [SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_client_method
+1995 [SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
+1995 [SGXSan] ALWAYS: Enter wc_benchmark_test
+1995 [SGXSan] ALWAYS: Enter wc_test
