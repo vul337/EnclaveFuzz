@@ -23,3 +23,5 @@
 1995 [SGXSan] ALWAYS: Enter enc_wolfTLSv1_2_server_method
 1995 [SGXSan] ALWAYS: Enter wc_benchmark_test
 1995 [SGXSan] ALWAYS: Enter wc_test
+
+cov 44.51%
