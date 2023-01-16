@@ -40,9 +40,7 @@ RandPool gRandPool;
 
 sgx_enclave_id_t global_eid = 0;
 std::string ClEnclaveFileName;
-size_t ClMaxStrlen;
-size_t ClMaxCount;
-size_t ClMaxSize;
+size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize;
 int ClUsedLogLevel;
 bool ClProvideNullPointer;
 double ClProvideNullPointerProbability;
@@ -341,16 +339,31 @@ public:
   }
 
   void getCallSequence(std::vector<int> &intCallSeq, size_t funcNum) {
-    std::vector<int> callSeq(funcNum);
-    std::iota(callSeq.begin(), callSeq.end(), 0);
-    while (provider->remaining_bytes() > 0 and callSeq.size() > 0) {
-      int idx = provider->ConsumeIntegralInRange<int>(0, callSeq.size() - 1);
-      intCallSeq.push_back(callSeq[idx]);
-      callSeq.erase(callSeq.begin() + idx);
-    }
-    for (auto id : callSeq) {
-      NeedMoreFuzzData(sizeof(int));
-      intCallSeq.push_back(id);
+    if (funcNum < ClMaxCallSeqSize) {
+      std::vector<int> callSeq(funcNum);
+      std::iota(callSeq.begin(), callSeq.end(), 0);
+      while (provider->remaining_bytes() > 0 and callSeq.size() > 0) {
+        int idx = provider->ConsumeIntegralInRange<int>(0, callSeq.size() - 1);
+        intCallSeq.push_back(callSeq[idx]);
+        callSeq.erase(callSeq.begin() + idx);
+      }
+      for (auto id : callSeq) {
+        NeedMoreFuzzData(sizeof(int));
+        intCallSeq.push_back(id);
+      }
+    } else {
+      for (size_t i = 0; i < ClMaxCallSeqSize; i++) {
+        if (provider->remaining_bytes() > 0) {
+          int idx = provider->ConsumeIntegralInRange<int>(0, funcNum - 1);
+          intCallSeq.push_back(idx);
+        } else {
+          NeedMoreFuzzData(sizeof(int));
+          int idx;
+          gRandPool.getBytes(&idx, sizeof(int), mRandPoolBytesOffset++);
+          idx %= funcNum;
+          intCallSeq.push_back(idx);
+        }
+      }
     }
   }
 
@@ -393,13 +406,13 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
               ->default_value("enclave.signed.so"),
           "Name of target Enclave file");
   add_opt(
-      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(4096),
+      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(65536),
       "Max count of elements for pointer which size is unknown or not fixed, "
       "if set too large, multi-level pointer will consume a large memory");
   add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(65536),
           "Max size of pointer element");
   add_opt("cb_max_str_len",
-          po::value<size_t>(&ClMaxStrlen)->default_value(4096),
+          po::value<size_t>(&ClMaxStrlen)->default_value(65536),
           "Max length of string");
   add_opt("cb_filter_out", po::value<std::string>(),
           "Specified ECalls that we don't test");
@@ -424,6 +437,8 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_not_modify_ocall_ret", po::value<std::string>(),
           "EDL_JSON_PTR_ID,... , e.g. "
           "/untrusted/ocall_current_time/parameter/0,...");
+  add_opt("cb_max_call_seq_size",
+          po::value<size_t>(&ClMaxCallSeqSize)->default_value(20), "");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
