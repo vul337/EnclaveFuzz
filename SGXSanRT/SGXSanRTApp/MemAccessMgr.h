@@ -52,8 +52,17 @@ public:
 #endif
   }
 
-  static void active() { m_active = true; }
-  static void deactive() { m_active = false; }
+  static void active() {
+    if (m_inited) {
+      m_active = true;
+    }
+  }
+
+  static void deactive() {
+    if (m_inited) {
+      m_active = false;
+    }
+  }
 
   // fetch must be a LoadInst
   static bool double_fetch_detect(const void *ptr, size_t size,
