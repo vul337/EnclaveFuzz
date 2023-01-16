@@ -787,7 +787,7 @@ bool DriverGenerator::runOnModule(Module &M) {
     // dbgs() << M.getName() << " isn't a UBridge\n";
     return false;
   }
-  dbgs() << M.getName() << " is a UBridge, start generating...\n";
+  dbgs() << "== DriverGenerator: " << M.getName() << " ==\n";
   initialize(M);
 
   // Collect all OCalls' names except it start with sgxsan_ocall_
