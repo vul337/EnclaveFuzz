@@ -1,4 +1,5 @@
 #include "AddressSanitizer.h"
+#include "FuncRenamePass.h"
 #include "SensitiveLeakSanitizer.h"
 
 using namespace llvm;
@@ -22,6 +23,8 @@ struct SGXSanLegacyPass : public ModulePass {
 
   bool runOnModule(Module &M) override {
     bool Changed = false;
+
+    Changed |= RenameFuncSym(M);
 
     // run SLSan Pass
     if (ClEnableSLSan) {
