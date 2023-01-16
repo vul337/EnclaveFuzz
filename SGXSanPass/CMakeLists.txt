@@ -18,3 +18,4 @@ add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp PassUtil.cpp S
 target_link_libraries(SGXSanPass ${SVF_DIR}/${SVF_MODE}-build/lib/libSvf.a)
 
 add_library(FuncRenamePass MODULE FuncRenamePass.cpp)
+add_library(GetOCallTable MODULE GetOCallTable.cpp)

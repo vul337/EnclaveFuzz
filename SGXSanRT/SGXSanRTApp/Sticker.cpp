@@ -278,14 +278,18 @@ void PoisonEnclaveDSOCodeSegment() {
   _PoisonEnclaveDSOCodeSegment();
 }
 
+extern "C" __attribute__((weak)) void *GetOCallTableAddr();
 extern "C" sgx_status_t __sgx_create_enclave_ex(
     const char *file_name, const int debug, sgx_launch_token_t *launch_token,
     int *launch_token_updated, sgx_enclave_id_t *enclave_id,
     sgx_misc_attribute_t *misc_attr, const uint32_t ex_features,
     const void *ex_features_p[32]) {
   setEnclaveFileName(file_name);
+  if (GetOCallTableAddr) {
+    g_enclave_ocall_table = (sgx_ocall_table_t *)GetOCallTableAddr();
+  }
   RunInEnclave = true;
-  gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_NOW);
+  gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_LAZY);
   RunInEnclave = false;
   sgxsan_error(gEnclaveHandler == nullptr, "%s\n", dlerror());
 
