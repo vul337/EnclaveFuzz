@@ -457,10 +457,10 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_data_type", po::value<std::string>(),
           "Feed data with specified type (override default), ID=FUZZ_XXX[, "
           "...] , e.g. "
-          "/untrusted/ocall_current_time/parameter/0=FUZZ_P_DOUBLE[, ...]");
+          "/untrusted/ocall_current_time/parameter/0=FUZZ_P_DOUBLE[,...]");
   add_opt("cb_ocall_ret_through", po::value<std::string>(),
-          "Not modify OCall return value specified by ID, ID[, ...] , e.g. "
-          "/untrusted/ocall_current_time/parameter/0[, ...]");
+          "Not modify OCall return value specified by ID, ID[,...] , e.g. "
+          "/untrusted/ocall_current_time/parameter/0[,...]");
   add_opt("cb_ecall_queue_size",
           po::value<size_t>(&ClMaxCallSeqSize)->default_value(20),
           "Max ECall queue size");
