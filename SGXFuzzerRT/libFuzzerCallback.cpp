@@ -55,9 +55,9 @@ static std::unordered_map<std::string, FuzzDataTy> gSpecDataID2Type;
 static std::unordered_set<std::string> gNotModifyOCallRetSpecs;
 
 // Passed from DriverGen IR pass
-extern sgx_status_t (*sgx_fuzzer_ecall_array[])();
-extern int sgx_fuzzer_ecall_num;
-extern char *sgx_fuzzer_ecall_wrapper_name_array[];
+extern sgx_status_t (*gFuzzECallArray[])();
+extern int gFuzzECallNum;
+extern char *gFuzzECallNameArray[];
 
 // log util
 static const char *log_level_to_prefix[] = {
@@ -206,6 +206,9 @@ public:
         givedStrlen = ClMaxStrlen;
         NeedMoreFuzzData(sizeof(size_t));
       }
+      if (bytesNum != 0) {
+        givedStrlen %= (bytesNum + 1);
+      }
       // Get string
       if (provider->remaining_bytes() > 0) {
         auto wstr =
@@ -238,6 +241,9 @@ public:
       } else {
         givedStrlen = ClMaxStrlen;
         NeedMoreFuzzData(sizeof(size_t));
+      }
+      if (bytesNum != 0) {
+        givedStrlen %= (bytesNum + 1);
       }
       // Get string
       if (provider->remaining_bytes() > 0) {
@@ -331,6 +337,16 @@ public:
     return ptr;
   }
 
+  void *managedCalloc(size_t count, size_t size) {
+    if (count * size == 0)
+      return nullptr;
+    void *ptr = calloc(count, size);
+    sgxfuzz_assert(ptr != nullptr);
+    // log_debug("calloc %p(%d * %d)\n", ptr, count, size);
+    allocatedMemAreas.push_back((uint8_t *)ptr);
+    return ptr;
+  }
+
   char *managedStr2CStr(std::string str) {
     char *cStr = (char *)managedMalloc(str.length() + 1);
     memcpy(cStr, str.c_str(), str.length());
@@ -375,12 +391,12 @@ private:
 FuzzDataFactory data_factory;
 
 void ShowAllECalls() {
-  log_always("[Init] Num of ECall: %d\n", sgx_fuzzer_ecall_num);
+  log_always("[Init] Num of ECall: %d\n", gFuzzECallNum);
   std::string ecalls;
-  for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-    ecalls += std::string("  " + std::to_string(i) + " - " +
-                          sgx_fuzzer_ecall_wrapper_name_array[i]) +
-              "\n";
+  for (int i = 0; i < gFuzzECallNum; i++) {
+    ecalls +=
+        std::string("  " + std::to_string(i) + " - " + gFuzzECallNameArray[i]) +
+        "\n";
   }
   log_always("ECalls:\n%s\n", ecalls.c_str());
 }
@@ -413,7 +429,7 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
           "Max size of pointer element");
   add_opt("cb_max_str_len",
           po::value<size_t>(&ClMaxStrlen)->default_value(65536),
-          "Max length of string");
+          "Max length of string (not contain tail 0)");
   add_opt("cb_filter_out", po::value<std::string>(),
           "Specified ECalls that we don't test");
   add_opt("sgxfuzz_test_user",
@@ -487,8 +503,8 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
                  [](char c) { return c == ','; });
 
     std::map<std::string, int> wrapperName2Idx;
-    for (int i = 0; i < sgx_fuzzer_ecall_num; i++) {
-      wrapperName2Idx[sgx_fuzzer_ecall_wrapper_name_array[i]] = i;
+    for (int i = 0; i < gFuzzECallNum; i++) {
+      wrapperName2Idx[gFuzzECallNameArray[i]] = i;
     }
 
     for (auto fiterOutECall : fiterOutECallVec) {
@@ -573,22 +589,21 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   if (gFuzzMode == TEST_USER) {
     callSeq = gFuzzerSeq;
   } else {
-    data_factory.getCallSequence(callSeq, sgx_fuzzer_ecall_num);
+    data_factory.getCallSequence(callSeq, gFuzzECallNum);
   }
   for (int i : callSeq) {
-    sgxfuzz_assert(i < sgx_fuzzer_ecall_num);
+    sgxfuzz_assert(i < gFuzzECallNum);
     if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
         gFilterOutIndices.end()) {
       // Filter it out
       continue;
     }
 
-    log_trace("[TEST] ECall-%d: %s\n", i,
-              sgx_fuzzer_ecall_wrapper_name_array[i]);
-    ret = sgx_fuzzer_ecall_array[i]();
+    log_trace("[TEST] ECall-%d: %s\n", i, gFuzzECallNameArray[i]);
+    ret = gFuzzECallArray[i]();
     sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
                       ret != SGX_ERROR_ECALL_NOT_ALLOWED,
-                  "[FAIL] ECall: %s", sgx_fuzzer_ecall_wrapper_name_array[i]);
+                  "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
   }
 
   data_factory.clear();
@@ -605,15 +620,16 @@ uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
   return data_factory.getBytes(ptr, byteArrLen, dataType);
 }
 
-uint8_t *DFGetBytes(size_t byteArrLen, char *cStrAsParamID,
+uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
                     FuzzDataTy dataType) {
+  // log_always("%s requires %llx bytes data\n", cStrAsParamID, byteArrLen);
   std::string ParamID(cStrAsParamID);
   // std::replace(ParamID.begin(), ParamID.end(), '/', '_');
   if (gSpecDataID2Type.count(ParamID)) {
     // Override DataType by user specified
     dataType = gSpecDataID2Type[ParamID];
   }
-  return data_factory.getBytes(nullptr, byteArrLen, dataType);
+  return data_factory.getBytes(ptr, byteArrLen, dataType);
 }
 
 bool DFEnableSetNull(char *cStrAsParamID) {
@@ -621,12 +637,22 @@ bool DFEnableSetNull(char *cStrAsParamID) {
 }
 
 void *DFManagedMalloc(size_t size) { return data_factory.managedMalloc(size); }
+void *DFManagedCalloc(size_t count, size_t size) {
+  return data_factory.managedCalloc(count, size);
+}
 
-uint64_t getPointToCount(uint64_t size, uint64_t count, uint64_t eleSize) {
+uint64_t DFGetPtToCntECall(uint64_t size, uint64_t count, uint64_t eleSize) {
   sgxfuzz_assert(eleSize);
   // Maybe size * count != n * eleSize, due to problem of Enclave developer
   uint64_t ptCnt = (size * count + eleSize - 1) / eleSize;
-  return std::max(ptCnt, (uint64_t)1);
+  return ptCnt;
+}
+
+uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count, uint64_t eleSize) {
+  sgxfuzz_assert(eleSize);
+  // Maybe size * count != n * eleSize, due to problem of Enclave developer
+  uint64_t ptCnt = (size * count) / eleSize;
+  return ptCnt;
 }
 
 bool DFEnableModifyOCallRet(char *cParamID) {

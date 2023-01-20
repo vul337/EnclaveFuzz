@@ -1,12 +1,12 @@
 #pragma once
 
+#include "PassUtil.h"
+#include "nlohmann/json.hpp"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
-
-#include "nlohmann/json.hpp"
 #include <unordered_set>
 
 /// This struct defines the shadow mapping using the rule:
@@ -142,9 +142,9 @@ private:
       SGXSanMemsetS, SGXSanMemmoveS, TDECallConstructor, TDECallDestructor,
       PushOCAllocStack, PopOCAllocStack;
   std::unordered_set<Function *> TDMgrInstrumentedEcall;
-  bool isFuncAtTBridge = false;
   Constant *globalFuncName = nullptr;
   std::map<Type *, bool> typeHasPointerMap;
+  SGXSanInstVisitor mInstVisitor;
 };
 
 class ModuleAddressSanitizer {

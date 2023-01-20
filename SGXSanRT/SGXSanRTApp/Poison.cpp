@@ -78,6 +78,9 @@ void PoisonShadow(uptr addr, uptr size, uint8_t value,
   // RoundUpTo(addr, granularity)
   if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY))) {
     uptr aligned_addr = RoundUpTo(addr, SHADOW_GRANULARITY);
+    if (size <= aligned_addr - addr) {
+      return;
+    }
     size -= aligned_addr - addr;
     addr = aligned_addr;
   }
@@ -89,7 +92,7 @@ void PoisonShadow(uptr addr, uptr size, uint8_t value,
     uint8_t *shadowEnd = (uint8_t *)MEM_TO_SHADOW(addr + size - remained);
     int8_t origValue = L1F(*shadowEnd);
     if (value >= 0x80) {
-      if (0 <= origValue && origValue <= (int8_t)remained)
+      if (0 < origValue && origValue <= (int8_t)remained)
         *shadowEnd = L0P(value);
     } else if (value == kAsanNotPoisonedMagic) {
       uint8_t poisonVal = std::max(origValue, (int8_t)remained);
@@ -151,11 +154,6 @@ static void RegisterGlobal(const SGXSanGlobal *g) {
 
 // Register an array of globals.
 extern "C" void __asan_register_globals(SGXSanGlobal *globals, uptr n) {
-  bool origInEnclave = false;
-  if (RunInEnclave == false)
-    RunInEnclave = true;
-  else
-    origInEnclave = true;
   for (uptr i = 0; i < n; i++) {
     RegisterGlobal(&globals[i]);
   }
@@ -163,7 +161,6 @@ extern "C" void __asan_register_globals(SGXSanGlobal *globals, uptr n) {
   // Poison the metadata. It should not be accessible to user code.
   PoisonShadow((uptr)globals, n * sizeof(SGXSanGlobal),
                kAsanGlobalRedzoneMagic);
-  RunInEnclave = origInEnclave;
 }
 
 static void UnregisterGlobal(const SGXSanGlobal *g) {
@@ -197,27 +194,15 @@ void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value, bool doPoison) {
   }
   if (size == 0)
     return;
-  uptr *p_shadow = (uptr *)MEM_TO_SHADOW(addr);
+  uint8_t *p_shadow = (uint8_t *)MEM_TO_SHADOW(addr);
   uptr shadow_size = RoundUpDiv(size, SHADOW_GRANULARITY);
-  uptr extendedValue = ExtendInt8(value);
-  size_t step_size = sizeof(uptr), step_times = shadow_size / step_size,
-         remained = shadow_size % step_size;
-  uint8_t *p_shadow_remained =
-      (uint8_t *)((uptr)p_shadow + shadow_size - remained);
   if (doPoison) {
-    for (size_t step = 0; step < step_times; step++) {
-      p_shadow[step] |= extendedValue;
-    }
-    for (size_t i = 0; i < remained; i++) {
-      p_shadow_remained[i] |= value;
+    for (size_t i = 0; i < shadow_size; i++) {
+      p_shadow[i] |= value;
     }
   } else {
-    uptr unpoisonValue = ~extendedValue;
-    for (size_t step = 0; step < step_times; step++) {
-      p_shadow[step] &= unpoisonValue;
-    }
-    for (size_t i = 0; i < remained; i++) {
-      p_shadow_remained[i] &= ~value;
+    for (size_t i = 0; i < shadow_size; i++) {
+      p_shadow[i] &= ~value;
     }
   }
 }
@@ -246,11 +231,7 @@ struct SLSanGlobal {
 
 static void RegisterSensitiveGlobal(SLSanGlobal *g) {
   sgxsan_assert(IsAligned(g->beg, SHADOW_GRANULARITY));
-  size_t shadowSize = RoundUpDiv(g->size, SHADOW_GRANULARITY);
-  uint8_t *shadowAddr = (uint8_t *)MEM_TO_SHADOW(g->beg);
-  for (size_t i = 0; i < shadowSize; i++) {
-    *shadowAddr |= kSGXSanSensitiveObjData;
-  }
+  ShallowPoisonShadow(g->beg, g->size, kSGXSanSensitiveObjData);
 }
 
 extern "C" void PoisonSensitiveGlobal(SLSanGlobal *globals, size_t n) {

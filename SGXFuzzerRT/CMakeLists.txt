@@ -1,4 +1,4 @@
-set(SOURCE
+set(LIBFUZZER_SRC
     libFuzzer/FuzzerCrossOver.cpp
     libFuzzer/FuzzerDataFlowTrace.cpp
     libFuzzer/FuzzerDriver.cpp
@@ -22,7 +22,9 @@ set(SOURCE
     libFuzzer/FuzzerUtilFuchsia.cpp
     libFuzzer/FuzzerUtilLinux.cpp
     libFuzzer/FuzzerUtilPosix.cpp
-    libFuzzer/FuzzerUtilWindows.cpp
+    libFuzzer/FuzzerUtilWindows.cpp)
+
+set(FUZZER_RT_SRC
     libFuzzerCallback.cpp)
 
 
@@ -36,9 +38,14 @@ include_directories(
 
 add_library(
     SGXFuzzerRT STATIC 
-    ${SOURCE})
+    ${LIBFUZZER_SRC}
+    ${FUZZER_RT_SRC})
 
 set_target_properties(
     SGXFuzzerRT PROPERTIES
     POSITION_INDEPENDENT_CODE True
-    COMPILE_FLAGS "-Wall -Wno-builtin-declaration-mismatch -Wno-unused-result -std=c++17")
+    COMPILE_FLAGS "-Wall -Wno-unused-result -std=c++17")
+
+get_filename_component(SGXSanPassPath ${CMAKE_BINARY_DIR}/SGXSanPass/libSGXSanPass.so ABSOLUTE)
+# set_source_files_properties(${FUZZER_RT_SRC} PROPERTIES
+#     COMPILE_FLAGS "-flegacy-pass-manager -Xclang -load -Xclang ${SGXSanPassPath} -mllvm -in-enclave=false")

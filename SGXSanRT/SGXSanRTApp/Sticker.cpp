@@ -1,5 +1,6 @@
 #include "Sticker.h"
 #include "ArgShadow.h"
+#include "HostASanRT.h"
 #include "Malloc.h"
 #include "MemAccessMgr.h"
 #include "Poison.h"
@@ -189,6 +190,9 @@ int sgx_init_string_lib(uint64_t cpu_feature_indicator) {
   return 0;
 }
 
+#ifdef alloca
+#undef alloca
+#endif
 void *alloca(size_t __size) { return __builtin_alloca(__size); }
 
 sgx_status_t sgx_cpuidex(int cpuinfo[4], int leaf, int subleaf) {
@@ -417,7 +421,9 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   MemAccessMgrClear();
   ClearArgShadowStack();
   ClearSticker();
-  ClearStackPoison();
+  if (not gHostASanInited) {
+    ClearStackPoison();
+  }
   ClearHeapObject();
   gEnclaveHandler = nullptr;
   return SGX_SUCCESS;

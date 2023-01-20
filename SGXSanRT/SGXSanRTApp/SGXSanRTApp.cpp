@@ -51,21 +51,21 @@ static std::string sgxsan_exec(const char *cmd) {
   return result;
 }
 
-static void PrintAddressSpaceLayout() {
-  log_debug("|| `[%16p, %16p]` || LowMem          ||\n", (void *)kLowMemBeg,
-            (void *)kLowMemEnd);
-  log_debug("|| `[%16p, %16p]` || LowShadowGuard  ||\n",
-            (void *)kLowShadowGuardBeg, (void *)(kLowShadowBeg - 1));
-  log_debug("|| `[%16p, %16p]` || LowShadow       ||\n", (void *)kLowShadowBeg,
-            (void *)kLowShadowEnd);
-  log_debug("|| `[%16p, %16p]` || ShadowGap       ||\n", (void *)kShadowGapBeg,
-            (void *)kShadowGapEnd);
-  log_debug("|| `[%16p, %16p]` || HighShadow      ||\n", (void *)kHighShadowBeg,
-            (void *)kHighShadowEnd);
-  log_debug("|| `[%16p, %16p]` || HighShadowGuard ||\n",
-            (void *)(kHighShadowEnd + 1), (void *)kHighShadowGuardEnd);
-  log_debug("|| `[%16p, %16p]` || HighMem         ||\n", (void *)kHighMemBeg,
-            (void *)kHighMemEnd);
+static void PrintAddressSpaceLayout(log_level ll = LOG_LEVEL_DEBUG) {
+  sgxsan_log(ll, true, "|| `[%16p, %16p]` || LowMem          ||\n",
+             (void *)kLowMemBeg, (void *)kLowMemEnd);
+  sgxsan_log(ll, true, "|| `[%16p, %16p]` || LowShadowGuard  ||\n",
+             (void *)kLowShadowGuardBeg, (void *)(kLowShadowBeg - 1));
+  sgxsan_log(ll, true, "|| `[%16p, %16p]` || LowShadow       ||\n",
+             (void *)kLowShadowBeg, (void *)kLowShadowEnd);
+  sgxsan_log(ll, true, "|| `[%16p, %16p]` || ShadowGap       ||\n",
+             (void *)kShadowGapBeg, (void *)kShadowGapEnd);
+  sgxsan_log(ll, true, "|| `[%16p, %16p]` || HighShadow      ||\n",
+             (void *)kHighShadowBeg, (void *)kHighShadowEnd);
+  sgxsan_log(ll, true, "|| `[%16p, %16p]` || HighShadowGuard ||\n",
+             (void *)(kHighShadowEnd + 1), (void *)kHighShadowGuardEnd);
+  sgxsan_log(ll, true, "|| `[%16p, %16p]` || HighMem         ||\n",
+             (void *)kHighMemBeg, (void *)kHighMemEnd);
 }
 
 /// \brief Signal handler to report illegal memory access
@@ -206,7 +206,9 @@ int hook_enclave() {
 }
 
 __attribute__((constructor)) void SGXSanInit() {
-  assert(not asan_inited);
+  if (asan_inited) {
+    return;
+  }
   updateBackEndHeapAllocator();
   // make sure c++ stream is initialized
   std::ios_base::Init _init;

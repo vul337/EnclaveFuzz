@@ -20,7 +20,8 @@ add_library(
     SGXSanRTApp.cpp
     ArgShadow.cpp
     MemAccessMgr.cpp
-    Sticker.cpp 
+    Sticker.cpp
+    HostASanRT.cpp
     ${LINUX_SGX_MINI}/sdk/tlibc/gen/spinlock.c 
     ${LINUX_SGX_MINI}/sdk/tlibc/string/consttime_memequal.c 
     ${LINUX_SGX_MINI}/sdk/tlibthread/sethread_cond.cpp

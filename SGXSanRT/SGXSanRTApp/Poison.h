@@ -61,7 +61,8 @@ void PoisonShadow(uptr addr, uptr size, uint8_t value,
 #define kL2Filter 0x30
 #define L2F(ShadowValue) (ShadowValue & kL2Filter)
 /// Poison
-void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value, bool doPoison);
+void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value,
+                         bool doPoison = true);
 void MoveShallowShadow(uptr dst_addr, uptr src_addr, uptr dst_size,
                        uptr copy_cnt);
 

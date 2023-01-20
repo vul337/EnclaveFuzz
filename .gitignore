@@ -4,3 +4,4 @@
 *-build
 install
 sgx_edger8r
+vtune

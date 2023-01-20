@@ -80,9 +80,9 @@ void SensitiveLeakSanitizer::ShallowPoisonAlignedObject(
     // get several kSGXSanSensitiveObjData concate
     uint64_t value = 0;
     for (size_t i = 1; i <= stepSize; i++) {
-      value = (value << 8 /* bit */) + indicatorArr[(step + 1) * stepSize - i]
-                  ? kSGXSanSensitiveObjData
-                  : 0;
+      value = (value << 8 /* bit */) + (indicatorArr[(step + 1) * stepSize - i]
+                                            ? kSGXSanSensitiveObjData
+                                            : 0);
     }
     auto stepShadowAddr = IRB.CreateIntToPtr(
         IRB.CreateAdd(shadowAddr, ConstantInt::get(IntptrTy, step * stepSize)),
@@ -126,7 +126,7 @@ void SensitiveLeakSanitizer::poisonSensitiveStackOrHeapObj(
   if (AllocaInst *objAI = dyn_cast<AllocaInst>(objI)) {
     /// TODO: extend at next time
     assert(sensitiveIndicator == nullptr);
-    auto &visitInfos = SGXSanInstVisitor::visitFunction(*objAI->getFunction());
+    auto &visitInfos = mInstVisitor.visitFunction(*objAI->getFunction());
     if (objAI->isStaticAlloca()) {
       objLivePoints.push_back(objAI->getNextNode());
     } else {
@@ -250,7 +250,7 @@ std::string SensitiveLeakSanitizer::extractAnnotation(Value *annotationStrVal) {
 }
 
 bool SensitiveLeakSanitizer::isTBridgeFunc(Function &F) {
-  auto CallInstVec = SGXSanInstVisitor::visitFunction(F).CallInstVec;
+  auto CallInstVec = mInstVisitor.visitFunction(F).CallInstVec;
   for (auto CI : CallInstVec) {
     StringRef callee_name = getDirectCalleeName(CI);
     if (F.getName() ==
@@ -645,7 +645,7 @@ StringRef SensitiveLeakSanitizer::getObjMeaningfulName(SVF::ObjVar *objPN) {
 }
 
 void SensitiveLeakSanitizer::collectAndPoisonSensitiveObj() {
-  auto CallInstVec = SGXSanInstVisitor::visitModule(*M).CallInstVec;
+  auto CallInstVec = mInstVisitor.visitModule(*M).CallInstVec;
   for (auto CI : CallInstVec) {
     for (auto callee : getDirectAndIndirectCalledFunction(CI)) {
       if (isEncryptionFunction(callee)) {
@@ -734,8 +734,6 @@ void SensitiveLeakSanitizer::collectAndPoisonSensitiveObj() {
     }
   }
 }
-
-void dump(ordered_json js) { dbgs() << js.dump(4) << "\n"; }
 
 void SensitiveLeakSanitizer::updateSVFExtAPI() {
   // register heap allocator wrappers to SVF ExtAPI.json
@@ -861,7 +859,7 @@ bool SensitiveLeakSanitizer::isHeapAllocatorWrapper(Function &F) {
   if (!F.getFunctionType()->getReturnType()->isPointerTy())
     return false;
 
-  auto &visitInfo = SGXSanInstVisitor::visitFunction(F);
+  auto &visitInfo = mInstVisitor.visitFunction(F);
   auto CallInstVec = visitInfo.CallInstVec;
   auto RetInstVec = visitInfo.ReturnInstVec;
 
@@ -1267,7 +1265,7 @@ void SensitiveLeakSanitizer::ShallowUnpoisonStackObj(SVF::ObjVar *objPN) {
     // stack object must be a AllocInst
     if (AI && shallowUnpoisonedStackObjs.count(AI) == 0) {
       SmallVector<Instruction *> AIDiePoints;
-      auto &visitInfos = SGXSanInstVisitor::visitFunction(*(AI->getFunction()));
+      auto &visitInfos = mInstVisitor.visitFunction(*(AI->getFunction()));
       if (AI->isStaticAlloca()) {
         for (ReturnInst *RI : visitInfos.ReturnInstVec) {
           AIDiePoints.push_back(RI);

@@ -57,6 +57,7 @@ typedef signed long sptr;
 #define kHighShadowGuardEnd (kHighShadowEnd + PAGE_SIZE)
 /// Init util
 extern bool asan_inited;
+extern "C" void SGXSanInit();
 
 /// Logging utils
 enum log_level {

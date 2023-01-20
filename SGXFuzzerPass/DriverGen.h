@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PassUtil.h"
 #include "nlohmann/json.hpp"
 #include "llvm/IR/Module.h"
 
@@ -10,28 +11,16 @@ public:
   // propagate [in]/[out]/[user_check] to it's element
   void inheritDirectionAttr(nlohmann::json::json_pointer jsonPtr,
                             size_t field_index);
-  nlohmann::json::json_pointer getRootPtr(nlohmann::json::json_pointer jsonPtr);
-  bool isECallPtr(nlohmann::json::json_pointer jsonPtr);
-  bool whetherFeedRandom(nlohmann::json::json_pointer jsonPtr);
-  void dump(nlohmann::json js, nlohmann::json::json_pointer jsonPtr);
+  std::string RootToken(nlohmann::json::json_pointer jsonPtr);
+  bool IsECall(nlohmann::json::json_pointer jsonPtr);
+  bool EnableFuzzInput(nlohmann::json::json_pointer jsonPtr);
   void dataCopy(Value *dstPtr, Value *srcPtr, Type *type, Instruction *insertPt,
                 Value *arrCnt = nullptr);
-  GlobalVariable *CreateZeroInitizerGlobal(StringRef Name, Type *Ty);
-
-  /// @brief I don't use jsonPtr.to_string() as jsonPtrAsID, instead, I use
-  /// parentID+currentID, since later has InstanceID info
-  /// @param types
-  /// @param jsonPtr
-  /// @param parentID
-  /// @param currentID
-  /// @param paramPtrs
-  /// @param insertPt
-  /// @param recursion_depth
-  /// @return
   Value *createParamContent(SmallVector<Type *> types,
                             nlohmann::json::json_pointer jsonPtr,
                             std::map<uint64_t, Value *> *paramPtrs,
-                            Instruction *insertPt, size_t recursion_depth = 0);
+                            Instruction *insertPt, size_t recursion_depth = 0,
+                            Value *buffer = nullptr);
   void fillAtOnce(Value *dstPtr, nlohmann::json::json_pointer jsonPtr,
                   Value *jsonPtrAsID, Instruction *insertPt,
                   Type *type = nullptr, Value *arrCnt = nullptr,
@@ -52,11 +41,13 @@ public:
 
 private:
   FunctionCallee getIndexOfEcallToBeFuzzed, DFGetBytes, DFGetUserCheckCount,
-      _strlen, _wcslen, DFEnableSetNull, DFManagedMalloc,
-      DFEnableModifyOCallRet, getPointToCount;
+      _strlen, _wcslen, DFEnableSetNull, DFManagedMalloc, DFManagedCalloc,
+      DFEnableModifyOCallRet, DFGetPtToCntECall, DFGetPtToCntOCall;
   Module *M = nullptr;
   LLVMContext *C = nullptr;
   nlohmann::json edlJson;
   std::map<Type *, bool> typeHasPointerMap;
+  TypeSerialize::DeSerializer mDeSerialzer;
+  SGXSanInstVisitor mInstVisitor;
 };
 } // namespace llvm

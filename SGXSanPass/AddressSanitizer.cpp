@@ -17,7 +17,6 @@
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "AddressSanitizer.h"
-#include "PassUtil.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -184,6 +183,10 @@ const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
 static const unsigned kAllocaRzSize = 32;
 
 // Command-line flags.
+
+static cl::opt<bool> ClInEnclave("in-enclave",
+                                 cl::desc("in Enclave or Host App"), cl::Hidden,
+                                 cl::init(true));
 
 static cl::opt<bool>
     ClEnableKasan("sgxsan-kernel",
@@ -1845,123 +1848,44 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                       globalFuncName, ConstantInt::get(IRB.getInt32Ty(), Exp)});
     return;
   }
-  // <Below is pseudo-code>
-  // Cmp1_BB:
-  // get ShadowByte
-  // cmp ShadowByte == IN_ENCLAVE_FLAG
-  // branch InEnclaveAccess_BB, Cmp2_BB
-  //
-  // Cmp2_BB:
-  // IsInEnclave = and ShadowByte, IN_ENCLAVE_FLAG
-  // cmp IsInEnclave == 0
-  // branch OutEnclaveAccess_BB, SlowPath1_BB
-  //
-  // SlowPath1_BB:
-  // ShadowByte = and ShadowByte, 0x8F
-  // cmp ShadowByte == 0
-  // branch InEnclaveAccess_BB, SlowPath2_BB
-  //
-  // SlowPath2_BB:
-  // cmp LastAccessByte >= ShadowByte
-  // branch Crash_BB, InEnclaveAccess_BB
-  //
-  // Crash_BB:
-  // Report Error and Crash
-  //
-  // OutEnclaveAccess_BB:
-  // MemAccessMgr Statistics;
-  // branch Access_BB;
-  //
-  // InEnclaveAccess_BB:
-  // MemAccessMgr Statistics;
-  // branch Access_BB;
-  //
-  // Access_BB:
 
-  BasicBlock *Cmp1_BB = nullptr, *Cmp2_BB = nullptr, *SlowPath1_BB = nullptr,
-             *Crash_BB = nullptr, *OutEnclaveAccess_BB = nullptr,
-             *InEnclaveAccess_BB = nullptr, *Access_BB = nullptr;
-  Cmp1_BB = InsertBefore->getParent();
-  Access_BB = SplitBlock(Cmp1_BB, InsertBefore);
-  Function *curFunc = Cmp1_BB->getParent();
-  InEnclaveAccess_BB =
-      BasicBlock::Create(*C, "InEnclaveAccess_BB", curFunc, Access_BB);
-  OutEnclaveAccess_BB = BasicBlock::Create(*C, "OutEnclaveAccess_BB", curFunc,
-                                           InEnclaveAccess_BB);
-  Crash_BB = BasicBlock::Create(*C, "Crash_BB", curFunc, OutEnclaveAccess_BB);
-  SlowPath1_BB = BasicBlock::Create(*C, "SlowPath1_BB", curFunc, Crash_BB);
-  Cmp2_BB = BasicBlock::Create(*C, "Cmp2_BB", curFunc, SlowPath1_BB);
-
-  Instruction *Cmp1_BBTerm = Cmp1_BB->getTerminator();
-  IRB.SetInsertPoint(Cmp1_BBTerm);
   Type *ShadowTy =
       IntegerType::get(*C, std::max(8U, TypeSize >> Mapping.Scale));
   Type *ShadowPtrTy = PointerType::get(ShadowTy, 0);
   Value *ShadowPtr = memToShadow(AddrLong, IRB);
   Value *CmpVal = Constant::getNullValue(ShadowTy);
-  Value *InEnclaveFlag =
-      (ShadowTy == Type::getInt16Ty(*C))
-          ? IRB.getInt16((kSGXSanInEnclaveMagic << 8) + kSGXSanInEnclaveMagic)
-          : IRB.getInt8(kSGXSanInEnclaveMagic);
   Value *ShadowValue =
       IRB.CreateLoad(ShadowTy, IRB.CreateIntToPtr(ShadowPtr, ShadowPtrTy));
 
-  Value *Cmp = IRB.CreateICmpNE(ShadowValue, InEnclaveFlag);
+  Value *Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
   size_t Granularity = 1ULL << Mapping.Scale;
   Instruction *CrashTerm = nullptr;
 
-  IRB.CreateCondBr(Cmp, Cmp2_BB, InEnclaveAccess_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-  Cmp1_BBTerm->eraseFromParent();
-
-  IRB.SetInsertPoint(Cmp2_BB);
-  Value *IsInEnclave =
-      IRB.CreateICmpNE(IRB.CreateAnd(ShadowValue, InEnclaveFlag), CmpVal);
-  IRB.CreateCondBr(IsInEnclave, SlowPath1_BB, OutEnclaveAccess_BB,
-                   MDBuilder(*C).createBranchWeights(100000, 1));
-
-  IRB.SetInsertPoint(SlowPath1_BB);
-  // filte out sensitive poison value, then sensitive partial valid object oob
-  // access can be detected
-  ShadowValue = IRB.CreateAnd(ShadowValue, ShadowTy == Type::getInt16Ty(*C)
-                                               ? IRB.getInt16(0x8F8F)
-                                               : IRB.getInt8(0x8F));
-  Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
-
-  // If access less then 8 bytes (i.e. 1 shadow bytes), we need SlowPath2_BB to
-  // check
   if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
     // We use branch weights for the slow path check, to indicate that the slow
     // path is rarely taken. This seems to be the case for SPEC benchmarks.
-    BasicBlock *SlowPath2_BB =
-        BasicBlock::Create(*C, "SlowPath2_BB", curFunc, Crash_BB);
-    IRB.CreateCondBr(Cmp, SlowPath2_BB, InEnclaveAccess_BB,
-                     MDBuilder(*C).createBranchWeights(1, 100000));
-
-    IRB.SetInsertPoint(SlowPath2_BB);
-    Cmp = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    Instruction *CheckTerm = SplitBlockAndInsertIfThen(
+        Cmp, InsertBefore, false, MDBuilder(*C).createBranchWeights(1, 100000));
+    assert(cast<BranchInst>(CheckTerm)->isUnconditional());
+    BasicBlock *NextBB = CheckTerm->getSuccessor(0);
+    IRB.SetInsertPoint(CheckTerm);
+    Value *Cmp2 = createSlowPathCmp(IRB, AddrLong, ShadowValue, TypeSize);
+    if (Recover) {
+      CrashTerm = SplitBlockAndInsertIfThen(Cmp2, CheckTerm, false);
+    } else {
+      BasicBlock *CrashBlock =
+          BasicBlock::Create(*C, "", NextBB->getParent(), NextBB);
+      CrashTerm = new UnreachableInst(*C, CrashBlock);
+      BranchInst *NewTerm = BranchInst::Create(CrashBlock, NextBB, Cmp2);
+      ReplaceInstWithInst(CheckTerm, NewTerm);
+    }
+  } else {
+    CrashTerm = SplitBlockAndInsertIfThen(Cmp, InsertBefore, !Recover);
   }
-  IRB.CreateCondBr(Cmp, Crash_BB, InEnclaveAccess_BB,
-                   MDBuilder(*C).createBranchWeights(1, 100000));
-
-  IRB.SetInsertPoint(Crash_BB);
-  CrashTerm = IRB.CreateUnreachable();
 
   Instruction *Crash = generateCrashCode(CrashTerm, AddrLong, IsWrite,
                                          AccessSizeIndex, SizeArgument, Exp);
   Crash->setDebugLoc(OrigIns->getDebugLoc());
-
-  IRB.SetInsertPoint(OutEnclaveAccess_BB);
-  IRB.CreateCall(MemAccessMgrOutEnclaveAccess,
-                 {IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()),
-                  ConstantInt::get(IntptrTy, (TypeSize >> 3)),
-                  IRB.getInt1(IsWrite), IRB.getInt1(hasCmpUser(OrigIns)),
-                  globalFuncName});
-  IRB.CreateBr(Access_BB);
-
-  IRB.SetInsertPoint(InEnclaveAccess_BB);
-  IRB.CreateCall(MemAccessMgrInEnclaveAccess);
-  IRB.CreateBr(Access_BB);
 }
 
 // Instrument unusual size or unusual alignment.
@@ -3099,6 +3023,7 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   bool UseCalls = (ClInstrumentationWithCallsThreshold >= 0 &&
                    OperandsToInstrument.size() + IntrinToInstrument.size() >
                        (unsigned)ClInstrumentationWithCallsThreshold);
+  UseCalls = true;
   const DataLayout &DL = F.getParent()->getDataLayout();
   ObjectSizeOpts ObjSizeOpts;
   ObjSizeOpts.RoundToAlign = true;
@@ -3664,7 +3589,10 @@ void FunctionStackPoisoner::processStaticAllocas() {
 
   auto ShadowAfterScope = GetShadowBytesAfterScope(SVD, L);
   for (auto &byte : ShadowAfterScope) {
-    byte = (byte & 0x8F) | kSGXSanInEnclaveMagic;
+    byte &= 0x8F;
+    if (ClInEnclave) {
+      byte |= kSGXSanInEnclaveMagic;
+    }
   }
 
   // Poison the stack red zones at the entry.
@@ -3676,7 +3604,10 @@ void FunctionStackPoisoner::processStaticAllocas() {
   if (!StaticAllocaPoisonCallVec.empty()) {
     auto ShadowInScope = GetShadowBytes(SVD, L);
     for (auto &byte : ShadowInScope) {
-      byte = (byte & 0x8F) | kSGXSanInEnclaveMagic;
+      byte &= 0x8F;
+      if (ClInEnclave) {
+        byte |= kSGXSanInEnclaveMagic;
+      }
     }
 
     // Poison static allocas near lifetime intrinsics.
@@ -3883,7 +3814,7 @@ void AddressSanitizer::instrumentTDECallMgr(Function *ecallWrapper) {
   IRB.CreateCall(TDECallConstructor);
 
   for (auto RetInst :
-       SGXSanInstVisitor::visitFunction(*ecallWrapper).BroadReturnInstVec) {
+       mInstVisitor.visitFunction(*ecallWrapper).BroadReturnInstVec) {
     IRB.SetInsertPoint(RetInst);
     IRB.CreateCall(TDECallDestructor);
   }
@@ -3912,7 +3843,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
   IRB.CreateCall(PushOCAllocStack);
 
   for (auto RetInst :
-       SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec) {
+       mInstVisitor.visitFunction(OcallWrapper).BroadReturnInstVec) {
     IRB.SetInsertPoint(RetInst);
     IRB.CreateCall(PopOCAllocStack);
     IRB.CreateCall(MemAccessMgrActive);

@@ -252,7 +252,7 @@ void *REALLOC(void *oldmem, size_t bytes) {
   return mem;
 }
 
-size_t MALLOC_USABLE_SIZE(void *mem) {
+size_t MALLOC_USABLE_SIZE(void *mem) throw() {
   updateBackEndHeapAllocator();
   chunk *m = (chunk *)((uptr)mem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);

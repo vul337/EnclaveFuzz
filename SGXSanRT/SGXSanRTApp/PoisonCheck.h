@@ -18,9 +18,7 @@ enum PoisonStatus { UnknownPoisonStatus = -1, NotPoisoned = 0, IsPoisoned = 1 };
 /// @brief Check only one shadow byte, this function don't call other check.
 /// @param addr Address used to check shadow byte
 /// @param[out] addrInOutEnclaveStatus Returns InEnclave or OutEnclave.
-/// @param[out] addrPoisonStatus If addrInOutEnclaveStatus is InEnclave, return
-/// NotPoisoned or IsPoisoned. If addrInOutEnclaveStatus is OutEnclave, returns
-/// UnknownPoisonStatus.
+/// @param[out] addrPoisonStatus Return NotPoisoned or IsPoisoned
 /// @param filter Tell which bits in one byte is interesting
 void AddressInOutEnclaveStatusAndPoisonStatus(
     uptr addr, InOutEnclaveStatus &addrInOutEnclaveStatus,
@@ -35,9 +33,8 @@ void AddressInOutEnclaveStatusAndPoisonStatus(
 /// RangeOverflow if beg+size cause int overflow. Return RangeMixedInOutEnclave
 /// if not all address in or out Enclave. Otherwise return InEnclave or
 /// OutEnclave.
-/// @param[out] regionPoisonStatus When regionInOutEnclaveStatus is InEnclave,
-/// return IsPoisoned if we can quickly decide that the region is unpoisoned,
-/// otherwise NotPoisoned. When regionInOutEnclaveStatus is others, return
+/// @param[out] regionPoisonStatus When InEnclave or OutEnclave, return
+/// IsPoisoned or NotPoisoned. When regionInOutEnclaveStatus is others, return
 /// UnknownPoisonStatus.
 void FastRegionInOutEnclaveStatusAndPoisonStatus(
     uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
@@ -52,8 +49,8 @@ void FastRegionInOutEnclaveStatusAndPoisonStatus(
 /// RangeMixedInOutEnclave if partial shadow bytes indicate InEnclave while
 /// others indicate OutEnclave. Otherwise return InEnclave or OutEnclave
 /// @param[out] regionPoisonStatus
-/// If regionInOutEnclaveStatus returns InEnclave, return IsPoisoned or
-/// NotPoisoned, otherwise return UnknownPoisonStatus.
+/// If InEnclave or OutEnclave, return IsPoisoned or NotPoisoned, otherwise
+/// return UnknownPoisonStatus.
 /// @param filter Tell which bits in one byte is interesting
 void ShadowRegionInOutEnclaveStatusAndStrictPoisonStatus(
     uint8_t *beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
@@ -66,8 +63,8 @@ void ShadowRegionInOutEnclaveStatusAndStrictPoisonStatus(
 /// cause int overflow. Return RangeInvalid if region isn't in valid memory.
 /// Return RangeMixedInOutEnclave if partial shadow bytes indicate InEnclave
 /// while others indicate OutEnclave. Otherwise return InEnclave or OutEnclave.
-/// @param[out] regionPoisonStatus If regionInOutEnclaveStatus returns
-/// InEnclave, return NotPoisoned or IsPoisoned
+/// @param[out] regionPoisonStatus If InEnclave or OutEnclave, return
+/// NotPoisoned or IsPoisoned
 /// @param filter Tell which bits in one byte is interesting
 void RegionInOutEnclaveStatusAndPoisonStatus(
     uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
@@ -81,8 +78,8 @@ void RegionInOutEnclaveStatusAndPoisonStatus(
 /// cause int overflow. Return RangeInvalid if region isn't in valid memory.
 /// Return RangeMixedInOutEnclave if partial shadow bytes indicate InEnclave
 /// while others indicate OutEnclave. Otherwise return InEnclave or OutEnclave.
-/// @param[out] regionFirstPoisonedAddr If regionInOutEnclaveStatus returns
-/// InEnclave, return first poisoned address
+/// @param[out] regionFirstPoisonedAddr If InEnclave or OutEnclave, return first
+/// poisoned address
 /// @param filter Tell which bits in one byte is interesting
 void RegionInOutEnclaveStatusAndPoisonedAddr(
     uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,

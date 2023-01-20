@@ -37,11 +37,11 @@ void *__libc_calloc(size_t nmemb, size_t size) throw();
 void *__libc_realloc(void *ptr, size_t size) throw();
 void updateBackEndHeapAllocator();
 void ClearHeapObject();
-void *MALLOC(size_t size);
-void FREE(void *ptr);
-void *CALLOC(size_t n_elements, size_t elem_size);
-void *REALLOC(void *oldmem, size_t bytes);
-size_t MALLOC_USABLE_SIZE(void *mem);
+void *MALLOC(size_t size) throw();
+void FREE(void *ptr) throw();
+void *CALLOC(size_t n_elements, size_t elem_size) throw();
+void *REALLOC(void *oldmem, size_t bytes) throw();
+size_t MALLOC_USABLE_SIZE(void *mem) throw();
 #if defined(__cplusplus)
 }
 #endif

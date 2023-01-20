@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
+set(CMAKE_C_COMPILER "clang-13")
+set(CMAKE_CXX_COMPILER "clang++-13")
+
 set(LINUX_SGX_MINI "${CMAKE_CURRENT_SOURCE_DIR}/SGXSanRT/linux-sgx-mini/")
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 configure_file(SGXSanConfig.h.in SGXSanConfig.h @ONLY)
@@ -20,6 +23,8 @@ add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
 add_subdirectory(SGXFuzzerPass)
 add_subdirectory(SGXFuzzerRT)
+
+add_dependencies(SGXFuzzerRT SGXSanPass)
 
 install(TARGETS
         SGXSanPass

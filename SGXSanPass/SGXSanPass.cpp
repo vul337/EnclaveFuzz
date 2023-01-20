@@ -1,13 +1,18 @@
 #include "AddressSanitizer.h"
 #include "FuncRenamePass.h"
 #include "SensitiveLeakSanitizer.h"
+#include "nlohmann/json.hpp"
 
+using ordered_json = nlohmann::ordered_json;
 using namespace llvm;
 
 static cl::opt<bool>
     ClEnableSLSan("enable-slsan",
                   cl::desc("Whether enable Sensitive Leak Santizer or not"),
                   cl::Hidden, cl::init(false));
+
+static cl::opt<bool> ClDumpStructType("dump-struct", cl::desc("Dump Struct"),
+                                      cl::Hidden, cl::init(false));
 
 namespace {
 struct SGXSanLegacyPass : public ModulePass {
@@ -21,8 +26,22 @@ struct SGXSanLegacyPass : public ModulePass {
     AU.addRequired<TargetLibraryInfoWrapperPass>();
   }
 
+  void DumpModuleStructs(Module &M) {
+    ordered_json json;
+    for (auto structTy : M.getIdentifiedStructTypes()) {
+      TypeSerialize::Serializer serializer;
+      serializer.SerializeStructType(structTy, json);
+    }
+    std::ofstream ofs(M.getName().str() + ".sgxsan.typeinfo.json");
+    ofs << json.dump(4);
+  }
+
   bool runOnModule(Module &M) override {
     bool Changed = false;
+
+    if (ClDumpStructType) {
+      DumpModuleStructs(M);
+    }
 
     Changed |= RenameFuncSym(M);
 
