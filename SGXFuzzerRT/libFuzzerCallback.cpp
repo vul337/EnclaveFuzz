@@ -42,9 +42,7 @@ sgx_enclave_id_t global_eid = 0;
 std::string ClEnclaveFileName;
 size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize;
 int ClUsedLogLevel;
-bool ClProvideNullPointer;
-double ClProvideNullPointerProbability;
-double ClReturn0Probability;
+double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER };
@@ -52,7 +50,6 @@ static std::vector<int> gFuzzerSeq;
 static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
 static std::unordered_map<std::string, FuzzDataTy> gSpecDataID2Type;
-static std::unordered_set<std::string> gNotModifyOCallRetSpecs;
 
 // Passed from DriverGen IR pass
 extern sgx_status_t (*gFuzzECallArray[])();
@@ -176,7 +173,7 @@ public:
       bool return0;
       if (provider->remaining_bytes() > 0) {
         double prob = 1 - provider->ConsumeProbability<double>();
-        return0 = prob < ClReturn0Probability;
+        return0 = prob < ClReturn0Prob;
       } else {
         NeedMoreFuzzData(sizeof(uint64_t));
         return0 = false;
@@ -305,7 +302,7 @@ public:
   bool EnableSetNull() {
     if (provider->remaining_bytes() > 0) {
       auto prob = 1.0 - provider->ConsumeProbability<double>();
-      return prob <= ClProvideNullPointerProbability;
+      return prob <= ClProvideNullPointerProb;
     } else {
       NeedMoreFuzzData(sizeof(uint64_t));
       return false;
@@ -383,10 +380,29 @@ public:
     }
   }
 
+  void AddNotModifyOCallRetSpecs(std::string ID) {
+    mNotModifyOCallRetSpecs.emplace(ID);
+  }
+
+  bool EnableModifyOCallRet(char *cParamID) {
+    std::string ParamID(cParamID);
+    if (mNotModifyOCallRetSpecs.count(ParamID)) {
+      return false;
+    }
+    if (provider->remaining_bytes() > 0) {
+      auto prob = 1.0 - provider->ConsumeProbability<double>();
+      return prob <= ClModifyOCallRetProb;
+    } else {
+      NeedMoreFuzzData(sizeof(uint64_t));
+      return false;
+    }
+  }
+
 private:
   FuzzedDataProvider *provider;
   std::vector<uint8_t *> allocatedMemAreas;
   size_t mExpectedFuzzDataSize, mRandPoolBytesOffset;
+  std::unordered_set<std::string> mNotModifyOCallRetSpecs;
 };
 FuzzDataFactory data_factory;
 
@@ -416,45 +432,41 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   // Declare the supported options.
   po::options_description desc("LibFuzzerCallback's inner options");
   auto add_opt = desc.add_options();
-  add_opt("cb_help", "produce help message");
-  add_opt("cb_enclave_file_name",
+  add_opt("cb_help", "Produce help message");
+  add_opt("cb_enclave",
           po::value<std::string>(&ClEnclaveFileName)
               ->default_value("enclave.signed.so"),
           "Name of target Enclave file");
-  add_opt(
-      "cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(65536),
-      "Max count of elements for pointer which size is unknown or not fixed, "
-      "if set too large, multi-level pointer will consume a large memory");
+  add_opt("cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(65536),
+          "Max count of elements for pointer");
   add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(65536),
           "Max size of pointer element");
-  add_opt("cb_max_str_len",
+  add_opt("cb_max_strlen",
           po::value<size_t>(&ClMaxStrlen)->default_value(65536),
-          "Max length of string (not contain tail 0)");
-  add_opt("cb_filter_out", po::value<std::string>(),
-          "Specified ECalls that we don't test");
-  add_opt("sgxfuzz_test_user",
-          po::value<std::vector<std::string>>()->multitoken(),
-          "test a number of APIs user specified");
+          "Max length of string (no tail 0)");
+  add_opt("cb_filter_out", po::value<std::string>(), "Don't test these ECalls");
+  add_opt("sgxfuzz_test_user", po::value<std::string>(), "Test these ECalls");
   add_opt("cb_log_level", po::value<int>(&ClUsedLogLevel)->default_value(2),
           "0-Always, 1-Error, 2-Warning(Default), 3-Debug, 4-Trace");
-  add_opt("cb_provide_nullptr",
-          po::value<bool>(&ClProvideNullPointer)->default_value(true),
-          "Provide NULL for fuzzed pointer parameter");
-  add_opt(
-      "cb_provide_nullptr_probability",
-      po::value<double>(&ClProvideNullPointerProbability)->default_value(0.01),
-      "The minimum granularity is 0.01 (1%)");
-  add_opt("cb_return0_probability",
-          po::value<double>(&ClReturn0Probability)->default_value(0.01),
-          "The minimum granularity is 0.01 (1%)");
+  add_opt("cb_nullptr_prob",
+          po::value<double>(&ClProvideNullPointerProb)->default_value(0.01),
+          "Probability to provide null as fuzz data to pointer");
+  add_opt("cb_return0_prob",
+          po::value<double>(&ClReturn0Prob)->default_value(0.01),
+          "Probability to return all 0 in OCall return");
   add_opt("cb_data_type", po::value<std::string>(),
-          "EDL_JSON_PTR_ID=FUZZ_XXX,... , e.g. "
-          "/untrusted/ocall_current_time/parameter/0=FUZZ_P_DOUBLE,...");
-  add_opt("cb_not_modify_ocall_ret", po::value<std::string>(),
-          "EDL_JSON_PTR_ID,... , e.g. "
-          "/untrusted/ocall_current_time/parameter/0,...");
-  add_opt("cb_max_call_seq_size",
-          po::value<size_t>(&ClMaxCallSeqSize)->default_value(20), "");
+          "Feed data with specified type (override default), ID=FUZZ_XXX[, "
+          "...] , e.g. "
+          "/untrusted/ocall_current_time/parameter/0=FUZZ_P_DOUBLE[, ...]");
+  add_opt("cb_ocall_ret_through", po::value<std::string>(),
+          "Not modify OCall return value specified by ID, ID[, ...] , e.g. "
+          "/untrusted/ocall_current_time/parameter/0[, ...]");
+  add_opt("cb_ecall_queue_size",
+          po::value<size_t>(&ClMaxCallSeqSize)->default_value(20),
+          "Max ECall queue size");
+  add_opt("cb_modify_ocall_ret_prob",
+          po::value<double>(&ClModifyOCallRetProb)->default_value(0.5),
+          "Probability to modify OCall return");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -470,21 +482,18 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   if (vm.count("cb_help")) {
     std::stringstream ss;
     ss << desc << "\n";
-    log_always(ss.str().c_str());
+    log_always("%s", ss.str().c_str());
     exit(0);
   }
 
   if (vm.count("sgxfuzz_test_user")) {
     gFuzzMode = TEST_USER;
-    std::vector<std::string> indicesVec =
-        vm["sgxfuzz_test_user"].as<std::vector<std::string>>();
-    for (auto indices : indicesVec) {
-      std::vector<std::string> indexVec;
-      boost::split(indexVec, indices, [](char c) { return c == ','; });
-      for (auto index : indexVec) {
-        boost::trim(index);
-        if (index == "")
-          continue;
+    std::string indexList = vm["sgxfuzz_test_user"].as<std::string>();
+    std::vector<std::string> indexVec;
+    boost::split(indexVec, indexList, [](char c) { return c == ','; });
+    for (auto index : indexVec) {
+      boost::trim(index);
+      if (index != "") {
         gFuzzerSeq.push_back(std::stoi(index, 0, 0));
       }
     }
@@ -509,14 +518,13 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
     for (auto fiterOutECall : fiterOutECallVec) {
       boost::trim(fiterOutECall);
-      if (fiterOutECall == "") {
-        continue;
-      }
-      std::string fuzzWrapperPrefix = "fuzz_";
-      if (wrapperName2Idx.count(fuzzWrapperPrefix + fiterOutECall)) {
-        size_t fiterOutECallIdx =
-            wrapperName2Idx[fuzzWrapperPrefix + fiterOutECall];
-        gFilterOutIndices.push_back(fiterOutECallIdx);
+      if (fiterOutECall != "") {
+        std::string fuzzWrapperPrefix = "fuzz_";
+        if (wrapperName2Idx.count(fuzzWrapperPrefix + fiterOutECall)) {
+          size_t fiterOutECallIdx =
+              wrapperName2Idx[fuzzWrapperPrefix + fiterOutECall];
+          gFilterOutIndices.push_back(fiterOutECallIdx);
+        }
       }
     }
     log_always("Filter out:");
@@ -534,29 +542,29 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
     for (auto dataTySpec : dataTySpecVec) {
       boost::trim(dataTySpec);
-      if (dataTySpec == "")
-        continue;
-      std::vector<std::string> pair;
-      boost::split(pair, dataTySpec, [](char c) { return c == '='; });
-      auto dataType = magic_enum::enum_cast<FuzzDataTy>(pair[1]);
-      if (dataType.has_value()) {
-        gSpecDataID2Type[pair[0]] = dataType.value();
+      if (dataTySpec != "") {
+        std::vector<std::string> pair;
+        boost::split(pair, dataTySpec, [](char c) { return c == '='; });
+        auto dataType = magic_enum::enum_cast<FuzzDataTy>(pair[1]);
+        if (dataType.has_value()) {
+          gSpecDataID2Type[pair[0]] = dataType.value();
+        }
       }
     }
   }
 
-  if (vm.count("cb_not_modify_ocall_ret")) {
+  if (vm.count("cb_ocall_ret_through")) {
     std::string NotModifyOCallRetSpecList =
-        vm["cb_not_modify_ocall_ret"].as<std::string>();
+        vm["cb_ocall_ret_through"].as<std::string>();
     std::vector<std::string> NotModifyOCallRetSpecVec;
     boost::split(NotModifyOCallRetSpecVec, NotModifyOCallRetSpecList,
                  [](char c) { return c == ','; });
 
     for (auto NotModifyOCallRetSpec : NotModifyOCallRetSpecVec) {
       boost::trim(NotModifyOCallRetSpec);
-      if (NotModifyOCallRetSpec == "")
-        continue;
-      gNotModifyOCallRetSpecs.emplace(NotModifyOCallRetSpec);
+      if (NotModifyOCallRetSpec != "") {
+        data_factory.AddNotModifyOCallRetSpecs(NotModifyOCallRetSpec);
+      }
     }
   }
 
@@ -633,7 +641,7 @@ uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
 }
 
 bool DFEnableSetNull(char *cStrAsParamID) {
-  return ClProvideNullPointer ? data_factory.EnableSetNull() : false;
+  return data_factory.EnableSetNull();
 }
 
 void *DFManagedMalloc(size_t size) { return data_factory.managedMalloc(size); }
@@ -656,10 +664,6 @@ uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count, uint64_t eleSize) {
 }
 
 bool DFEnableModifyOCallRet(char *cParamID) {
-  std::string ParamID(cParamID);
-  if (gNotModifyOCallRetSpecs.count(ParamID)) {
-    return false;
-  }
-  return true;
+  return data_factory.EnableModifyOCallRet(cParamID);
 }
 }
