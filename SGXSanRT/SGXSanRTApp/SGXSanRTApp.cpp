@@ -259,6 +259,8 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
   std::cerr << content;
 }
 
+void SGXSanLogEnter(const char *str) { log_always("Enter %s\n", str); }
+
 static void PrintShadowMap(log_level ll, uptr addr) {
   uptr shadowAddr = MEM_TO_SHADOW(addr);
   uptr shadowAddrRow = RoundDownTo(shadowAddr, 0x10);

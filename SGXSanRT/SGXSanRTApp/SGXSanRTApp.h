@@ -72,8 +72,16 @@ enum log_level {
 #define USED_LOG_LEVEL LOG_LEVEL_WARNING
 #endif
 
-extern "C" void sgxsan_log(log_level ll, bool with_prefix, const char *fmt,
-                           ...);
+#if defined(__cplusplus)
+extern "C" {
+#endif
+void register_sgxsan_sigaction();
+int hook_enclave();
+
+void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
+void SGXSanLogEnter(const char *str);
+#if defined(__cplusplus)
+}
 
 /// have prefix in output
 #define log_always(...) sgxsan_log(LOG_LEVEL_ALWAYS, true, __VA_ARGS__)
@@ -207,11 +215,4 @@ void *sgxsan_backtrace_i(int idx);
 void setEnclaveFileName(std::string fileName);
 std::string getEnclaveFileName();
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-void register_sgxsan_sigaction();
-int hook_enclave();
-#if defined(__cplusplus)
-}
 #endif
