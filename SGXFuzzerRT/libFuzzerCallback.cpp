@@ -200,7 +200,8 @@ public:
       if (provider->remaining_bytes() > 0) {
         givedStrlen = provider->ConsumeIntegralInRange<size_t>(0, ClMaxStrlen);
       } else {
-        givedStrlen = ClMaxStrlen;
+        givedStrlen = gRandPool.getIntergerInRange<size_t>(
+            0, ClMaxStrlen, mRandPoolBytesOffset++);
         NeedMoreFuzzData(sizeof(size_t));
       }
       if (bytesNum != 0) {
@@ -236,7 +237,8 @@ public:
       if (provider->remaining_bytes() > 0) {
         givedStrlen = provider->ConsumeIntegralInRange<size_t>(0, ClMaxStrlen);
       } else {
-        givedStrlen = ClMaxStrlen;
+        givedStrlen = gRandPool.getIntergerInRange<size_t>(
+            0, ClMaxStrlen, mRandPoolBytesOffset++);
         NeedMoreFuzzData(sizeof(size_t));
       }
       if (bytesNum != 0) {
@@ -293,30 +295,36 @@ public:
     if (provider->remaining_bytes() > 0) {
       res = provider->ConsumeIntegralInRange<size_t>(0, ClMaxCount);
     } else {
-      res = ClMaxCount;
+      res = gRandPool.getIntergerInRange<size_t>(0, ClMaxCount,
+                                                 mRandPoolBytesOffset++);
       NeedMoreFuzzData(sizeof(size_t));
     }
     return res;
   }
 
   bool EnableSetNull() {
+    double prob;
     if (provider->remaining_bytes() > 0) {
-      auto prob = 1.0 - provider->ConsumeProbability<double>();
-      return prob <= ClProvideNullPointerProb;
+      prob = 1.0 - provider->ConsumeProbability<double>();
     } else {
       NeedMoreFuzzData(sizeof(uint64_t));
-      return false;
+      prob = gRandPool.getProbability(mRandPoolBytesOffset++);
     }
+    return prob <= ClProvideNullPointerProb;
   }
 
   void init(const uint8_t *Data, size_t Size) {
+    if (provider) {
+      // Remove old
+      delete provider;
+    }
     provider = new FuzzedDataProvider(Data, Size);
     mExpectedFuzzDataSize = Size;
     mRandPoolBytesOffset = 0;
   }
 
   void clear() {
-    delete provider;
+    // Don't delete provider here, since later sgx_destroy_enclave may use it
     for (auto memArea : allocatedMemAreas) {
       // log_debug("free %p\n", memArea);
       free(memArea);
@@ -389,13 +397,14 @@ public:
     if (mNotModifyOCallRetSpecs.count(ParamID)) {
       return false;
     }
+    double prob;
     if (provider->remaining_bytes() > 0) {
-      auto prob = 1.0 - provider->ConsumeProbability<double>();
-      return prob <= ClModifyOCallRetProb;
+      prob = 1.0 - provider->ConsumeProbability<double>();
     } else {
       NeedMoreFuzzData(sizeof(uint64_t));
-      return false;
+      prob = gRandPool.getProbability(mRandPoolBytesOffset++);
     }
+    return prob <= ClModifyOCallRetProb;
   }
 
 private:

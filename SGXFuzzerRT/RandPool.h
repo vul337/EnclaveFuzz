@@ -56,6 +56,37 @@ public:
     }
   }
 
+  double getProbability(size_t offset = 0) {
+    uint64_t tmp;
+    getBytes(&tmp, sizeof(uint64_t), offset);
+    double res = ((double)tmp) / ((double)std::numeric_limits<uint64_t>::max());
+    return res;
+  }
+
+  template <class T> T getInterger(size_t offset = 0) {
+    T res;
+    getBytes(&res, sizeof(T), offset);
+    return res;
+  }
+
+  template <class T> T getIntergerInRange(T min, T max, size_t offset = 0) {
+    static_assert(std::is_integral<T>::value, "An integral type is required.");
+    static_assert(sizeof(T) <= sizeof(uint64_t), "Unsupported integral type.");
+    if (min > max)
+      abort();
+
+    // Use the biggest type possible to hold the range and the result.
+    uint64_t range = static_cast<uint64_t>(max) - min;
+    uint64_t result = 0;
+    getBytes(&result, sizeof(uint64_t), offset);
+
+    // Avoid division by 0, in case |range + 1| results in overflow.
+    if (range != std::numeric_limits<decltype(range)>::max())
+      result = result % (range + 1);
+
+    return static_cast<T>(min + result);
+  }
+
 private:
   std::string mRandFilePath;
   size_t mRandPoolSize;

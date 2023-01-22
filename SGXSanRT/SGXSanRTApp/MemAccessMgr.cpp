@@ -22,8 +22,7 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
     if (res) {
       sgxsan_warning(
           true,
-          "Detect Double-Fetch Situation, and modify it with random data\n");
-      // TODO: give it a new value
+          "Detect Double-Fetch Situation, and modify it with fuzz data\n");
       if (DFGetBytesEx) {
         DFGetBytesEx((uint8_t *)ptr, size, nullptr, 2 /* FUZZ_DATA */);
       }

@@ -70,25 +70,31 @@ static void PrintAddressSpaceLayout(log_level ll = LOG_LEVEL_DEBUG) {
 
 /// \brief Signal handler to report illegal memory access
 static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
-  size_t page_size = getpagesize();
-  // process siginfo
-  void *_page_fault_addr = siginfo->si_addr;
-  log_error("#PF Addr: %p\n", _page_fault_addr);
+  sgxsan_assert(siginfo->si_signo == SIGSEGV);
+  if (siginfo->si_code == SI_KERNEL) {
+    // If si_code is SI_KERNEL, #PF address is not true
+    log_error("#PF Addr: Unknown\n");
+  } else {
+    size_t page_size = getpagesize();
+    // process siginfo
+    void *_page_fault_addr = siginfo->si_addr;
+    log_error("#PF Addr: %p\n", _page_fault_addr);
 
-  uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
-  if (page_fault_addr == 0) {
-    log_error("Null-Pointer Dereference\n");
-  } else if ((kLowShadowGuardBeg <= page_fault_addr &&
-              page_fault_addr < kLowShadowBeg) ||
-             (kHighShadowEnd < page_fault_addr &&
-              page_fault_addr <= kHighShadowGuardEnd)) {
-    log_error("ShadowMap's Guard Dereference\n");
-  } else if ((kHighShadowEnd + 1 - page_size) <= page_fault_addr &&
-             page_fault_addr <= kHighShadowEnd) {
-    log_error("Cross ShadowMap's Guard Dereference\n");
-  } else if (kShadowGapBeg <= page_fault_addr &&
-             page_fault_addr < kShadowGapEnd) {
-    log_error("ShadowMap's GAP Dereference\n");
+    uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
+    if (page_fault_addr == 0) {
+      log_error("Null-Pointer Dereference\n");
+    } else if ((kLowShadowGuardBeg <= page_fault_addr &&
+                page_fault_addr < kLowShadowBeg) ||
+               (kHighShadowEnd < page_fault_addr &&
+                page_fault_addr <= kHighShadowGuardEnd)) {
+      log_error("ShadowMap's Guard Dereference\n");
+    } else if ((kHighShadowEnd + 1 - page_size) <= page_fault_addr &&
+               page_fault_addr <= kHighShadowEnd) {
+      log_error("Cross ShadowMap's Guard Dereference\n");
+    } else if (kShadowGapBeg <= page_fault_addr &&
+               page_fault_addr < kShadowGapEnd) {
+      log_error("ShadowMap's GAP Dereference\n");
+    }
   }
 
   // call previous signal handler
