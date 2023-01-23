@@ -113,8 +113,14 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
         GET_CALLER_PC_BP_SP;                                                   \
         ReportGenericError(pc, bp, sp, addr, is_write, size, true);            \
       }                                                                        \
+    } else if (addrInOutEnclaveStatus == RangeMixedInOutEnclave) {             \
+      log_error("RangeMixedInOutEnclave hint OOB\n");                          \
+      GET_CALLER_PC_BP_SP;                                                     \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, true);              \
     } else {                                                                   \
-      sgxsan_error(true, "Invalid addrInOutEnclaveStatus\n");                  \
+      log_error("addrInOutEnclaveStatus: %d\n", addrInOutEnclaveStatus);       \
+      GET_CALLER_PC_BP_SP;                                                     \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, true);              \
     }                                                                          \
   }
 
@@ -364,7 +370,8 @@ void RegionInOutEnclaveStatusAndPoisonStatus(
             // make sure all bytes at same side
             if (begInOutEnclaveStatus != alignedRegionInOutEnclaveStatus) {
               if (alignedRegionInOutEnclaveStatus == InEnclave or
-                  alignedRegionInOutEnclaveStatus == OutEnclave) {
+                  alignedRegionInOutEnclaveStatus == OutEnclave or
+                  alignedRegionInOutEnclaveStatus == RangeMixedInOutEnclave) {
                 regionInOutEnclaveStatus = RangeMixedInOutEnclave;
               } else {
                 regionInOutEnclaveStatus = alignedRegionInOutEnclaveStatus;
@@ -444,7 +451,8 @@ void RegionInOutEnclaveStatusAndPoisonedAddr(
             // make sure all bytes at same side
             if (begInOutEnclaveStatus != alignedRegionInOutEnclaveStatus) {
               if (alignedRegionInOutEnclaveStatus == InEnclave or
-                  alignedRegionInOutEnclaveStatus == OutEnclave) {
+                  alignedRegionInOutEnclaveStatus == OutEnclave or
+                  alignedRegionInOutEnclaveStatus == RangeMixedInOutEnclave) {
                 regionInOutEnclaveStatus = RangeMixedInOutEnclave;
               } else {
                 regionInOutEnclaveStatus = alignedRegionInOutEnclaveStatus;
@@ -460,9 +468,10 @@ void RegionInOutEnclaveStatusAndPoisonedAddr(
           }
         }
       }
-      if ((regionInOutEnclaveStatus == InEnclave or
-           regionInOutEnclaveStatus == OutEnclave) and
-          regionFirstPoisonedAddr == IsPoisoned) {
+      if (((regionInOutEnclaveStatus == InEnclave or
+            regionInOutEnclaveStatus == OutEnclave) and
+           regionFirstPoisonedAddr == IsPoisoned) or
+          regionInOutEnclaveStatus == RangeMixedInOutEnclave) {
         // must be poisoned
         // The fast check failed, so we have a poisoned byte somewhere.
         // Find it slowly.
@@ -521,27 +530,33 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
 }
 
 /// \param size should not be 0
-#define RANGE_CHECK(beg, size, regionInOutEnclaveStatus, PoisonedAddr,         \
-                    IsWrite)                                                   \
-  do {                                                                         \
-    RegionInOutEnclaveStatusAndPoisonedAddr(                                   \
-        (uptr)beg, size, regionInOutEnclaveStatus, PoisonedAddr, kL1Filter);   \
-    if (regionInOutEnclaveStatus == InEnclave) {                               \
-      MemAccessMgrInEnclaveAccess();                                           \
-      if (PoisonedAddr) {                                                      \
-        GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
-      }                                                                        \
-    } else if (regionInOutEnclaveStatus == OutEnclave) {                       \
-      MemAccessMgrOutEnclaveAccess(beg, size, IsWrite);                        \
-      if (PoisonedAddr) {                                                      \
-        GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
-      }                                                                        \
-    } else {                                                                   \
-      sgxsan_error(true, "Invalid regionInOutEnclaveStatus\n");                \
-    }                                                                          \
-  } while (0);
+static inline void RANGE_CHECK(const void *beg, uptr size,
+                               InOutEnclaveStatus &regionInOutEnclaveStatus,
+                               uptr &PoisonedAddr, bool IsWrite) {
+  RegionInOutEnclaveStatusAndPoisonedAddr(
+      (uptr)beg, size, regionInOutEnclaveStatus, PoisonedAddr, kL1Filter);
+  if (regionInOutEnclaveStatus == InEnclave) {
+    MemAccessMgrInEnclaveAccess();
+    if (PoisonedAddr) {
+      GET_CALLER_PC_BP_SP;
+      ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);
+    }
+  } else if (regionInOutEnclaveStatus == OutEnclave) {
+    MemAccessMgrOutEnclaveAccess(beg, size, IsWrite);
+    if (PoisonedAddr) {
+      GET_CALLER_PC_BP_SP;
+      ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);
+    }
+  } else if (regionInOutEnclaveStatus == RangeMixedInOutEnclave) {
+    log_error("RangeMixedInOutEnclave hint OOB \n");
+    GET_CALLER_PC_BP_SP;
+    ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);
+  } else {
+    log_error("regionInOutEnclaveStatus: %d\n", regionInOutEnclaveStatus);
+    GET_CALLER_PC_BP_SP;
+    ReportGenericError(pc, bp, sp, (uptr)beg, IsWrite, size, true);
+  }
+}
 
 /// \param srcSize can't be 0
 #define LEAK_CHECK_MT(srcInOutEnclave, dstInOutEnclave, srcAddr, srcSize)      \

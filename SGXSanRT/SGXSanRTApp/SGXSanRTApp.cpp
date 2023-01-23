@@ -268,6 +268,8 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
 void SGXSanLogEnter(const char *str) { log_always("Enter %s\n", str); }
 
 static void PrintShadowMap(log_level ll, uptr addr) {
+  uptr addr_mask = (~(((uptr)1 << ADDR_SPACE_BITS) - 1));
+  sgxsan_assert((addr & addr_mask) == 0);
   uptr shadowAddr = MEM_TO_SHADOW(addr);
   uptr shadowAddrRow = RoundDownTo(shadowAddr, 0x10);
   int shadowAddrCol = (int)(shadowAddr - shadowAddrRow);
