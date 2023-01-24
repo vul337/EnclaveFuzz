@@ -18,6 +18,7 @@
 #include "trts_internal.h"
 #include <algorithm>
 #include <errno.h>
+#include <filesystem>
 #include <fstream>
 #include <link.h>
 #include <map>
@@ -27,6 +28,8 @@
 #include <thread_data.h>
 #include <unistd.h>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 /// TCS Manager
 
@@ -270,7 +273,7 @@ void PoisonEnclaveDSOCodeSegment() {
 
   // Current Enclave is in dlopen-ing, and should already have been mmap-ed
   // We get start address of current Enclave
-  auto handler = (struct link_map *)dlopen(("./" + enclaveFileName).c_str(),
+  auto handler = (struct link_map *)dlopen(enclaveFileName.c_str(),
                                            RTLD_LAZY | RTLD_NOLOAD);
   sgxsan_assert(handler);
   uptr EnclaveStartAddr = handler->l_addr;
@@ -288,12 +291,14 @@ extern "C" sgx_status_t __sgx_create_enclave_ex(
     int *launch_token_updated, sgx_enclave_id_t *enclave_id,
     sgx_misc_attribute_t *misc_attr, const uint32_t ex_features,
     const void *ex_features_p[32]) {
-  setEnclaveFileName(file_name);
+  std::string file_abs_path = fs::absolute(fs::path(file_name));
+  sgxsan_assert(fs::exists(file_abs_path));
+  setEnclaveFileName(file_abs_path);
   if (GetOCallTableAddr) {
     g_enclave_ocall_table = (sgx_ocall_table_t *)GetOCallTableAddr();
   }
   RunInEnclave = true;
-  gEnclaveHandler = dlopen((std::string("./") + file_name).c_str(), RTLD_LAZY);
+  gEnclaveHandler = dlopen(file_abs_path.c_str(), RTLD_LAZY);
   RunInEnclave = false;
   sgxsan_error(gEnclaveHandler == nullptr, "%s\n", dlerror());
 

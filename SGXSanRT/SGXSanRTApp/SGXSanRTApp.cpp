@@ -191,7 +191,7 @@ int hook_enclave() {
   plthook_t *plthook;
   std::string fileName = getEnclaveFileName();
   sgxsan_assert(fileName != "");
-  if (plthook_open(&plthook, ("./" + fileName).c_str()) != 0) {
+  if (plthook_open(&plthook, fileName.c_str()) != 0) {
     log_error("plthook_open error: %s\n", plthook_error());
     return -1;
   }
