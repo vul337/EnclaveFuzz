@@ -360,31 +360,16 @@ public:
   }
 
   void getCallSequence(std::vector<int> &intCallSeq, size_t funcNum) {
-    if (funcNum < ClMaxCallSeqSize) {
-      std::vector<int> callSeq(funcNum);
-      std::iota(callSeq.begin(), callSeq.end(), 0);
-      while (provider->remaining_bytes() > 0 and callSeq.size() > 0) {
-        int idx = provider->ConsumeIntegralInRange<int>(0, callSeq.size() - 1);
-        intCallSeq.push_back(callSeq[idx]);
-        callSeq.erase(callSeq.begin() + idx);
-      }
-      for (auto id : callSeq) {
+    for (size_t i = 0; i < ClMaxCallSeqSize; i++) {
+      int idx;
+      if (provider->remaining_bytes() > 0) {
+        idx = provider->ConsumeIntegralInRange<int>(0, funcNum - 1);
+      } else {
         NeedMoreFuzzData(sizeof(int));
-        intCallSeq.push_back(id);
+        idx = gRandPool.getIntergerInRange<int>(0, funcNum - 1,
+                                                mRandPoolBytesOffset++);
       }
-    } else {
-      for (size_t i = 0; i < ClMaxCallSeqSize; i++) {
-        if (provider->remaining_bytes() > 0) {
-          int idx = provider->ConsumeIntegralInRange<int>(0, funcNum - 1);
-          intCallSeq.push_back(idx);
-        } else {
-          NeedMoreFuzzData(sizeof(int));
-          int idx;
-          gRandPool.getBytes(&idx, sizeof(int), mRandPoolBytesOffset++);
-          idx %= funcNum;
-          intCallSeq.push_back(idx);
-        }
-      }
+      intCallSeq.push_back(idx);
     }
   }
 
