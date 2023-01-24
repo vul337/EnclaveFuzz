@@ -1,0 +1,11 @@
+94314055 exec in 14400*6 s
+
+1091 exec/s
+
+94274078 [SGXSan] ALWAYS: Enter ecall_add_item
+94272491 [SGXSan] ALWAYS: Enter ecall_change_master_password
+94272489 [SGXSan] ALWAYS: Enter ecall_create_wallet
+94272513 [SGXSan] ALWAYS: Enter ecall_remove_item
+94312437 [SGXSan] ALWAYS: Enter ecall_show_wallet
+
+cov 93.06%

@@ -1,6 +1,10 @@
-import os, argparse, subprocess
+#!/bin/python3
+import os
+import argparse
+import subprocess
 from tqdm.auto import tqdm
-import re, json
+import re
+import json
 import multiprocessing as mp
 import datetime
 
@@ -11,6 +15,7 @@ CHUNK_SIZE = 5
 
 
 crash_report = dict()
+
 
 def check_aslr():
     with open("/proc/sys/kernel/randomize_va_space", "r") as f:
@@ -27,8 +32,10 @@ def get_crash_info(binary, crash_file):
     except subprocess.TimeoutExpired:
         print(f"Timeout input {crash_file}!")
         return
-    error_regex = re.compile(r"\[SGXSan\] (ERROR|WARNING): (.*)", flags=re.IGNORECASE)
-    backtrace_regex = re.compile(r"== SGXSan Backtrace BEG ==((?:.|\n)*?)== SGXSan Backtrace END ==")
+    error_regex = re.compile(
+        r"\[SGXSan\] (ERROR|WARNING): (.*)", flags=re.IGNORECASE)
+    backtrace_regex = re.compile(
+        r"== SGXSan Backtrace BEG ==((?:.|\n)*?)== SGXSan Backtrace END ==")
     error = error_regex.findall(logs.stderr.decode("utf-8"))
 
     backtrace = backtrace_regex.findall(logs.stderr.decode("utf-8"))
@@ -40,17 +47,15 @@ def get_crash_info(binary, crash_file):
     else:
         for e in error:
             error_tag += " :".join(e) + " | "
-    
+
     # print(logs)
     # print(f"Log: {logs}")
     # print(f"Error: {error_tag}")
-
 
     if (len(pc_value) == 1):
         pc_value = pc_value[0]
     else:
         pc_value = None
-
 
     if error_tag not in crash_report:
         crash_report[error_tag] = dict()
@@ -68,8 +73,6 @@ def get_crash_info(binary, crash_file):
         print(f"Error: {error_tag}")
 
 
-
-
 def filter_crashes(binary, crashes_dir):
     if (binary.startswith("..")):
         binary = os.path.abspath(binary)
@@ -82,7 +85,7 @@ def filter_crashes(binary, crashes_dir):
     if (not os.path.exists(crashes_dir)):
         print(f"Crashes directory {crashes_dir} not found!")
         return
-    
+
     # get_crash_info(binary, os.path.join(crashes_dir, "crash-afc2e0ef6ec37f0974f71d36c98191e9be4df691"))
 
     for f in tqdm(os.listdir(crashes_dir), position=0):
@@ -93,28 +96,27 @@ def filter_crashes(binary, crashes_dir):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Filter crashes and generate result.json")
-    parser.add_argument("-b", "--binary", help="path of fuzzer binary", required=True)
-    parser.add_argument("-c", "--crashes", help="path of crashes directory", required=True)
-    parser.add_argument("-p", "--prefix", help="prefix of result file", required=True)
+    parser = argparse.ArgumentParser(
+        description="Filter crashes and generate result.json")
+    parser.add_argument(
+        "-b", "--binary", help="path of fuzzer binary", required=True)
+    parser.add_argument("-c", "--crashes",
+                        help="path of crashes directory", required=True)
+    parser.add_argument(
+        "-p", "--prefix", help="prefix of result file", required=True)
 
     args = parser.parse_args()
     check_aslr()
 
     filter_crashes(args.binary, args.crashes)
 
-
     binary_name = os.path.basename(args.binary)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     result_file = f"{args.prefix}-{binary_name}-{timestamp}.result.json"
     json.dump(crash_report, open(result_file, "w"), indent=4)
-    
+
     # print(crash_report)
-    
+
     print(f"Saved result to {result_file}")
 
-
-
     # fileter_crashes
-
-    
