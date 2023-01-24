@@ -581,15 +581,19 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   return 0;
 }
 
-extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
-                                          size_t MaxSize, unsigned int Seed) {
+size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size, size_t MaxSize,
+                               unsigned int Seed) {
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
+extern "C" __attribute__((weak)) int SGXFuzzerEarlyAfterRunOne();
 void LLVMFuzzerEarlyAfterRunOne() {
   // Destroy Enclave
   sgxfuzz_error(sgx_destroy_enclave(global_eid) != SGX_SUCCESS,
                 "[FAIL] Enclave destroy");
+  if (SGXFuzzerEarlyAfterRunOne) {
+    sgxfuzz_assert(SGXFuzzerEarlyAfterRunOne() == 0);
+  }
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
