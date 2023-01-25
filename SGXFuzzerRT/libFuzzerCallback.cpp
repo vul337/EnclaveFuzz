@@ -362,7 +362,18 @@ public:
   }
 
   void getCallSequence(std::vector<int> &intCallSeq, size_t funcNum) {
-    for (size_t i = 0; i < ClMaxCallSeqSize; i++) {
+    // Get CallSeqSize
+    size_t CallSeqSize;
+    if (provider->remaining_bytes() > 0) {
+      CallSeqSize =
+          provider->ConsumeIntegralInRange<size_t>(1, ClMaxCallSeqSize);
+    } else {
+      NeedMoreFuzzData(sizeof(size_t));
+      CallSeqSize = gRandPool.getIntergerInRange<size_t>(
+          1, ClMaxCallSeqSize, mRandPoolBytesOffset++);
+    }
+    // Get CallSeq
+    for (size_t i = 0; i < CallSeqSize; i++) {
       int idx;
       if (provider->remaining_bytes() > 0) {
         idx = provider->ConsumeIntegralInRange<int>(0, funcNum - 1);
@@ -565,6 +576,7 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   }
 
   sgxfuzz_assert(ClUsedLogLevel <= 4);
+  sgxfuzz_assert(ClMaxCallSeqSize >= 1);
   return 0;
 }
 
