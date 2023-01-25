@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <openssl/evp.h>
@@ -35,6 +36,7 @@
 
 using ordered_json = nlohmann::ordered_json;
 namespace po = boost::program_options;
+namespace fs = std::filesystem;
 
 RandPool gRandPool;
 
@@ -571,17 +573,20 @@ size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size, size_t MaxSize,
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
-extern "C" __attribute__((weak)) int SGXFuzzerEarlyAfterRunOne();
 void LLVMFuzzerEarlyAfterRunOne() {
   // Destroy Enclave
   sgxfuzz_error(sgx_destroy_enclave(global_eid) != SGX_SUCCESS,
                 "[FAIL] Enclave destroy");
-  if (SGXFuzzerEarlyAfterRunOne) {
-    sgxfuzz_assert(SGXFuzzerEarlyAfterRunOne() == 0);
-  }
 }
 
+extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+  // Remove last round environment remain
+  if (SGXFuzzerEnvClearBeforeTest) {
+    sgxfuzz_assert(SGXFuzzerEnvClearBeforeTest() == 0);
+  }
+  // Remove last round backtrace.dump
+  fs::remove(fs::path("backtrace.dump"));
   data_factory.init(Data, Size);
 
   // Initialize Enclave

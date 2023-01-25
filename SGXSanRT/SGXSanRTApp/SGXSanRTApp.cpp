@@ -71,6 +71,7 @@ static void PrintAddressSpaceLayout(log_level ll = LOG_LEVEL_DEBUG) {
 /// \brief Signal handler to report illegal memory access
 static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   sgxsan_assert(siginfo->si_signo == SIGSEGV);
+  boost::stacktrace::safe_dump_to("./backtrace.dump");
   if (siginfo->si_code == SI_KERNEL) {
     // If si_code is SI_KERNEL, #PF address is not true
     log_error("#PF Addr: Unknown\n");
