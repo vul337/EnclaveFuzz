@@ -114,13 +114,14 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
         ReportGenericError(pc, bp, sp, addr, is_write, size, true);            \
       }                                                                        \
     } else if (addrInOutEnclaveStatus == RangeMixedInOutEnclave) {             \
-      log_error("RangeMixedInOutEnclave hint OOB\n");                          \
       GET_CALLER_PC_BP_SP;                                                     \
-      ReportGenericError(pc, bp, sp, addr, is_write, size, true);              \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
+                         "RangeMixedInOutEnclave hint OOB");                   \
     } else {                                                                   \
-      log_error("addrInOutEnclaveStatus: %d\n", addrInOutEnclaveStatus);       \
       GET_CALLER_PC_BP_SP;                                                     \
-      ReportGenericError(pc, bp, sp, addr, is_write, size, true);              \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
+                         "addrInOutEnclaveStatus: %d",                         \
+                         addrInOutEnclaveStatus);                              \
     }                                                                          \
   }
 
@@ -479,7 +480,7 @@ void RegionInOutEnclaveStatusAndPoisonedAddr(
           AddressInOutEnclaveStatusAndPoisonStatus(beg, begInOutEnclaveStatus,
                                                    begPoisonStatus, filter);
           sgxsan_assert(begInOutEnclaveStatus == InEnclave or
-                        regionInOutEnclaveStatus == OutEnclave);
+                        begInOutEnclaveStatus == OutEnclave);
           if (begPoisonStatus == IsPoisoned) {
             regionFirstPoisonedAddr = beg;
             return;
@@ -548,13 +549,14 @@ static inline void RANGE_CHECK(const void *beg, uptr size,
       ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);
     }
   } else if (regionInOutEnclaveStatus == RangeMixedInOutEnclave) {
-    log_error("RangeMixedInOutEnclave hint OOB \n");
     GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);
+    ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true,
+                       "RangeMixedInOutEnclave hint OOB");
   } else {
-    log_error("regionInOutEnclaveStatus: %d\n", regionInOutEnclaveStatus);
     GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, (uptr)beg, IsWrite, size, true);
+    ReportGenericError(pc, bp, sp, (uptr)beg, IsWrite, size, true,
+                       "regionInOutEnclaveStatus: %d",
+                       regionInOutEnclaveStatus);
   }
 }
 

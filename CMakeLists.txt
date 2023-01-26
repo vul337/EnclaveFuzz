@@ -24,7 +24,12 @@ add_subdirectory(SGXSanRT)
 add_subdirectory(SGXFuzzerPass)
 add_subdirectory(SGXFuzzerRT)
 
-add_dependencies(SGXFuzzerRT SGXSanPass)
+if(LIBFUZZER_CB_ASAN)
+    message(STATUS "LIBFUZZER_CB_ASAN: Enable")
+    add_dependencies(SGXFuzzerRT SGXSanPass)
+else()
+    message(STATUS "LIBFUZZER_CB_ASAN: Disable")
+endif()
 
 install(TARGETS
         SGXSanPass

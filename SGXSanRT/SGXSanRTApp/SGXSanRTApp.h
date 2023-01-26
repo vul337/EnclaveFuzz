@@ -101,7 +101,7 @@ void sgxsan_backtrace(log_level ll = LOG_LEVEL_ERROR);
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal = true,
-                        const char *msg = "");
+                        const char *msg = "Out of bound", ...);
 
 #define sgxsan_error(cond, ...)                                                \
   do {                                                                         \

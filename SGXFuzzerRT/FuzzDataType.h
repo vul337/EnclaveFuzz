@@ -11,4 +11,5 @@ enum FuzzDataTy {
   FUZZ_BOOL_SET_NULL,
   FUZZ_SEQ,
   FUZZ_P_DOUBLE,
+  FUZZ_DATA_OR_PTR,
 };

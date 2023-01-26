@@ -34,6 +34,9 @@
 #include <unordered_set>
 #include <vector>
 
+#define X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS 47
+#define ADDR_SPACE_BITS X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS
+
 using ordered_json = nlohmann::ordered_json;
 namespace po = boost::program_options;
 namespace fs = std::filesystem;
@@ -44,14 +47,14 @@ sgx_enclave_id_t global_eid = 0;
 std::string ClEnclaveFileName;
 size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize;
 int ClUsedLogLevel;
-double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb;
+double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
+    ClModifyDoubleFetchValueProb;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER };
 static std::vector<int> gFuzzerSeq;
 static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
-static std::unordered_map<std::string, FuzzDataTy> gSpecDataID2Type;
 
 // Passed from DriverGen IR pass
 extern sgx_status_t (*gFuzzECallArray[])();
@@ -97,12 +100,11 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
     return;
 
   // get prefix
-  std::string prefix = "";
   if (with_prefix) {
-    prefix += std::string(log_level_to_prefix[level]) + "[" +
-              time_in_HH_MM_SS_MMM() + "] ";
+    std::string prefix = std::string(log_level_to_prefix[level]) + "[" +
+                         time_in_HH_MM_SS_MMM() + "] ";
+    std::cerr << prefix;
   }
-  std::cerr << prefix;
 
   va_list ap;
   va_start(ap, format);
@@ -135,7 +137,12 @@ public:
     return NewSize;
   }
 
-  uint8_t *getBytes(uint8_t *dst, size_t bytesNum, FuzzDataTy dataTy) {
+  uint8_t *getBytes(uint8_t *dst, size_t bytesNum, FuzzDataTy dataTy,
+                    std::string ParamID = "") {
+    if (mSpecDataID2Type.count(ParamID)) {
+      // Override DataType by user specified
+      dataTy = mSpecDataID2Type[ParamID];
+    }
     if (bytesNum == 0 and dataTy != FUZZ_STRING and dataTy != FUZZ_WSTRING) {
       // Do nothing
       return dst;
@@ -146,141 +153,61 @@ public:
       sgxfuzz_assert(sizeof(double) == bytesNum);
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
-      if (provider->remaining_bytes() > 0) {
-        provider->ConsumeFloatingPointInRange<double>(
-            0, std::numeric_limits<double>::max());
-      } else {
-        gRandPool.getBytes(dst, bytesNum, mRandPoolBytesOffset++);
-        NeedMoreFuzzData(sizeof(uint64_t));
-        double *dst_double = (double *)dst;
-        *dst_double = std::fabs(*dst_double);
-      }
+      *((double *)dst) = getFloatingPointInRange<double>(
+          0.0, std::numeric_limits<double>::max());
       break;
     }
     case FUZZ_ARRAY:
     case FUZZ_DATA: {
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
-      size_t wrCnt = 0;
-      if (provider->remaining_bytes() > 0) {
-        wrCnt = provider->ConsumeData(dst, bytesNum);
-      }
-      if (wrCnt < bytesNum) {
-        gRandPool.getBytes(dst, bytesNum - wrCnt, mRandPoolBytesOffset++);
-        NeedMoreFuzzData(bytesNum - wrCnt);
-      }
+      FillByteArray(dst, bytesNum);
+      break;
+    }
+    case FUZZ_DATA_OR_PTR: {
+      sgxfuzz_assert(bytesNum == sizeof(void *));
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc(bytesNum);
+      FillByteArray(dst, bytesNum);
+      *(uint64_t *)dst %= ((uint64_t)1 << ADDR_SPACE_BITS);
       break;
     }
     case FUZZ_RET: {
-      bool return0;
-      if (provider->remaining_bytes() > 0) {
-        double prob = 1 - provider->ConsumeProbability<double>();
-        return0 = prob < ClReturn0Prob;
-      } else {
-        NeedMoreFuzzData(sizeof(uint64_t));
-        return0 = false;
-      }
+      double prob = getProbability<double>();
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
-      if (return0) {
+      if (prob < ClReturn0Prob) {
         memset(dst, 0, bytesNum);
       } else {
-        size_t wrCnt = 0;
-        if (provider->remaining_bytes() > 0) {
-          wrCnt = provider->ConsumeData(dst, bytesNum);
-        }
-        if (wrCnt < bytesNum) {
-          gRandPool.getBytes(dst, bytesNum - wrCnt, mRandPoolBytesOffset++);
-          NeedMoreFuzzData(bytesNum - wrCnt);
-        }
+        FillByteArray(dst, bytesNum);
       }
       break;
     }
     case FUZZ_WSTRING: {
-      // Get string length
-      size_t givedStrlen;
-      if (provider->remaining_bytes() > 0) {
-        givedStrlen = provider->ConsumeIntegralInRange<size_t>(0, ClMaxStrlen);
-      } else {
-        givedStrlen = gRandPool.getIntergerInRange<size_t>(
-            0, ClMaxStrlen, mRandPoolBytesOffset++);
-        NeedMoreFuzzData(sizeof(size_t));
-      }
-      if (bytesNum != 0) {
+      size_t givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      if (bytesNum != 0)
         givedStrlen %= (bytesNum + 1);
-      }
-      // Get string
-      if (provider->remaining_bytes() > 0) {
-        auto wstr =
-            provider->ConsumeBytes<uint8_t>(givedStrlen * sizeof(wchar_t));
-        if (wstr.size() < givedStrlen * sizeof(wchar_t)) {
-          NeedMoreFuzzData(givedStrlen * sizeof(wchar_t) - wstr.size());
-        }
-        size_t wstrlen = (wstr.size() + sizeof(wchar_t) - 1) / sizeof(wchar_t);
-        if (dst == nullptr) {
-          dst = (uint8_t *)managedMalloc((wstrlen + 1) * sizeof(wchar_t));
-        }
-        memcpy(dst, wstr.data(), wstr.size());
-        ((wchar_t *)dst)[wstrlen] = 0;
-      } else {
-        if (dst == nullptr) {
-          dst = (uint8_t *)managedMalloc((givedStrlen + 1) * sizeof(wchar_t));
-        }
-        gRandPool.getBytes(dst, givedStrlen * sizeof(wchar_t),
-                           mRandPoolBytesOffset++);
-        ((wchar_t *)dst)[givedStrlen] = 0;
-        NeedMoreFuzzData(givedStrlen * sizeof(wchar_t));
-      }
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc((givedStrlen + 1) * sizeof(wchar_t));
+      FillByteArray(dst, givedStrlen * sizeof(wchar_t));
+      ((wchar_t *)dst)[givedStrlen] = 0;
       break;
     }
     case FUZZ_STRING: {
-      // Get string length
-      size_t givedStrlen;
-      if (provider->remaining_bytes() > 0) {
-        givedStrlen = provider->ConsumeIntegralInRange<size_t>(0, ClMaxStrlen);
-      } else {
-        givedStrlen = gRandPool.getIntergerInRange<size_t>(
-            0, ClMaxStrlen, mRandPoolBytesOffset++);
-        NeedMoreFuzzData(sizeof(size_t));
-      }
-      if (bytesNum != 0) {
+      size_t givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      if (bytesNum != 0)
         givedStrlen %= (bytesNum + 1);
-      }
-      // Get string
-      if (provider->remaining_bytes() > 0) {
-        std::string str = provider->ConsumeBytesAsString(givedStrlen);
-        if (str.size() < givedStrlen) {
-          NeedMoreFuzzData(givedStrlen - str.size());
-        }
-        if (dst == nullptr)
-          dst = (uint8_t *)managedMalloc(str.size() + 1);
-        memcpy(dst, str.data(), str.size());
-        ((char *)dst)[str.size()] = 0;
-      } else {
-        // If data remained is not enough, get from fixed random pool
-        if (dst == nullptr)
-          dst = (uint8_t *)managedMalloc(givedStrlen + 1);
-        gRandPool.getBytes(dst, givedStrlen, mRandPoolBytesOffset++);
-        ((char *)dst)[givedStrlen] = 0;
-        NeedMoreFuzzData(givedStrlen);
-      }
+      if (dst == nullptr)
+        dst = (uint8_t *)managedMalloc((givedStrlen + 1) * sizeof(char));
+      FillByteArray(dst, givedStrlen * sizeof(char));
+      ((char *)dst)[givedStrlen] = 0;
       break;
     }
     case FUZZ_SIZE:
     case FUZZ_COUNT: {
       sgxfuzz_assert((bytesNum <= sizeof(size_t)));
-      size_t data = 0;
-      if (provider->remaining_bytes() > 0) {
-        data = provider->ConsumeIntegralInRange<size_t>(
-            0, dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount);
-      } else {
-        // No data prepared, get from fixed random pool
-        // assume little endian
-        gRandPool.getBytes(&data, sizeof(size_t), mRandPoolBytesOffset++);
-        size_t maxValue = (dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount);
-        data %= (maxValue + 1);
-        NeedMoreFuzzData(sizeof(size_t));
-      }
+      size_t data = getIntergerInRange<size_t>(
+          0, dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount);
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
       memcpy(dst, &data, bytesNum);
@@ -292,27 +219,16 @@ public:
     return dst;
   }
 
-  size_t getUserCheckCount() {
-    size_t res;
-    if (provider->remaining_bytes() > 0) {
-      res = provider->ConsumeIntegralInRange<size_t>(0, ClMaxCount);
-    } else {
-      res = gRandPool.getIntergerInRange<size_t>(0, ClMaxCount,
-                                                 mRandPoolBytesOffset++);
-      NeedMoreFuzzData(sizeof(size_t));
-    }
+  size_t getUserCheckCount(size_t eleSize) {
+    sgxfuzz_assert(eleSize);
+    size_t res = getIntergerInRange<size_t>(0, ClMaxCount);
+    res = res % (std::max(ClMaxSize / eleSize, (size_t)1) + 1);
     return res;
   }
 
   bool EnableSetNull() {
-    double prob;
-    if (provider->remaining_bytes() > 0) {
-      prob = 1.0 - provider->ConsumeProbability<double>();
-    } else {
-      NeedMoreFuzzData(sizeof(uint64_t));
-      prob = gRandPool.getProbability(mRandPoolBytesOffset++);
-    }
-    return prob <= ClProvideNullPointerProb;
+    double prob = getProbability<double>();
+    return prob < ClProvideNullPointerProb;
   }
 
   void init(const uint8_t *Data, size_t Size) {
@@ -323,6 +239,46 @@ public:
     provider = new FuzzedDataProvider(Data, Size);
     mExpectedFuzzDataSize = Size;
     mRandPoolBytesOffset = 0;
+  }
+
+  template <class T> T getProbability() {
+    if (provider->remaining_bytes() > 0) {
+      return 1.0 - provider->ConsumeProbability<T>();
+    } else {
+      NeedMoreFuzzData((sizeof(T) <= sizeof(uint32_t)) ? sizeof(uint32_t)
+                                                       : sizeof(uint64_t));
+      return gRandPool.getProbability<T>(mRandPoolBytesOffset++);
+    }
+  }
+
+  template <class T> T getIntergerInRange(T min, T max) {
+    if (provider->remaining_bytes() > 0) {
+      return provider->ConsumeIntegralInRange<T>(min, max);
+    } else {
+      NeedMoreFuzzData(sizeof(T));
+      return gRandPool.getIntergerInRange<T>(min, max, mRandPoolBytesOffset++);
+    }
+  }
+
+  template <typename T> T getFloatingPointInRange(T min, T max) {
+    if (provider->remaining_bytes() > 0) {
+      return provider->ConsumeFloatingPointInRange<T>(min, max);
+    } else {
+      NeedMoreFuzzData(sizeof(T));
+      return gRandPool.getFloatingPointInRange<T>(min, max,
+                                                  mRandPoolBytesOffset++);
+    }
+  }
+  bool FillByteArray(uint8_t *bytes, size_t size) {
+    size_t wrCnt = 0;
+    if (provider->remaining_bytes() > 0) {
+      wrCnt = provider->ConsumeData(bytes, size);
+    }
+    if (wrCnt < size) {
+      gRandPool.getBytes(bytes + wrCnt, size - wrCnt, mRandPoolBytesOffset++);
+      NeedMoreFuzzData(size - wrCnt);
+    }
+    return true;
   }
 
   void clear() {
@@ -363,25 +319,10 @@ public:
 
   void getCallSequence(std::vector<int> &intCallSeq, size_t funcNum) {
     // Get CallSeqSize
-    size_t CallSeqSize;
-    if (provider->remaining_bytes() > 0) {
-      CallSeqSize =
-          provider->ConsumeIntegralInRange<size_t>(1, ClMaxCallSeqSize);
-    } else {
-      NeedMoreFuzzData(sizeof(size_t));
-      CallSeqSize = gRandPool.getIntergerInRange<size_t>(
-          1, ClMaxCallSeqSize, mRandPoolBytesOffset++);
-    }
+    size_t CallSeqSize = getIntergerInRange<size_t>(1, ClMaxCallSeqSize);
     // Get CallSeq
     for (size_t i = 0; i < CallSeqSize; i++) {
-      int idx;
-      if (provider->remaining_bytes() > 0) {
-        idx = provider->ConsumeIntegralInRange<int>(0, funcNum - 1);
-      } else {
-        NeedMoreFuzzData(sizeof(int));
-        idx = gRandPool.getIntergerInRange<int>(0, funcNum - 1,
-                                                mRandPoolBytesOffset++);
-      }
+      int idx = getIntergerInRange<int>(0, funcNum - 1);
       intCallSeq.push_back(idx);
     }
   }
@@ -390,19 +331,22 @@ public:
     mNotModifyOCallRetSpecs.emplace(ID);
   }
 
+  void AddDataID2TypeSpecs(std::string ID, FuzzDataTy ty) {
+    mSpecDataID2Type[ID] = ty;
+  }
+
   bool EnableModifyOCallRet(char *cParamID) {
     std::string ParamID(cParamID);
     if (mNotModifyOCallRetSpecs.count(ParamID)) {
       return false;
     }
-    double prob;
-    if (provider->remaining_bytes() > 0) {
-      prob = 1.0 - provider->ConsumeProbability<double>();
-    } else {
-      NeedMoreFuzzData(sizeof(uint64_t));
-      prob = gRandPool.getProbability(mRandPoolBytesOffset++);
-    }
-    return prob <= ClModifyOCallRetProb;
+    double prob = getProbability<double>();
+    return prob < ClModifyOCallRetProb;
+  }
+
+  bool EnableModifyDoubleFetchValue() {
+    double prob = getProbability<double>();
+    return prob < ClModifyDoubleFetchValueProb;
   }
 
 private:
@@ -410,6 +354,7 @@ private:
   std::vector<uint8_t *> allocatedMemAreas;
   size_t mExpectedFuzzDataSize, mRandPoolBytesOffset;
   std::unordered_set<std::string> mNotModifyOCallRetSpecs;
+  std::unordered_map<std::string, FuzzDataTy> mSpecDataID2Type;
 };
 FuzzDataFactory data_factory;
 
@@ -474,6 +419,9 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_modify_ocall_ret_prob",
           po::value<double>(&ClModifyOCallRetProb)->default_value(0.5),
           "Probability to modify OCall return");
+  add_opt("cb_modify_double_fetch_value_prob",
+          po::value<double>(&ClModifyDoubleFetchValueProb)->default_value(0.5),
+          "Probability to modify value when detect double fetch");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -554,7 +502,7 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
         boost::split(pair, dataTySpec, [](char c) { return c == '='; });
         auto dataType = magic_enum::enum_cast<FuzzDataTy>(pair[1]);
         if (dataType.has_value()) {
-          gSpecDataID2Type[pair[0]] = dataType.value();
+          data_factory.AddDataID2TypeSpecs(pair[0], dataType.value());
         }
       }
     }
@@ -597,8 +545,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   if (SGXFuzzerEnvClearBeforeTest) {
     sgxfuzz_assert(SGXFuzzerEnvClearBeforeTest() == 0);
   }
-  // Remove last round backtrace.dump
-  fs::remove(fs::path("backtrace.dump"));
   data_factory.init(Data, Size);
 
   // Initialize Enclave
@@ -635,7 +581,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
 // DriverGen Callbacks
 size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
-  return data_factory.getUserCheckCount();
+  return data_factory.getUserCheckCount(eleSize);
 }
 
 uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
@@ -645,14 +591,7 @@ uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
 
 uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
                     FuzzDataTy dataType) {
-  // log_always("%s requires %llx bytes data\n", cStrAsParamID, byteArrLen);
-  std::string ParamID(cStrAsParamID);
-  // std::replace(ParamID.begin(), ParamID.end(), '/', '_');
-  if (gSpecDataID2Type.count(ParamID)) {
-    // Override DataType by user specified
-    dataType = gSpecDataID2Type[ParamID];
-  }
-  return data_factory.getBytes(ptr, byteArrLen, dataType);
+  return data_factory.getBytes(ptr, byteArrLen, dataType, cStrAsParamID);
 }
 
 bool DFEnableSetNull(char *cStrAsParamID) {
@@ -680,5 +619,9 @@ uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count, uint64_t eleSize) {
 
 bool DFEnableModifyOCallRet(char *cParamID) {
   return data_factory.EnableModifyOCallRet(cParamID);
+}
+
+bool DFEnableModifyDoubleFetchValue() {
+  return data_factory.EnableModifyDoubleFetchValue();
 }
 }

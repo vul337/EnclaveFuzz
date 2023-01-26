@@ -29,7 +29,7 @@ public:
 
   size_t getPoolSize() { return mRandPoolSize; }
 
-  void getBytes(void *buf, size_t size, size_t offset = 0) {
+  void getBytes(void *buf, size_t size, size_t offset) {
     // Pre check
     if (size == 0) {
       return;
@@ -56,20 +56,25 @@ public:
     }
   }
 
-  double getProbability(size_t offset = 0) {
-    uint64_t tmp;
-    getBytes(&tmp, sizeof(uint64_t), offset);
-    double res = ((double)tmp) / ((double)std::numeric_limits<uint64_t>::max());
-    return res;
+  template <class T> T getProbability(size_t offset) {
+    static_assert(std::is_floating_point<T>::value,
+                  "A floating point type is required.");
+
+    using IntegralType =
+        typename std::conditional<(sizeof(T) <= sizeof(uint32_t)), uint32_t,
+                                  uint64_t>::type;
+    IntegralType tmp = getInterger<IntegralType>(offset);
+    T result = (T)tmp / (T)std::numeric_limits<IntegralType>::max();
+    return result;
   }
 
-  template <class T> T getInterger(size_t offset = 0) {
+  template <class T> T getInterger(size_t offset) {
     T res;
     getBytes(&res, sizeof(T), offset);
     return res;
   }
 
-  template <class T> T getIntergerInRange(T min, T max, size_t offset = 0) {
+  template <class T> T getIntergerInRange(T min, T max, size_t offset) {
     static_assert(std::is_integral<T>::value, "An integral type is required.");
     static_assert(sizeof(T) <= sizeof(uint64_t), "Unsupported integral type.");
     if (min > max)
@@ -85,6 +90,30 @@ public:
       result = result % (range + 1);
 
     return static_cast<T>(min + result);
+  }
+
+  bool getBool(size_t offset) { return 1 & getInterger<uint8_t>(offset); }
+
+  template <typename T> T getFloatingPointInRange(T min, T max, size_t offset) {
+    if (min > max)
+      abort();
+
+    T range = .0;
+    T result = min;
+    constexpr T zero(.0);
+    if (max > zero && min < zero && max > min + std::numeric_limits<T>::max()) {
+      // The diff |max - min| would overflow the given floating point type. Use
+      // the half of the diff as the range and consume a bool to decide whether
+      // the result is in the first of the second part of the diff.
+      range = (max / 2.0) - (min / 2.0);
+      if (getBool(offset++)) {
+        result += range;
+      }
+    } else {
+      range = max - min;
+    }
+
+    return result + range * getProbability<T>(offset);
   }
 
 private:

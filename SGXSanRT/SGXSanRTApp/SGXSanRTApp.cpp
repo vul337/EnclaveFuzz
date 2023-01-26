@@ -7,6 +7,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <boost/stacktrace.hpp>
+#include <dlfcn.h>
 #include <execinfo.h>
 #include <fstream>
 #include <iostream>
@@ -68,10 +69,33 @@ static void PrintAddressSpaceLayout(log_level ll = LOG_LEVEL_DEBUG) {
              (void *)kHighMemBeg, (void *)kHighMemEnd);
 }
 
+// https://maskray.me/blog/2022-04-10-unwinding-through-signal-handler
+void async_signal_safe_dump_bt() {
+  size_t max_bt_count = 100;
+  uint64_t bt_buf[max_bt_count];
+  size_t bt_cnt =
+      boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
+
+  fprintf(stderr, "== SGXSan Backtrace BEG ==\n");
+  for (size_t i = 0; i < bt_cnt; i++) {
+    uint64_t addr = bt_buf[i];
+    Dl_info info;
+    if (dladdr((void *)addr, &info) != 0) {
+      fprintf(
+          stderr, "0x%016lx: %s at %s (%p) \n", addr - (uint64_t)info.dli_fbase,
+          info.dli_sname ? info.dli_sname : "?",
+          info.dli_fname ? info.dli_fname : "?",
+          info.dli_saddr
+              ? (void *)((uint64_t)info.dli_saddr - (uint64_t)info.dli_fbase)
+              : nullptr);
+    }
+  }
+  fprintf(stderr, "== SGXSan Backtrace END ==\n");
+}
+
 /// \brief Signal handler to report illegal memory access
 static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   sgxsan_assert(siginfo->si_signo == SIGSEGV);
-  boost::stacktrace::safe_dump_to("./backtrace.dump");
   if (siginfo->si_code == SI_KERNEL) {
     // If si_code is SI_KERNEL, #PF address is not true
     log_error("#PF Addr: Unknown\n");
@@ -97,6 +121,8 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
       log_error("ShadowMap's GAP Dereference\n");
     }
   }
+
+  async_signal_safe_dump_bt();
 
   // call previous signal handler
   if (SIG_DFL == g_old_sigact[signum].sa_handler) {
@@ -247,23 +273,17 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
   if (ll > USED_LOG_LEVEL)
     return;
 
-  char buf[BUFSIZ] = {'\0'};
-  std::string prefix = "";
   if (with_prefix) {
 #if (SHOW_TID)
-    snprintf(buf, BUFSIZ, "[TID=0x%x] ", gettid());
-    prefix += buf;
+    fprintf(stderr, "[TID=0x%x] ", gettid());
 #endif
-    prefix += log_level_to_prefix[ll];
+    fprintf(stderr, "%s", log_level_to_prefix[ll]);
   }
 
   va_list ap;
   va_start(ap, fmt);
-  vsnprintf(buf, BUFSIZ, fmt, ap);
+  vfprintf(stderr, fmt, ap);
   va_end(ap);
-  std::string content = prefix + buf;
-
-  std::cerr << content;
 }
 
 void SGXSanLogEnter(const char *str) { log_always("Enter %s\n", str); }
@@ -328,15 +348,28 @@ static void PrintShadowMap(log_level ll, uptr addr) {
 }
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
-                        uptr access_size, bool fatal, const char *msg) {
-  log_level ll = fatal ? LOG_LEVEL_ERROR : LOG_LEVEL_WARNING;
+                        uptr access_size, bool fatal, const char *msg, ...) {
+  log_level ll;
+  if (fatal) {
+    ll = LOG_LEVEL_ERROR;
+    log_error_np("================ Error Report ================\n"
+                 "[SGXSan] ERROR: ");
+  } else {
+    ll = LOG_LEVEL_WARNING;
+    log_warning_np("================ Warning Report ================\n"
+                   "[SGXSan] WARNING: ");
+  }
+
+  if (ll <= USED_LOG_LEVEL) {
+    va_list ap;
+    va_start(ap, msg);
+    vfprintf(stderr, msg, ap);
+    va_end(ap);
+  }
+
   sgxsan_log(ll, false,
-             "================ Error Report ================\n"
-             "%s\n"
-             "  pc = 0x%lx\tbp   = 0x%lx\n"
-             "  sp = 0x%lx\taddr = 0x%lx\n"
-             "  is_write = %d\t\taccess_size = 0x%lx\n",
-             msg, pc, bp, sp, addr, is_write, access_size);
+             " at pc 0x%lx %s 0x%lx with 0x%lx bytes (bp = 0x%lx sp = 0x%lx)\n",
+             pc, (is_write ? "write" : "read"), addr, access_size, bp, sp);
   sgxsan_backtrace(ll);
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");

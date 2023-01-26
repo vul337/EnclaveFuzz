@@ -115,4 +115,4 @@ ${MAKE} clean -s
 ${MAKE} -j${Jobs} ${ADD_MAKE_FLAGS}
 ${CP} libsgx_uae_service_sim.so ${PREFIX}/lib64
 
-echo "== Successfully get SGXSDK =="
+echo "== Successfully get SGXSDK ${MODE} =="
