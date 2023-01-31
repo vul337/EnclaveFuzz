@@ -24,6 +24,7 @@
 #include <map>
 #include <pthread.h>
 #include <regex>
+#include <set>
 #include <stack>
 #include <thread_data.h>
 #include <unistd.h>
@@ -122,6 +123,7 @@ extern "C" void PopOCAllocStack() { OCAllocStack.pop(); }
 extern "C" void *sgx_ocalloc(size_t size) {
   auto &top = OCAllocStack.top();
   void *ocallocAddr = malloc(size);
+  sgxsan_assert(ocallocAddr);
   top.push_back(ocallocAddr);
   return ocallocAddr;
 }
@@ -342,46 +344,85 @@ __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg, const uintptr_t *pcs_end);
 extern "C" __attribute__((weak)) void
 __sanitizer_cov_pcs_unregister(const uintptr_t *pcs_beg);
 
-uptr gEnclaveDSOSanCovCntrsStart = 0, gEnclaveDSOSanCovCntrsStop = 0,
-     gEnclaveDSOSanCovPCsStart = 0, gEnclaveDSOSanCovPCsStop = 0;
+class SanCovMapRepeater {
 
-bool gHasShowHook8bit = false, gHasShowHookPCs = false;
+  struct PCTableEntry {
+    uintptr_t PC, PCFlags;
+  };
+
+public:
+  void RegisterSanCov8Bit(uint8_t *Start, uint8_t *Stop) {
+    if (!__sanitizer_cov_8bit_counters_init or
+        !__sanitizer_cov_8bit_counters_unregister)
+      return;
+    if (m8BitStart2Stop.count(Start) != 0) {
+      // Already registered
+      sgxsan_assert(m8BitStart2Stop[Start] == Stop);
+      return;
+    }
+    m8BitStart2Stop[Start] = Stop;
+    __sanitizer_cov_8bit_counters_init(Start, Stop);
+    if (mShowed8BitCntrs.count(Start) == 0) {
+      log_always("Enclave __sanitizer_cov_8bit_counters_init, %ld inline "
+                 "8-bit counts [%p, %p)\n",
+                 (uptr)Stop - (uptr)Start, Start, Stop);
+      mShowed8BitCntrs.emplace(Start);
+    }
+  }
+
+  void RegisterSanCovPCs(const uintptr_t *pcs_beg, const uintptr_t *pcs_end) {
+    if (!__sanitizer_cov_pcs_init or !__sanitizer_cov_pcs_unregister)
+      return;
+    if (mPCsBeg2End.count(pcs_beg) != 0) {
+      // Already registered
+      sgxsan_assert(mPCsBeg2End[pcs_beg] == pcs_end);
+      return;
+    }
+    mPCsBeg2End[pcs_beg] = pcs_end;
+    __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
+    if (mShowedPCs.count(pcs_beg) == 0) {
+      log_always("Enclave __sanitizer_cov_pcs_init, %ld PCs [%p, %p)\n",
+                 (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
+                 pcs_end);
+      mShowedPCs.emplace(pcs_beg);
+    }
+  }
+
+  void UnregisterSanCov8Bit() {
+    if (!__sanitizer_cov_8bit_counters_unregister)
+      return;
+    for (auto &pair : m8BitStart2Stop) {
+      __sanitizer_cov_8bit_counters_unregister(pair.first);
+    }
+    m8BitStart2Stop.clear();
+  }
+
+  void UnregisterSanCovPCs() {
+    if (!__sanitizer_cov_pcs_unregister)
+      return;
+    for (auto &pair : mPCsBeg2End) {
+      __sanitizer_cov_pcs_unregister(pair.first);
+    }
+    mPCsBeg2End.clear();
+  }
+
+private:
+  std::map<uint8_t *, uint8_t *> m8BitStart2Stop;
+  std::map<const uintptr_t *, const uintptr_t *> mPCsBeg2End;
+  std::set<uint8_t *> mShowed8BitCntrs;
+  std::set<const uintptr_t *> mShowedPCs;
+};
+
+SanCovMapRepeater gRepeater;
 
 extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
                                                            uint8_t *Stop) {
-  if (gEnclaveDSOSanCovCntrsStart == (uptr)Start) {
-    return;
-  }
-  if (gHasShowHook8bit == false) {
-    log_always("Hook __sanitizer_cov_8bit_counters_init of Enclave, %ld inline "
-               "8-bit counts [%p, %p) (First time)\n",
-               (uptr)Stop - (uptr)Start, Start, Stop);
-    gHasShowHook8bit = true;
-  }
-  gEnclaveDSOSanCovCntrsStart = (uptr)Start;
-  gEnclaveDSOSanCovCntrsStop = (uptr)Stop;
-  __sanitizer_cov_8bit_counters_init(Start, Stop);
+  gRepeater.RegisterSanCov8Bit(Start, Stop);
 }
-
-struct PCTableEntry {
-  uintptr_t PC, PCFlags;
-};
 
 extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
                                                  const uintptr_t *pcs_end) {
-  if (gEnclaveDSOSanCovPCsStart == (uptr)pcs_beg) {
-    return;
-  }
-  gEnclaveDSOSanCovPCsStart = (uptr)pcs_beg;
-  gEnclaveDSOSanCovPCsStop = (uptr)pcs_end;
-  if (gHasShowHookPCs == false) {
-    log_always("Hook __sanitizer_cov_pcs_init of Enclave, %ld PCs [%p, %p) "
-               "(First time)\n",
-               (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
-               pcs_end);
-    gHasShowHookPCs = true;
-  }
-  __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
+  gRepeater.RegisterSanCovPCs(pcs_beg, pcs_end);
 }
 
 void ClearSticker() {
@@ -396,25 +437,8 @@ void ClearSticker() {
 }
 
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
-  // sgxsan_warning(
-  //     gEnclaveDSOSanCovCntrsStart == 0,
-  //     "Fail to hook Enclave's __sanitizer_cov_8bit_counters_init and "
-  //     "record section start address, or don't enable inline-8bit-counters");
-  if (__sanitizer_cov_8bit_counters_unregister) {
-    __sanitizer_cov_8bit_counters_unregister(
-        (uint8_t *)gEnclaveDSOSanCovCntrsStart);
-  }
-  gEnclaveDSOSanCovCntrsStart = 0;
-  gEnclaveDSOSanCovCntrsStop = 0;
-
-  // sgxsan_warning(gEnclaveDSOSanCovPCsStart == 0,
-  //                "Fail to hook Enclave's __sanitizer_cov_pcs_init and "
-  //                "record section start address, or don't enable pc-table");
-  if (__sanitizer_cov_pcs_unregister) {
-    __sanitizer_cov_pcs_unregister((uintptr_t *)gEnclaveDSOSanCovPCsStart);
-  }
-  gEnclaveDSOSanCovPCsStart = 0;
-  gEnclaveDSOSanCovPCsStop = 0;
+  gRepeater.UnregisterSanCov8Bit();
+  gRepeater.UnregisterSanCovPCs();
 
   // Since we will access object belong to Enclave, so set RunInEnclave to true
   RunInEnclave = true;

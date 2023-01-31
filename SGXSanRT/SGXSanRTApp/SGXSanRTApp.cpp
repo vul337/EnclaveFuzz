@@ -4,6 +4,7 @@
 #include "MemAccessMgr.h"
 #include "Sticker.h"
 #include "plthook.h"
+#include <atomic>
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <boost/stacktrace.hpp>
@@ -69,6 +70,19 @@ static void PrintAddressSpaceLayout(log_level ll = LOG_LEVEL_DEBUG) {
              (void *)kHighMemBeg, (void *)kHighMemEnd);
 }
 
+typedef void (*DieCallbackType)(void);
+static DieCallbackType UserDieCallback;
+void SetUserDieCallback(DieCallbackType callback) {
+  UserDieCallback = callback;
+}
+
+void NORETURN Die() {
+  if (UserDieCallback)
+    UserDieCallback();
+  _Exit(1);
+}
+
+extern "C" {
 // https://maskray.me/blog/2022-04-10-unwinding-through-signal-handler
 void async_signal_safe_dump_bt() {
   size_t max_bt_count = 100;
@@ -81,20 +95,46 @@ void async_signal_safe_dump_bt() {
     uint64_t addr = bt_buf[i];
     Dl_info info;
     if (dladdr((void *)addr, &info) != 0) {
-      fprintf(
-          stderr, "0x%016lx: %s at %s (%p) \n", addr - (uint64_t)info.dli_fbase,
-          info.dli_sname ? info.dli_sname : "?",
-          info.dli_fname ? info.dli_fname : "?",
-          info.dli_saddr
-              ? (void *)((uint64_t)info.dli_saddr - (uint64_t)info.dli_fbase)
-              : nullptr);
+      if (info.dli_saddr) {
+        fprintf(stderr, "0x%016lx: %s (offset 0x%lx) at %s\n",
+                addr - (uint64_t)info.dli_fbase,
+                info.dli_sname ? info.dli_sname : "?",
+                (uint64_t)info.dli_saddr - (uint64_t)info.dli_fbase,
+                info.dli_fname ? info.dli_fname : "?");
+      } else {
+        fprintf(stderr, "0x%016lx: %s at %s\n", addr - (uint64_t)info.dli_fbase,
+                info.dli_sname ? info.dli_sname : "?",
+                info.dli_fname ? info.dli_fname : "?");
+      }
     }
   }
   fprintf(stderr, "== SGXSan Backtrace END ==\n");
 }
 
+__attribute__((alias("async_signal_safe_dump_bt")))
+SANITIZER_INTERFACE_ATTRIBUTE void
+__sanitizer_print_stack_trace();
+
+// https://github.com/google/sanitizers/issues/788
+// __sanitizer_acquire_crash_state is important
+SANITIZER_INTERFACE_ATTRIBUTE
+int __sanitizer_acquire_crash_state() {
+  static std::atomic<int> in_crash_state = 0;
+  return !std::atomic_exchange_explicit(&in_crash_state, 1,
+                                        std::memory_order_relaxed);
+}
+
+SANITIZER_INTERFACE_ATTRIBUTE
+void __sanitizer_set_death_callback(void (*callback)(void)) {
+  SetUserDieCallback(callback);
+}
+}
+
 /// \brief Signal handler to report illegal memory access
 static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
+  if (!__sanitizer_acquire_crash_state()) {
+    return;
+  }
   sgxsan_assert(siginfo->si_signo == SIGSEGV);
   if (siginfo->si_code == SI_KERNEL) {
     // If si_code is SI_KERNEL, #PF address is not true
@@ -122,8 +162,11 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     }
   }
 
-  async_signal_safe_dump_bt();
-
+  Die();
+  // Never achieve here
+  signal(signum, SIG_DFL);
+  raise(signum);
+#if 0
   // call previous signal handler
   if (SIG_DFL == g_old_sigact[signum].sa_handler) {
     signal(signum, SIG_DFL);
@@ -153,6 +196,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     if (g_old_sigact[signum].sa_flags & SA_RESETHAND)
       g_old_sigact[signum].sa_handler = SIG_DFL;
   }
+#endif
 }
 
 bool AlreadyRegisterSignalHandler = false;

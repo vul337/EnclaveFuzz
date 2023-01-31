@@ -541,6 +541,7 @@ void LLVMFuzzerEarlyAfterRunOne() {
 
 extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+  log_always("Start LLVMFuzzerTestOneInput\n");
   // Remove last round environment remain
   if (SGXFuzzerEnvClearBeforeTest) {
     sgxfuzz_assert(SGXFuzzerEnvClearBeforeTest() == 0);

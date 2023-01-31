@@ -20,11 +20,11 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
     auto res =
         MemAccessMgr::double_fetch_detect(ptr, size, used_to_cmp, parent_func);
     if (res) {
-      sgxsan_warning(
-          true,
-          "Detect Double-Fetch Situation, and modify it with fuzz data\n");
       if (DFEnableModifyDoubleFetchValue && DFGetBytesEx &&
           DFEnableModifyDoubleFetchValue()) {
+        sgxsan_warning(
+            true,
+            "Detect Double-Fetch Situation, and modify it with fuzz data\n");
         if (size == sizeof(void *)) {
           // It may be a pointer
           DFGetBytesEx((uint8_t *)ptr, size, nullptr,
@@ -32,6 +32,9 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
         } else {
           DFGetBytesEx((uint8_t *)ptr, size, nullptr, 2 /* FUZZ_DATA */);
         }
+      } else {
+        sgxsan_warning(true,
+                       "Detect Double-Fetch Situation, but don't modify it\n");
       }
     }
   }

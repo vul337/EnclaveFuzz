@@ -32,6 +32,9 @@ typedef signed long sptr;
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
+#define SANITIZER_INTERFACE_ATTRIBUTE __attribute__((visibility("default")))
+#define NORETURN __attribute__((noreturn))
+
 #define GET_CALLER_PC_BP_SP                                                    \
   uptr pc = (uptr)__builtin_return_address(0);                                 \
   uptr bp = (uptr)__builtin_frame_address(0);                                  \
@@ -80,8 +83,10 @@ int hook_enclave();
 
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void SGXSanLogEnter(const char *str);
+void async_signal_safe_dump_bt();
 #if defined(__cplusplus)
 }
+#endif
 
 /// have prefix in output
 #define log_always(...) sgxsan_log(LOG_LEVEL_ALWAYS, true, __VA_ARGS__)
@@ -214,5 +219,3 @@ void *sgxsan_backtrace_i(int idx);
 /* Set or get global Enclave file name */
 void setEnclaveFileName(std::string fileName);
 std::string getEnclaveFileName();
-
-#endif

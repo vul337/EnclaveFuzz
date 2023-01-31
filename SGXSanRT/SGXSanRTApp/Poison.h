@@ -16,7 +16,6 @@ const int kAsanAllocaRightMagic = 0x87 /* 0xcb */;
 const int kAsanStackUseAfterScopeMagic = 0x88 /* 0xf8 */;
 const int kAsanGlobalRedzoneMagic = 0x89 /* 0xf9 */;
 const int kAsanHeapLeftRedzoneMagic = 0x8a /* 0xfa */;
-const int kAsanHeapRightRedzoneMagic = 0x8b;
 const int kAsanHeapFreeMagic = 0x8d /* 0xfd */;
 const int kAsanInternalHeapMagic = 0x8e /* 0xfe */;
 /// Mark sensitive area

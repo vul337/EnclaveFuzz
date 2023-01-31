@@ -80,10 +80,10 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
 
 void *MALLOC(size_t size) {
   updateBackEndHeapAllocator();
-  if (size == 0) {
-    sgxsan_warning(true, "Malloc 0 size\n");
-    // return nullptr;
-  }
+  // if (size == 0) {
+  //   sgxsan_warning(true, "Malloc 0 size\n");
+  //   return nullptr;
+  // }
 
   if (not asan_inited) {
     auto p = BACKEND_MALLOC(size);
@@ -134,7 +134,7 @@ void *MALLOC(size_t size) {
   PoisonShadow(user_beg, size, kAsanNotPoisonedMagic);
   uptr right_redzone_beg = RoundUpTo(user_end, alignment);
   PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg,
-               kAsanHeapRightRedzoneMagic);
+               kAsanHeapLeftRedzoneMagic);
 
   if (RunInEnclave) {
     void *callPt = __builtin_return_address(0);
@@ -173,7 +173,7 @@ void FREE(void *ptr) {
     goto fallback;
   }
 
-  if (*(uint8_t *)MEM_TO_SHADOW(user_beg) == kAsanHeapFreeMagic) {
+  if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
     GET_CALLER_PC_BP_SP;
     ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
   }
@@ -271,14 +271,14 @@ void ClearHeapObject() {
       abort();
     }
 
-    if (*(uint8_t *)MEM_TO_SHADOW(user_beg) == kAsanHeapFreeMagic) {
+    if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
       GET_CALLER_PC_BP_SP;
       ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
     }
     sgxsan_assert(IsAligned(user_beg, alignment));
 
     PoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
-                 kAsanHeapFreeMagic);
+                 kAsanHeapLeftRedzoneMagic);
     BACKEND_FREE((void *)m->alloc_beg);
   }
   gHeapObjs.clear();
