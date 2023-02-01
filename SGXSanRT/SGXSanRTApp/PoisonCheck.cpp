@@ -574,7 +574,7 @@ static inline void RANGE_CHECK(const void *beg, uptr size,
         if (_srcPoisonedStatus != NotPoisoned) {                               \
           GET_CALLER_PC_BP_SP;                                                 \
           ReportGenericError(pc, bp, sp, (uptr)srcAddr, 0, srcSize, false,     \
-                             "[WARNING] Plaintext Transfer");                  \
+                             "Plaintext Transfer");                            \
         }                                                                      \
         check_output_hybrid((uptr)srcAddr, srcSize);                           \
       }                                                                        \

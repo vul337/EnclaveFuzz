@@ -25,6 +25,41 @@ def check_aslr():
             exit(1)
 
 
+def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
+    dict = crash_report_simple if do_simple else crash_report
+    bt_hash = hashlib.sha256(bt_str.encode()).hexdigest() if bt_str else ""
+    filter1 = bt_hash
+    filter2 = error_tag
+    if filter1 not in dict:
+        dict[filter1] = {}
+    if filter2 not in dict[filter1]:
+        dict[filter1][filter2] = {}
+
+    if "num_crashes" not in dict[filter1][filter2]:
+        dict[filter1][filter2]["num_crashes"] = 0
+    dict[filter1][filter2]["num_crashes"] += 1
+
+    if "inputs" not in dict[filter1][filter2]:
+        dict[filter1][filter2]["inputs"] = []
+    if not do_simple:
+        dict[filter1][filter2]["inputs"].append(
+            os.path.basename(crash_file))
+    elif not filter1 or not filter2 or not dict[filter1][filter2]["inputs"]:
+        dict[filter1][filter2]["inputs"].append(
+            os.path.basename(crash_file))
+
+    if "pcs" not in dict[filter1][filter2]:
+        dict[filter1][filter2]["pcs"] = {}
+    if pc_value not in dict[filter1][filter2]["pcs"]:
+        dict[filter1][filter2]["pcs"][pc_value] = 0
+    dict[filter1][filter2]["pcs"][pc_value] += 1
+
+    if "hash2bt" not in dict:
+        dict["hash2bt"] = {}
+    if bt_hash:
+        dict["hash2bt"][bt_hash] = bt_str.split("\n")
+
+
 def get_crash_info(binary, crash_file, extra_opt: list, test_dir):
     cmd: str = binary+" "+crash_file
     if(extra_opt):
@@ -42,7 +77,9 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir):
     stderr = logs.stderr.decode("utf-8")
 
     sgxsan_error_regex = re.compile(
-        r"\[SGXSan\] ((?:ERROR|WARNING): .*)", flags=re.IGNORECASE)
+        r"\[SGXSan\] ERROR:.*"
+        r"|\[SGXSan\] WARNING:\s*?Detect Double-Fetch Situation, and modify it with fuzz data"
+        r"|ERROR: libFuzzer:.*", flags=re.IGNORECASE)
     sgxsan_error = sgxsan_error_regex.findall(stderr)
     error_tag = " | ".join(sgxsan_error)
 
@@ -51,61 +88,17 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir):
     bt_list = bt_regex.findall(stderr)
     bt_str = "======================== BREAK LINE ========================\n".join(
         bt_list)
-    backtrace = hashlib.sha256(bt_str.encode()).hexdigest()
-    if bt_str and "ERROR: libFuzzer: out-of-memory" not in stderr:
-        assert error_tag
 
     pc_regex = re.compile(
         r"==\d+==ERROR:.*?\bpc\s+(0x[A-Fa-f0-9]*?)", re.DOTALL)
     pc_value = re.search(pc_regex, stderr)
 
-    if error_tag not in crash_report:
-        crash_report[error_tag] = {}
-    if backtrace not in crash_report[error_tag]:
-        crash_report[error_tag][backtrace] = {}
+    if "NOTE: fuzzing was not performed, you have only" in stderr:
+        error_tag = ""
+        bt_str = ""
 
-    if "num_crashes" not in crash_report[error_tag][backtrace]:
-        crash_report[error_tag][backtrace]["num_crashes"] = 0
-    crash_report[error_tag][backtrace]["num_crashes"] += 1
-
-    if "inputs" not in crash_report[error_tag][backtrace]:
-        crash_report[error_tag][backtrace]["inputs"] = []
-    crash_report[error_tag][backtrace]["inputs"].append(
-        os.path.basename(crash_file))
-
-    if "pcs" not in crash_report[error_tag][backtrace]:
-        crash_report[error_tag][backtrace]["pcs"] = {}
-    if pc_value not in crash_report[error_tag][backtrace]["pcs"]:
-        crash_report[error_tag][backtrace]["pcs"][pc_value] = 0
-    crash_report[error_tag][backtrace]["pcs"][pc_value] += 1
-
-    if error_tag not in crash_report_simple:
-        crash_report_simple[error_tag] = {}
-    if backtrace not in crash_report_simple[error_tag]:
-        crash_report_simple[error_tag][backtrace] = {}
-
-    if "num_crashes" not in crash_report_simple[error_tag][backtrace]:
-        crash_report_simple[error_tag][backtrace]["num_crashes"] = 0
-    crash_report_simple[error_tag][backtrace]["num_crashes"] += 1
-
-    if "inputs" not in crash_report_simple[error_tag][backtrace]:
-        crash_report_simple[error_tag][backtrace]["inputs"] = []
-    if not error_tag or not backtrace or not crash_report_simple[error_tag][backtrace]["inputs"]:
-        crash_report_simple[error_tag][backtrace]["inputs"].append(os.path.basename(
-            crash_file))
-
-    if "pcs" not in crash_report_simple[error_tag][backtrace]:
-        crash_report_simple[error_tag][backtrace]["pcs"] = {}
-    if pc_value not in crash_report_simple[error_tag][backtrace]["pcs"]:
-        crash_report_simple[error_tag][backtrace]["pcs"][pc_value] = 0
-    crash_report_simple[error_tag][backtrace]["pcs"][pc_value] += 1
-
-    if "hash2bt" not in crash_report:
-        crash_report["hash2bt"] = {}
-    crash_report["hash2bt"][backtrace] = bt_str.split("\n")
-    if "hash2bt" not in crash_report_simple:
-        crash_report_simple["hash2bt"] = {}
-    crash_report_simple["hash2bt"][backtrace] = bt_str.split("\n")
+    update2dict(bt_str, error_tag, pc_value, crash_file, False)
+    update2dict(bt_str, error_tag, pc_value, crash_file, True)
 
 
 def filter_crashes(binary, crashes_dir, extra_opt, test_dir):
@@ -120,10 +113,11 @@ def filter_crashes(binary, crashes_dir, extra_opt, test_dir):
         return
 
     for f in tqdm(os.listdir(crashes_dir)):
-        if (f.startswith("crash-")):
-            crash_file = os.path.join(crashes_dir, f)
-            # print(crash_file)
-            get_crash_info(binary, crash_file, extra_opt, test_dir)
+        if not f.startswith("crash-"):
+            continue
+        crash_file = os.path.join(crashes_dir, f)
+        # print(crash_file)
+        get_crash_info(binary, crash_file, extra_opt, test_dir)
 
 
 def main():

@@ -2,20 +2,22 @@
 import argparse
 import os
 import re
+from tqdm.auto import tqdm
 
 gECallCnt = {}
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('logs', nargs="+", metavar="<xxx.log>")
+    parser = argparse.ArgumentParser(
+        description="Analyse all *.log in <log_dir> to count Enter ECall_XXX")
+    parser.add_argument('log_dir')
     args = parser.parse_args()
 
-    logs = args.logs
-    for log in logs:
-        log_abs = os.path.abspath(log)
+    for log in tqdm(os.listdir(args.log_dir)):
+        if not log.endswith(r".log"):
+            continue
+        log_abs = os.path.join(args.log_dir, log)
         if os.path.exists(log_abs):
-            print("== Process "+log+" ==")
             with open(log_abs) as log_file:
                 lines = log_file.readlines()
                 for line in lines:
@@ -26,8 +28,8 @@ def main():
                             gECallCnt[ECallName] += 1
                         else:
                             gECallCnt[ECallName] = 1
-            for ECallName in gECallCnt.keys():
-                print(str(gECallCnt[ECallName])+" Enter "+ECallName)
+    for ECallName in gECallCnt.keys():
+        print(str(gECallCnt[ECallName])+" Enter "+ECallName)
 
 
 if __name__ == "__main__":

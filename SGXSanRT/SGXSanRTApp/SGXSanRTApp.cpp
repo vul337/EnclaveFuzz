@@ -146,7 +146,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     log_error("#PF Addr: %p\n", _page_fault_addr);
 
     uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
-    if (page_fault_addr == 0) {
+    if (0 <= page_fault_addr and page_fault_addr < page_size) {
       log_error("Null-Pointer Dereference\n");
     } else if ((kLowShadowGuardBeg <= page_fault_addr &&
                 page_fault_addr < kLowShadowBeg) ||
@@ -159,9 +159,12 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     } else if (kShadowGapBeg <= page_fault_addr &&
                page_fault_addr < kShadowGapEnd) {
       log_error("ShadowMap's GAP Dereference\n");
+    } else {
+      log_error("Unknown page fault\n");
     }
   }
 
+  async_signal_safe_dump_bt();
   Die();
   // Never achieve here
   signal(signum, SIG_DFL);
@@ -199,8 +202,8 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
 #endif
 }
 
-bool AlreadyRegisterSignalHandler = false;
 void register_sgxsan_sigaction() {
+  static bool AlreadyRegisterSignalHandler = false;
   if (AlreadyRegisterSignalHandler)
     return;
   struct sigaction sig_act;
@@ -621,7 +624,7 @@ extern "C" void ReportSensitiveDataLeak(SensitiveDataType srcType,
     size_t srcSize = srcInfo2;
     GET_CALLER_PC_BP_SP;
     ReportGenericError(pc, bp, sp, srcAddr, false, srcSize, false,
-                       "[WARNING] Leak of Sensitive Data");
+                       "Leak of Sensitive Data");
 
   } else if (srcType == ArgData or srcType == ReturnedData) {
     sptr argPos = (sptr)srcInfo2;
