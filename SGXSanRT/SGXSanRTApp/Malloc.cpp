@@ -16,8 +16,10 @@ DEFINE_BACK_END(realloc) = __libc_realloc;
 DEFINE_BACK_END(malloc_usable_size) = nullptr;
 #undef DEFINE_BACK_END
 
-bool alreadyUpdateBackEndHeapAllocator = false;
+SGXSanHeapBacktrace *gHeapBT = nullptr;
+QuarantineCache *gQCache = nullptr;
 void updateBackEndHeapAllocator() {
+  static bool alreadyUpdateBackEndHeapAllocator = false;
   // since we also update it in SGXSan ctor, so this statement only will be
   // triggered before SGXSan's ctor, and only one main thread exists, thus,
   // needn't consider multi-thread situation
@@ -31,11 +33,13 @@ void updateBackEndHeapAllocator() {
   GET_BACK_END(realloc);
   GET_BACK_END(malloc_usable_size);
 #undef GET_BACK_END
+  // Never free, since they are still used when exit()
+  void *p = BACKEND_MALLOC(sizeof(SGXSanHeapBacktrace));
+  gHeapBT = new (p) SGXSanHeapBacktrace();
+  p = BACKEND_MALLOC(sizeof(QuarantineCache));
+  gQCache = new (p) QuarantineCache();
   alreadyUpdateBackEndHeapAllocator = true;
 }
-
-static QuarantineCache QCache;
-QuarantineCache *gQCache = &QCache;
 
 static pthread_mutex_t heap_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
@@ -125,6 +129,7 @@ void *MALLOC(size_t size) {
   m->alloc_beg = alloc_beg;
   m->alloc_size = allocated_size;
   m->user_size = size;
+  gHeapBT->StoreMallocBT(user_beg);
   log_trace("\n");
   log_trace("[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg,
             user_end, alloc_end);
@@ -152,6 +157,10 @@ void *MALLOC(size_t size) {
   return (void *)user_beg;
 }
 
+extern "C" bool AddrIsInHeapQuarantine(uptr addr) {
+  return L1F(*(uint8_t *)MEM_TO_SHADOW(addr)) == kAsanHeapFreeMagic;
+}
+
 void FREE(void *ptr) {
   uptr user_beg, alignment;
   chunk *m;
@@ -175,7 +184,7 @@ void FREE(void *ptr) {
 
   if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
     GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
+    ReportDoubleFree(pc, bp, sp, user_beg, gHeapBT->GetHeapBacktrace(user_beg));
   }
   sgxsan_assert(IsAligned(user_beg, alignment));
 
@@ -273,7 +282,8 @@ void ClearHeapObject() {
 
     if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
       GET_CALLER_PC_BP_SP;
-      ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
+      ReportDoubleFree(pc, bp, sp, user_beg,
+                       gHeapBT->GetHeapBacktrace(user_beg));
     }
     sgxsan_assert(IsAligned(user_beg, alignment));
 

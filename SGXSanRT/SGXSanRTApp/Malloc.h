@@ -2,10 +2,12 @@
 
 #include "Poison.h"
 #include "SGXSanRTApp.h"
+#include <boost/stacktrace.hpp>
 #include <deque>
 #include <pthread.h>
 #include <stddef.h>
 #include <sys/resource.h>
+#include <unordered_map>
 
 #define FRONT_END(sym) sym
 #define BACK_END(sym) back_end_##sym
@@ -144,6 +146,49 @@ bool operator!=(const ContainerAllocator<T1> &,
   return false;
 }
 
+class SGXSanHeapBacktrace {
+public:
+  SGXSanHeapBacktrace() { pthread_rwlock_init(&mRWLock, nullptr); }
+
+  void StoreMallocBT(uptr user_beg) {
+    pthread_rwlock_wrlock(&mRWLock);
+    auto &BT = mUserBeg2BT[user_beg];
+    BT.malloc_bt_cnt = boost::stacktrace::safe_dump_to(
+        BT.malloc_bt, sizeof(decltype(BT.malloc_bt)));
+    BT.free_bt_cnt = 0;
+    pthread_rwlock_unlock(&mRWLock);
+  }
+
+  void StoreFreeBT(uptr user_beg) {
+    pthread_rwlock_wrlock(&mRWLock);
+    auto &BT = mUserBeg2BT[user_beg];
+    BT.free_bt_cnt = boost::stacktrace::safe_dump_to(
+        BT.free_bt, sizeof(decltype(BT.free_bt)));
+    pthread_rwlock_unlock(&mRWLock);
+  }
+
+  void RemoveBT(uptr user_beg) {
+    pthread_rwlock_wrlock(&mRWLock);
+    mUserBeg2BT.erase(user_beg);
+    pthread_rwlock_unlock(&mRWLock);
+  }
+
+  MallocFreeBTTy GetHeapBacktrace(uptr user_beg) {
+    pthread_rwlock_rdlock(&mRWLock);
+    auto bt = mUserBeg2BT[user_beg];
+    pthread_rwlock_unlock(&mRWLock);
+    return bt;
+  }
+
+private:
+  std::unordered_map<uptr, MallocFreeBTTy, std::hash<uptr>, std::equal_to<uptr>,
+                     ContainerAllocator<std::pair<const uptr, MallocFreeBTTy>>>
+      mUserBeg2BT;
+  pthread_rwlock_t mRWLock;
+};
+
+extern SGXSanHeapBacktrace *gHeapBT;
+
 struct QuarantineElement {
   uptr alloc_beg;
   uptr alloc_size;
@@ -218,6 +263,7 @@ public:
       log_trace("[Put to Quaratine] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n",
                 qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size,
                 qe.alloc_beg + qe.alloc_size);
+      gHeapBT->StoreFreeBT(qe.user_beg);
       m_queue->push_back(qe);
       m_used_size += qe.alloc_size;
     }
@@ -228,6 +274,7 @@ public:
 private:
   void freeQuarantineElement(QuarantineElement qe) {
     update_heap_usage((void *)qe.alloc_beg, false);
+    gHeapBT->RemoveBT(qe.user_beg);
     BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
     log_trace("[Free QuarantineElement] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n",
               qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size,
@@ -239,6 +286,7 @@ private:
   }
   void freeDirectly(QuarantineElement qe) {
     update_heap_usage((void *)qe.alloc_beg, false);
+    gHeapBT->RemoveBT(qe.user_beg);
     BACKEND_FREE((void *)qe.alloc_beg);
     log_trace("[Direct Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg,
               qe.user_beg, qe.user_beg + qe.user_size,

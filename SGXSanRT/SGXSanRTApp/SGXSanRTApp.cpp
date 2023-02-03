@@ -84,12 +84,7 @@ void NORETURN Die() {
 
 extern "C" {
 // https://maskray.me/blog/2022-04-10-unwinding-through-signal-handler
-void async_signal_safe_dump_bt() {
-  size_t max_bt_count = 100;
-  uint64_t bt_buf[max_bt_count];
-  size_t bt_cnt =
-      boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
-
+void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf, size_t bt_cnt) {
   fprintf(stderr, "== SGXSan Backtrace BEG ==\n");
   for (size_t i = 0; i < bt_cnt; i++) {
     uint64_t addr = bt_buf[i];
@@ -111,7 +106,16 @@ void async_signal_safe_dump_bt() {
   fprintf(stderr, "== SGXSan Backtrace END ==\n");
 }
 
-__attribute__((alias("async_signal_safe_dump_bt")))
+void sgxsan_signal_safe_dump_bt() {
+  size_t max_bt_count = 100;
+  uint64_t bt_buf[max_bt_count];
+  size_t bt_cnt =
+      boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
+
+  sgxsan_signal_safe_dump_bt_buf(bt_buf, bt_cnt);
+}
+
+__attribute__((alias("sgxsan_signal_safe_dump_bt")))
 SANITIZER_INTERFACE_ATTRIBUTE void
 __sanitizer_print_stack_trace();
 
@@ -164,7 +168,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     }
   }
 
-  async_signal_safe_dump_bt();
+  sgxsan_signal_safe_dump_bt();
   Die();
   // Never achieve here
   signal(signum, SIG_DFL);
@@ -399,11 +403,11 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   log_level ll;
   if (fatal) {
     ll = LOG_LEVEL_ERROR;
-    log_error_np("================ Error Report ================\n"
-                 "[SGXSan] ERROR: ");
+    log_error_np(RED "\n================ Error Report ================\n"
+                     "[SGXSan] ERROR: ");
   } else {
     ll = LOG_LEVEL_WARNING;
-    log_warning_np("================ Warning Report ================\n"
+    log_warning_np("\n================ Warning Report ================\n"
                    "[SGXSan] WARNING: ");
   }
 
@@ -415,13 +419,33 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   }
 
   sgxsan_log(ll, false,
-             " at pc 0x%lx %s 0x%lx with 0x%lx bytes (bp = 0x%lx sp = 0x%lx)\n",
+             " at pc 0x%lx %s 0x%lx with 0x%lx bytes (bp = 0x%lx sp = "
+             "0x%lx)\n\n" RESET,
              pc, (is_write ? "write" : "read"), addr, access_size, bp, sp);
   sgxsan_backtrace(ll);
   PrintShadowMap(ll, addr);
-  sgxsan_log(ll, false, "================= Report End =================\n");
+  sgxsan_log(ll, false,
+             RED "================= Report End =================\n" RESET);
   if (fatal)
-    abort();
+    Die();
+  return;
+}
+
+void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr, MallocFreeBTTy bt) {
+  log_level ll = LOG_LEVEL_ERROR;
+  log_error_np(RED "\n================ Error Report ================\n"
+                   "[SGXSan] ERROR: Double Free 0x%lx at pc 0x%lx (bp = 0x%lx "
+                   "sp = 0x%lx)\n\n" RESET,
+               addr, pc, bp, sp);
+  sgxsan_backtrace(ll);
+  log_error_np(GREEN "\nPreviously malloc at:\n\n" RESET);
+  sgxsan_dump_bt_buf((void **)bt.malloc_bt /* int array -> pointer array */,
+                     bt.malloc_bt_cnt);
+  log_error_np(GREEN "\nPreviously free at:\n\n" RESET);
+  sgxsan_dump_bt_buf((void **)bt.free_bt, bt.free_bt_cnt);
+  PrintShadowMap(ll, addr);
+  log_error_np(RED "================= Report End =================\n" RESET);
+  Die();
   return;
 }
 
@@ -463,12 +487,7 @@ std::string addr2fname(void *addr) {
   return fname;
 }
 
-void sgxsan_backtrace(log_level ll) {
-#if (DUMP_STACK_TRACE)
-  if (ll > USED_LOG_LEVEL)
-    return;
-  void *array[20];
-  size_t size = backtrace(array, 20);
+void sgxsan_dump_bt_buf(void **array, size_t size) {
   log_always_np("== SGXSan Backtrace BEG ==\n");
   Dl_info info;
   for (size_t i = 0; i < size; i++) {
@@ -481,6 +500,15 @@ void sgxsan_backtrace(log_level ll) {
     }
   }
   log_always_np("== SGXSan Backtrace END ==\n");
+}
+
+void sgxsan_backtrace(log_level ll) {
+#if (DUMP_STACK_TRACE)
+  if (ll > USED_LOG_LEVEL)
+    return;
+  void *array[20];
+  size_t size = backtrace(array, 20);
+  sgxsan_dump_bt_buf(array, size);
 #endif
 }
 

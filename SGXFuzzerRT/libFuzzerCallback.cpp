@@ -112,6 +112,7 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
   va_end(ap);
 }
 
+extern "C" __attribute__((weak)) bool AddrIsInHeapQuarantine(uint64_t addr);
 // DataFactory Util
 class FuzzDataFactory {
 public:
@@ -285,6 +286,10 @@ public:
     // Don't delete provider here, since later sgx_destroy_enclave may use it
     for (auto memArea : allocatedMemAreas) {
       // log_debug("free %p\n", memArea);
+      if (AddrIsInHeapQuarantine && AddrIsInHeapQuarantine((uint64_t)memArea)) {
+        // It may be freed by ECall
+        continue;
+      }
       free(memArea);
     }
     allocatedMemAreas.clear();
@@ -569,7 +574,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
       continue;
     }
 
-    log_trace("[TEST] ECall-%d: %s\n", i, gFuzzECallNameArray[i]);
+    log_always("Try %s\n", gFuzzECallNameArray[i]);
     ret = gFuzzECallArray[i]();
     sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
                       ret != SGX_ERROR_ECALL_NOT_ALLOWED,

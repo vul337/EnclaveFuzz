@@ -530,35 +530,36 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
     return 0;
 }
 
-/// \param size should not be 0
-static inline void RANGE_CHECK(const void *beg, uptr size,
-                               InOutEnclaveStatus &regionInOutEnclaveStatus,
-                               uptr &PoisonedAddr, bool IsWrite) {
-  RegionInOutEnclaveStatusAndPoisonedAddr(
-      (uptr)beg, size, regionInOutEnclaveStatus, PoisonedAddr, kL1Filter);
-  if (regionInOutEnclaveStatus == InEnclave) {
-    MemAccessMgrInEnclaveAccess();
-    if (PoisonedAddr) {
-      GET_CALLER_PC_BP_SP;
-      ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);
-    }
-  } else if (regionInOutEnclaveStatus == OutEnclave) {
-    MemAccessMgrOutEnclaveAccess(beg, size, IsWrite);
-    if (PoisonedAddr) {
-      GET_CALLER_PC_BP_SP;
-      ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);
-    }
-  } else if (regionInOutEnclaveStatus == RangeMixedInOutEnclave) {
-    GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true,
-                       "RangeMixedInOutEnclave hint OOB");
-  } else {
-    GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, (uptr)beg, IsWrite, size, true,
-                       "regionInOutEnclaveStatus: %d",
-                       regionInOutEnclaveStatus);
-  }
-}
+/// \param size should not be 0, RANGE_CHECK must be a macro since
+/// GET_CALLER_PC_BP_SP shouldn't called in sub-function
+#define RANGE_CHECK(beg, size, regionInOutEnclaveStatus, PoisonedAddr,         \
+                    IsWrite)                                                   \
+  do {                                                                         \
+    RegionInOutEnclaveStatusAndPoisonedAddr(                                   \
+        (uptr)beg, size, regionInOutEnclaveStatus, PoisonedAddr, kL1Filter);   \
+    if (regionInOutEnclaveStatus == InEnclave) {                               \
+      MemAccessMgrInEnclaveAccess();                                           \
+      if (PoisonedAddr) {                                                      \
+        GET_CALLER_PC_BP_SP;                                                   \
+        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
+      }                                                                        \
+    } else if (regionInOutEnclaveStatus == OutEnclave) {                       \
+      MemAccessMgrOutEnclaveAccess(beg, size, IsWrite);                        \
+      if (PoisonedAddr) {                                                      \
+        GET_CALLER_PC_BP_SP;                                                   \
+        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
+      }                                                                        \
+    } else if (regionInOutEnclaveStatus == RangeMixedInOutEnclave) {           \
+      GET_CALLER_PC_BP_SP;                                                     \
+      ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true,        \
+                         "RangeMixedInOutEnclave hint OOB");                   \
+    } else {                                                                   \
+      GET_CALLER_PC_BP_SP;                                                     \
+      ReportGenericError(pc, bp, sp, (uptr)beg, IsWrite, size, true,           \
+                         "regionInOutEnclaveStatus: %d",                       \
+                         regionInOutEnclaveStatus);                            \
+    }                                                                          \
+  } while (0);
 
 /// \param srcSize can't be 0
 #define LEAK_CHECK_MT(srcInOutEnclave, dstInOutEnclave, srcAddr, srcSize)      \
