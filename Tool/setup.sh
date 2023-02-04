@@ -2,8 +2,9 @@
 
 # set -ex
 
-if [ $# -ne 2 ]; then
+if [ $# -ne 4 ]; then
      echo "Illegal number of parameters"
+     exit 0
 fi
 if [[ " $*" == *" -h"* ]]; then
     echo "$(basename "$0") <fuzzbin> <enclave.so> Name ID"
@@ -33,8 +34,8 @@ mkdir -p $CRASHES
 mkdir -p $PROFILE
 
 
-echo "Use fuzzing binary: $FUZZERNAME, enclave binary: $ENCLAVENAME, "
-echo "Fuzzing binary: $FUZZERBIN, enclave binary: $ENCLAVEBIN, "
+echo "Use fuzzing binary: $FUZZERNAME, enclave binary: $ENCLAVENAME"
+echo "Fuzzing binary: $FUZZERBIN, enclave binary: $ENCLAVEBIN"
 echo "Evaluation directory: $EVALTOP"
 
 
