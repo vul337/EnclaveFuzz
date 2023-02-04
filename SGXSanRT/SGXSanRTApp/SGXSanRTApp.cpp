@@ -1,5 +1,6 @@
 #include "SGXSanRTApp.h"
 #include "ArgShadow.h"
+#include "Interceptor.h"
 #include "Malloc.h"
 #include "MemAccessMgr.h"
 #include "Sticker.h"
@@ -294,6 +295,7 @@ __attribute__((constructor)) void SGXSanInit() {
     return;
   }
   updateBackEndHeapAllocator();
+  InitInterceptor();
   // make sure c++ stream is initialized
   std::ios_base::Init _init;
   sgxsan_init_shadow_memory();
@@ -340,6 +342,7 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
 void SGXSanLogEnter(const char *str) { log_always("Enter %s\n", str); }
 
 static void PrintShadowMap(log_level ll, uptr addr) {
+  InitInterceptor();
   uptr addr_mask = (~(((uptr)1 << ADDR_SPACE_BITS) - 1));
   sgxsan_assert((addr & addr_mask) == 0);
   uptr shadowAddr = MEM_TO_SHADOW(addr);
@@ -354,10 +357,11 @@ static void PrintShadowMap(log_level ll, uptr addr) {
                     ? shadowAddrRow + 0x50
                     : (kHighShadowEnd + 1);
   char buf[BUFSIZ];
-  snprintf(buf, BUFSIZ, "Shadow bytes around the buggy address:\n");
+  REAL(snprintf)(buf, BUFSIZ, "Shadow bytes around the buggy address:\n");
   std::string str(buf);
   for (uptr i = startRow; i < endRow; i += 0x10) {
-    snprintf(buf, BUFSIZ, "%s%p:", i == shadowAddrRow ? "=>" : "  ", (void *)i);
+    REAL(snprintf)
+    (buf, BUFSIZ, "%s%p:", i == shadowAddrRow ? "=>" : "  ", (void *)i);
     str += buf;
     for (int j = 0; j < 16; j++) {
       std::string prefix = " ", appendix = "";
@@ -370,8 +374,9 @@ static void PrintShadowMap(log_level ll, uptr addr) {
         } else if (j == shadowAddrCol + 1)
           prefix = "]";
       }
-      snprintf(buf, BUFSIZ, "%s%02x%s", prefix.c_str(), *(uint8_t *)(i + j),
-               appendix.c_str());
+      REAL(snprintf)
+      (buf, BUFSIZ, "%s%02x%s", prefix.c_str(), *(uint8_t *)(i + j),
+       appendix.c_str());
       str += buf;
     }
     str += " \n";

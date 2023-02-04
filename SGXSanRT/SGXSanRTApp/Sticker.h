@@ -3,6 +3,8 @@
 
 enum ECallCheckType { CHECK_ECALL_PRIVATE, CHECK_ECALL_ALLOWED };
 
+extern bool __thread RunInEnclave;
+
 #if defined(__cplusplus)
 extern "C" {
 #endif

@@ -22,6 +22,7 @@ add_library(
     MemAccessMgr.cpp
     Sticker.cpp
     HostASanRT.cpp
+    Interceptor.cpp
     ${LINUX_SGX_MINI}/sdk/tlibc/gen/spinlock.c 
     ${LINUX_SGX_MINI}/sdk/tlibc/string/consttime_memequal.c 
     ${LINUX_SGX_MINI}/sdk/tlibthread/sethread_cond.cpp
