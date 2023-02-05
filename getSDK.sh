@@ -31,7 +31,7 @@ MKDIR=mkdir
 CC=clang-13
 CXX=clang++-13
 Jobs=$(nproc)
-ADD_LLVM_FLAGS="-Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -fno-discard-value-names -flegacy-pass-manager -Xclang -load -Xclang ${PREFIX}/lib64/libSGXSanPass.so"
+ADD_LLVM_FLAGS="-Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-deprecated-declarations -fno-discard-value-names -flegacy-pass-manager -Xclang -load -Xclang ${PREFIX}/lib64/libSGXSanPass.so"
 ADD_MAKE_FLAGS=
 if [[ "${MODE}" = "DEBUG" ]]
 then
@@ -72,7 +72,7 @@ fi
 echo "== Get libsgx_trts_sim.a =="
 cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/trtssim
 ${MAKE} clean -s
-${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}" ${ADD_MAKE_FLAGS}
 ${CP} linux/libsgx_trts_sim.a ${PREFIX}/lib64
 ${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr \
     --redefine-sym atexit=_deleted_atexit \
@@ -88,20 +88,32 @@ ${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr \
 # get libsgx_tservice_sim.a
 cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/tservice_sim
 ${MAKE} clean -s
-${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}" ${ADD_MAKE_FLAGS}
 ${CP} libsgx_tservice_sim.a ${PREFIX}/lib64
 
 # get libsgx_tsafecrt.a
 cd ${LINUX_SGX_SRC_DIR}/sdk/tsafecrt
 ${MAKE} clean -s
-${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}" ${ADD_MAKE_FLAGS}
 ${CP} libsgx_tsafecrt.a ${PREFIX}/lib64
 
 #get libsgx_tcrypto.a
 cd ${LINUX_SGX_SRC_DIR}/sdk/tlibcrypto
 ${MAKE} clean -s
-${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}"
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}" ${ADD_MAKE_FLAGS}
 ${CP} libsgx_tcrypto.a ${PREFIX}/lib64
+
+#get libsgx_tprotected_fs.a
+cd ${LINUX_SGX_SRC_DIR}/sdk/protected_fs/sgx_tprotected_fs
+${MAKE} clean -s
+${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}" ${ADD_MAKE_FLAGS}
+${CP} libsgx_tprotected_fs.a ${PREFIX}/lib64
+
+#get libsgx_uprotected_fs.a
+cd ${LINUX_SGX_SRC_DIR}/sdk/protected_fs/sgx_uprotected_fs
+${MAKE} clean -s
+${MAKE} -j${Jobs} ${ADD_MAKE_FLAGS}
+${CP} libsgx_uprotected_fs.a ${PREFIX}/lib64
 
 #get libsgx_urts_sim.so
 cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/urtssim/
