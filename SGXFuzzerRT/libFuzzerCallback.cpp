@@ -48,7 +48,7 @@ std::string ClEnclaveFileName;
 size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize;
 int ClUsedLogLevel;
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
-    ClModifyDoubleFetchValueProb;
+    ClModifyDoubleFetchValueProb, ClZoomRate;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER };
@@ -207,8 +207,9 @@ public:
     case FUZZ_SIZE:
     case FUZZ_COUNT: {
       sgxfuzz_assert((bytesNum <= sizeof(size_t)));
-      size_t data = getIntergerInRange<size_t>(
-          0, dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount);
+      size_t MaxVal = dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
+      size_t data = getIntergerInRange<size_t>(1, MaxVal);
+      data = zoom(data, MaxVal, ClZoomRate, 1.0);
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
       memcpy(dst, &data, bytesNum);
@@ -220,10 +221,15 @@ public:
     return dst;
   }
 
+  // (c,c) -> (a,a)
+  double zoom(double x, double a, double b, double c = 0) {
+    return a - std::pow(std::pow(a - c, b) - std::pow(x - c, b), 1.0 / b);
+  }
+
   size_t getUserCheckCount(size_t eleSize) {
     sgxfuzz_assert(eleSize);
-    size_t res = getIntergerInRange<size_t>(0, ClMaxCount);
-    res = res % (std::max(ClMaxSize / eleSize, (size_t)1) + 1);
+    size_t res = getIntergerInRange<size_t>(1, ClMaxCount);
+    res = zoom(res, ClMaxCount, ClZoomRate, 1.0);
     return res;
   }
 
@@ -394,12 +400,11 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
           po::value<std::string>(&ClEnclaveFileName)
               ->default_value("enclave.signed.so"),
           "Name of target Enclave file");
-  add_opt("cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(65536),
+  add_opt("cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(32),
           "Max count of elements for pointer");
-  add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(65536),
+  add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(512),
           "Max size of pointer element");
-  add_opt("cb_max_strlen",
-          po::value<size_t>(&ClMaxStrlen)->default_value(65536),
+  add_opt("cb_max_strlen", po::value<size_t>(&ClMaxStrlen)->default_value(128),
           "Max length of string (no tail 0)");
   add_opt("cb_filter_out", po::value<std::string>(), "Don't test these ECalls");
   add_opt("sgxfuzz_test_user", po::value<std::string>(), "Test these ECalls");
@@ -427,6 +432,9 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_modify_double_fetch_value_prob",
           po::value<double>(&ClModifyDoubleFetchValueProb)->default_value(0.5),
           "Probability to modify value when detect double fetch");
+  add_opt("cb_zoom_rate", po::value<double>(&ClZoomRate)->default_value(1),
+          "Give more or less probability to small count than big count, "
+          "rate > 1 => zoom out, 0 < rate < 1 => zoom in");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -530,6 +538,7 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
   sgxfuzz_assert(ClUsedLogLevel <= 4);
   sgxfuzz_assert(ClMaxCallSeqSize >= 1);
+  sgxfuzz_assert(ClZoomRate > 0 and ClZoomRate < 50);
   return 0;
 }
 
@@ -610,14 +619,14 @@ void *DFManagedCalloc(size_t count, size_t size) {
 }
 
 uint64_t DFGetPtToCntECall(uint64_t size, uint64_t count, uint64_t eleSize) {
-  sgxfuzz_assert(eleSize);
+  sgxfuzz_assert(size and count and eleSize);
   // Maybe size * count != n * eleSize, due to problem of Enclave developer
   uint64_t ptCnt = (size * count + eleSize - 1) / eleSize;
   return ptCnt;
 }
 
 uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count, uint64_t eleSize) {
-  sgxfuzz_assert(eleSize);
+  sgxfuzz_assert(size and count and eleSize);
   // Maybe size * count != n * eleSize, due to problem of Enclave developer
   uint64_t ptCnt = (size * count) / eleSize;
   return ptCnt;

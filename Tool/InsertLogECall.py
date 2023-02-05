@@ -11,6 +11,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--edl-json', metavar="<xxx.edl.json>")
     parser.add_argument('src_dir', metavar="<source directory>")
+    parser.add_argument('--kind', default="Fuzzer2.0")
     args = parser.parse_args()
 
     ecalls = []
@@ -28,15 +29,13 @@ def main():
 
     ecall_insert_times = {}
     for file in tqdm.tqdm(files):
-        with open(file, 'r+b') as f:
-            f.seek(0, os.SEEK_SET)
-            content_raw = f.read()
-            encoding = chardet.detect(content_raw)
-            content = content_raw.decode(encoding["encoding"])
+        with open(file, 'r+', errors="backslashreplace") as f:
+            content = f.read()
             modified = False
             for ecall in ecalls:
+                LogEnterFuncName = "SGXSanLogEnter" if args.kind == "Fuzzer2.0" else "LogEnter"
                 content, n = re.subn(
-                    r"(\b" + ecall+r"\b[^(){}]*?\([^(){}]*?\)[^(){}]*?\{(?!\n    LogEnter))", r"\1\n    LogEnter(__func__);", content, flags=re.DOTALL)
+                    r"(\b" + ecall+r"\s*?\([^(){}]*?\)[^(){}]*?\{(?!\n    "+LogEnterFuncName+r"))", r"\1\n    "+LogEnterFuncName+r"(__func__);", content, flags=re.DOTALL)
                 if n > 0:
                     modified = True
                     if ecall not in ecall_insert_times:
@@ -44,9 +43,16 @@ def main():
                     ecall_insert_times[ecall] += n
             if modified:
                 f.seek(0, os.SEEK_SET)
-                content = "#include \"kafl_hc.h\"\n"+content
-                content_raw = content.encode(encoding["encoding"])
-                f.write(content_raw)
+                head = \
+                    "#if defined(__cplusplus)\n" \
+                    "extern \"C\"{\n" \
+                    "#endif\n" \
+                    "void SGXSanLogEnter(const char *str);\n" \
+                    "#if defined(__cplusplus)\n" \
+                    "}\n" \
+                    "#endif\n" if args.kind == "Fuzzer2.0" else "#include \"kafl_hc.h\"\n"
+                content = head + content
+                f.write(content)
 
     print(json.dumps(ecall_insert_times, indent=4))
 

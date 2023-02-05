@@ -237,6 +237,21 @@ public:
     m_max_size = 0;
   }
 
+  QuarantineElement find(uptr addr) {
+    pthread_mutex_lock(&m_mutex);
+    auto it = std::find_if(
+        m_queue->begin(), m_queue->end(), [addr](QuarantineElement qe) {
+          return qe.user_beg <= addr and addr < qe.user_beg + qe.user_size;
+        });
+    QuarantineElement ret;
+    ret.alloc_beg = -1;
+    if (it != m_queue->end()) {
+      ret = *it;
+    }
+    pthread_mutex_unlock(&m_mutex);
+    return ret;
+  }
+
   void put(QuarantineElement qe) {
     pthread_mutex_lock(&m_mutex);
     if (m_queue == nullptr) {

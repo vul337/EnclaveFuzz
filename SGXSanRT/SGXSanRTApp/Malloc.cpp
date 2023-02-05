@@ -184,7 +184,7 @@ void FREE(void *ptr) {
 
   if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
     GET_CALLER_PC_BP_SP;
-    ReportDoubleFree(pc, bp, sp, user_beg, gHeapBT->GetHeapBacktrace(user_beg));
+    ReportDoubleFree(pc, bp, sp, user_beg);
   }
   sgxsan_assert(IsAligned(user_beg, alignment));
 
@@ -223,10 +223,10 @@ void *CALLOC(size_t n_elements, size_t elem_size) {
   }
 
   size_t req = n_elements * elem_size;
-  if (req == 0) {
-    sgxsan_warning(true, "Calloc 0 size\n");
-    return nullptr;
-  }
+  // if (req == 0) {
+  //   sgxsan_warning(true, "Calloc 0 size\n");
+  //   return nullptr;
+  // }
   sgxsan_assert(req / n_elements == elem_size);
   void *mem = MALLOC(req);
   if (mem != nullptr) {
@@ -282,8 +282,7 @@ void ClearHeapObject() {
 
     if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
       GET_CALLER_PC_BP_SP;
-      ReportDoubleFree(pc, bp, sp, user_beg,
-                       gHeapBT->GetHeapBacktrace(user_beg));
+      ReportDoubleFree(pc, bp, sp, user_beg);
     }
     sgxsan_assert(IsAligned(user_beg, alignment));
 

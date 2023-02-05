@@ -1,0 +1,15 @@
+633384 exec in 24H*Core
+
+8634032 ECalls
+
+99.93 ecall exec/s
+
+3022436 Enter ecall_execute_sql
+3894662 Enter ecall_opendb
+1716934 Enter ecall_closedb
+
+3022436 Try fuzz_ecall_execute_sql
+3894662 Try fuzz_ecall_opendb
+1716934 Try fuzz_ecall_closedb
+
+cov 6.07%

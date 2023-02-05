@@ -26,33 +26,36 @@ def check_aslr():
 
 
 def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
+    if do_simple and "ERROR: Host" in error_tag:
+        error_tag = "Don't care host error"
+        bt_str = ""
+        pc_value = ""
     dict = crash_report_simple if do_simple else crash_report
     bt_hash = hashlib.sha256(bt_str.encode()).hexdigest() if bt_str else ""
-    filter1 = bt_hash
-    filter2 = error_tag
+
+    filter1 = pc_value
+    filter2 = bt_hash
+    filter3 = error_tag
+
     if filter1 not in dict:
         dict[filter1] = {}
     if filter2 not in dict[filter1]:
         dict[filter1][filter2] = {}
+    if filter3 not in dict[filter1][filter2]:
+        dict[filter1][filter2][filter3] = {}
 
-    if "num_crashes" not in dict[filter1][filter2]:
-        dict[filter1][filter2]["num_crashes"] = 0
-    dict[filter1][filter2]["num_crashes"] += 1
+    if "num_crashes" not in dict[filter1][filter2][filter3]:
+        dict[filter1][filter2][filter3]["num_crashes"] = 0
+    dict[filter1][filter2][filter3]["num_crashes"] += 1
 
-    if "inputs" not in dict[filter1][filter2]:
-        dict[filter1][filter2]["inputs"] = []
+    if "inputs" not in dict[filter1][filter2][filter3]:
+        dict[filter1][filter2][filter3]["inputs"] = []
     if not do_simple:
-        dict[filter1][filter2]["inputs"].append(
+        dict[filter1][filter2][filter3]["inputs"].append(
             os.path.basename(crash_file))
-    elif not filter1 or not filter2 or not dict[filter1][filter2]["inputs"]:
-        dict[filter1][filter2]["inputs"].append(
+    elif not filter1 or not filter2 or not filter3 or not dict[filter1][filter2][filter3]["inputs"]:
+        dict[filter1][filter2][filter3]["inputs"].append(
             os.path.basename(crash_file))
-
-    if "pcs" not in dict[filter1][filter2]:
-        dict[filter1][filter2]["pcs"] = {}
-    if pc_value not in dict[filter1][filter2]["pcs"]:
-        dict[filter1][filter2]["pcs"][pc_value] = 0
-    dict[filter1][filter2]["pcs"][pc_value] += 1
 
     if "hash2bt" not in dict:
         dict["hash2bt"] = {}
@@ -60,7 +63,7 @@ def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
         dict["hash2bt"][bt_hash] = bt_str.split("\n")
 
 
-def get_crash_info(binary, crash_file, extra_opt: list, test_dir):
+def get_crash_info(binary, crash_file, extra_opt: list, test_dir, timeout):
     cmd: str = binary+" "+crash_file
     if(extra_opt):
         cmd = cmd+" " + " ".join(extra_opt)
@@ -70,9 +73,9 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir):
     # Run crash
     try:
         logs = subprocess.run(
-            cmd_list, capture_output=True, timeout=60, cwd=test_dir)
+            cmd_list, capture_output=True, timeout=timeout, cwd=test_dir)
     except subprocess.TimeoutExpired:
-        print(f"Timeout input {crash_file}!")
+        print(f"\nTimeout input {crash_file}!")
         return
     stderr = logs.stderr.decode("utf-8")
 
@@ -89,9 +92,11 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir):
     bt_str = "======================== BREAK LINE ========================\n".join(
         bt_list)
 
-    pc_regex = re.compile(
-        r"==\d+==ERROR:.*?\bpc\s+(0x[A-Fa-f0-9]*?)", re.DOTALL)
-    pc_value = re.search(pc_regex, stderr)
+    pc_regex = re.compile(r"ERROR:.*?\bpc\s+(0x[A-Fa-f0-9]*)", re.DOTALL)
+    res = re.search(pc_regex, stderr)
+    pc_value = "Unknown"
+    if res:
+        pc_value = res[1]
 
     if "NOTE: fuzzing was not performed, you have only" in stderr:
         error_tag = ""
@@ -101,7 +106,7 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir):
     update2dict(bt_str, error_tag, pc_value, crash_file, True)
 
 
-def filter_crashes(binary, crashes_dir, extra_opt, test_dir):
+def filter_crashes(binary, crashes_dir, extra_opt, test_dir, timeout):
     if (not os.path.isfile(binary)):
         print(f"Fuzzer binary {binary} not found!")
         return
@@ -117,7 +122,7 @@ def filter_crashes(binary, crashes_dir, extra_opt, test_dir):
             continue
         crash_file = os.path.join(crashes_dir, f)
         # print(crash_file)
-        get_crash_info(binary, crash_file, extra_opt, test_dir)
+        get_crash_info(binary, crash_file, extra_opt, test_dir, timeout)
 
 
 def main():
@@ -133,6 +138,7 @@ def main():
         "--test-dir", default=".", help="Test directory", metavar="<e.g. ./SGX_APP/sgx-wallet>")
     parser.add_argument(
         "--extra-opt", help="Suffix command options", nargs="+")
+    parser.add_argument("--timeout", default=60)
     args = parser.parse_args()
 
     check_aslr()
@@ -141,6 +147,7 @@ def main():
                    os.path.abspath(args.crashes),
                    args.extra_opt,
                    os.path.abspath(args.test_dir),
+                   int(args.timeout)
                    )
 
     binary_name = os.path.basename(args.binary)

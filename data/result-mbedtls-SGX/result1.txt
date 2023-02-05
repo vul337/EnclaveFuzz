@@ -1,0 +1,21 @@
+150933 in 24H*Core
+
+1874600 ECalls
+
+21.69 ecall exec/s
+
+205586 Enter ssl_conn_teardown
+376180 Enter sgx_connect
+350016 Enter sgx_accept
+416840 Enter ssl_conn_init
+313579 Enter dummy
+212399 Enter ssl_conn_handle
+
+205586 Try fuzz_ssl_conn_teardown
+376180 Try fuzz_sgx_connect
+350016 Try fuzz_sgx_accept
+416840 Try fuzz_ssl_conn_init
+313579 Try fuzz_dummy
+212399 Try fuzz_ssl_conn_handle
+
+cov 30.94%

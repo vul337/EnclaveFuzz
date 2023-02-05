@@ -76,7 +76,10 @@ ASAN_REPORT_ERROR_N(store, true)
                      (int8_t)((addr & (SHADOW_GRANULARITY - 1)) + size - 1) >= \
                          (int8_t)shadowByte)) {                                \
           GET_CALLER_PC_BP_SP;                                                 \
-          ReportGenericError(pc, bp, sp, addr, is_write, size, true);          \
+          ReportGenericError(pc, bp, sp, addr, is_write, size, true,           \
+                             IsInEnclave == inEnclaveFlag                      \
+                                 ? "Enclave out of bound"                      \
+                                 : "Host out of bound");                       \
         }                                                                      \
       }                                                                        \
     }                                                                          \
@@ -104,14 +107,16 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
       MemAccessMgrInEnclaveAccess();                                           \
       if (addrPoisonStatus != NotPoisoned) {                                   \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, addr, is_write, size, true);            \
+        ReportGenericError(pc, bp, sp, addr, is_write, size, true,             \
+                           "Enclave out of bound");                            \
       }                                                                        \
     } else if (addrInOutEnclaveStatus == OutEnclave) {                         \
       MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp,        \
                                    funcName);                                  \
       if (addrPoisonStatus != NotPoisoned) {                                   \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, addr, is_write, size, true);            \
+        ReportGenericError(pc, bp, sp, addr, is_write, size, true,             \
+                           "Host out of bound");                               \
       }                                                                        \
     } else if (addrInOutEnclaveStatus == RangeMixedInOutEnclave) {             \
       GET_CALLER_PC_BP_SP;                                                     \

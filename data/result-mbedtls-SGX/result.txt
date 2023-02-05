@@ -1,0 +1,14 @@
+115126 in 24H*Core
+
+1392944 ECalls
+
+16.12 ecall exec/s
+
+286197 Try fuzz_sgx_connect
+316579 Try fuzz_ssl_conn_init
+300764 Try fuzz_sgx_accept
+210553 Try fuzz_dummy
+119856 Try fuzz_ssl_conn_teardown
+158995 Try fuzz_ssl_conn_handle
+
+cov 26.80%

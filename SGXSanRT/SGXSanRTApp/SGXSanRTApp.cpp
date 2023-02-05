@@ -405,11 +405,15 @@ static void PrintShadowMap(log_level ll, uptr addr) {
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal, const char *msg, ...) {
+  if (L1F(*(uint8_t *)MEM_TO_SHADOW(addr)) == kAsanHeapFreeMagic) {
+    ReportUseAfterFree(pc, bp, sp, addr);
+    return;
+  }
   log_level ll;
   if (fatal) {
     ll = LOG_LEVEL_ERROR;
-    log_error_np(RED "\n================ Error Report ================\n"
-                     "[SGXSan] ERROR: ");
+    log_error_np("\n================ Error Report ================\n"
+                 "[SGXSan] ERROR: ");
   } else {
     ll = LOG_LEVEL_WARNING;
     log_warning_np("\n================ Warning Report ================\n"
@@ -425,31 +429,56 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
 
   sgxsan_log(ll, false,
              " at pc 0x%lx %s 0x%lx with 0x%lx bytes (bp = 0x%lx sp = "
-             "0x%lx)\n\n" RESET,
+             "0x%lx)\n\n",
              pc, (is_write ? "write" : "read"), addr, access_size, bp, sp);
   sgxsan_backtrace(ll);
   PrintShadowMap(ll, addr);
-  sgxsan_log(ll, false,
-             RED "================= Report End =================\n" RESET);
+  sgxsan_log(ll, false, "================= Report End =================\n");
   if (fatal)
     Die();
   return;
 }
 
-void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr, MallocFreeBTTy bt) {
+void ReportUseAfterFree(uptr pc, uptr bp, uptr sp, uptr addr) {
+  auto qe = gQCache->find(addr);
+  sgxsan_assert(qe.alloc_beg != -1);
+  MallocFreeBTTy bt = gHeapBT->GetHeapBacktrace(qe.user_beg);
   log_level ll = LOG_LEVEL_ERROR;
-  log_error_np(RED "\n================ Error Report ================\n"
-                   "[SGXSan] ERROR: Double Free 0x%lx at pc 0x%lx (bp = 0x%lx "
-                   "sp = 0x%lx)\n\n" RESET,
-               addr, pc, bp, sp);
+  log_error_np(
+      "\n================ Error Report ================\n"
+      "[SGXSan] ERROR: %s Use after free 0x%lx at pc 0x%lx bp 0x%lx "
+      "sp 0x%lx\n\n",
+      (sgx_is_within_enclave((const void *)addr, 1) ? "Enclave" : "Host"), addr,
+      pc, bp, sp);
   sgxsan_backtrace(ll);
-  log_error_np(GREEN "\nPreviously malloc at:\n\n" RESET);
+  log_error_np("\nPreviously malloc at:\n\n");
   sgxsan_dump_bt_buf((void **)bt.malloc_bt /* int array -> pointer array */,
                      bt.malloc_bt_cnt);
-  log_error_np(GREEN "\nPreviously free at:\n\n" RESET);
+  log_error_np("\nPreviously free at:\n\n");
   sgxsan_dump_bt_buf((void **)bt.free_bt, bt.free_bt_cnt);
   PrintShadowMap(ll, addr);
-  log_error_np(RED "================= Report End =================\n" RESET);
+  log_error_np("================= Report End =================\n");
+  Die();
+  return;
+}
+
+void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr) {
+  MallocFreeBTTy bt = gHeapBT->GetHeapBacktrace(addr);
+  log_level ll = LOG_LEVEL_ERROR;
+  log_error_np(
+      "\n================ Error Report ================\n"
+      "[SGXSan] ERROR: %s Double Free 0x%lx at pc 0x%lx bp 0x%lx "
+      "sp 0x%lx\n\n",
+      (sgx_is_within_enclave((const void *)addr, 1) ? "Enclave" : "Host"), addr,
+      pc, bp, sp);
+  sgxsan_backtrace(ll);
+  log_error_np("\nPreviously malloc at:\n\n");
+  sgxsan_dump_bt_buf((void **)bt.malloc_bt /* int array -> pointer array */,
+                     bt.malloc_bt_cnt);
+  log_error_np("\nPreviously free at:\n\n");
+  sgxsan_dump_bt_buf((void **)bt.free_bt, bt.free_bt_cnt);
+  PrintShadowMap(ll, addr);
+  log_error_np("================= Report End =================\n");
   Die();
   return;
 }

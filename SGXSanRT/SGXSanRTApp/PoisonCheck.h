@@ -112,13 +112,15 @@ int sgx_is_outside_enclave(const void *addr, size_t size);
       MemAccessMgrInEnclaveAccess();                                           \
       if (PoisonedAddr) {                                                      \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
+        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true,      \
+                           "Enclave out of bound");                            \
       }                                                                        \
     } else if (regionInOutEnclaveStatus == OutEnclave) {                       \
       MemAccessMgrOutEnclaveAccess(beg, size, IsWrite);                        \
       if (PoisonedAddr) {                                                      \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true);     \
+        ReportGenericError(pc, bp, sp, PoisonedAddr, IsWrite, size, true,      \
+                           "Host out of bound");                               \
       }                                                                        \
     } else if (regionInOutEnclaveStatus == RangeMixedInOutEnclave) {           \
       GET_CALLER_PC_BP_SP;                                                     \

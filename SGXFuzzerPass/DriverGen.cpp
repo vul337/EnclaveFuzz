@@ -121,10 +121,15 @@ void DriverGenerator::initialize(Module &M) {
 
 // propagate [in]/[out]/[user_check] to it's element
 void DriverGenerator::inheritDirectionAttr(json::json_pointer jsonPtr,
-                                           size_t field_index) {
+                                           size_t field_index, Type *eleTy) {
   json &Json = edlJson[jsonPtr];
   json &FieldJson = Json["field"][std::to_string(field_index)];
-
+  if (eleTy->isPointerTy() and FieldJson["count"].is_null() and
+      FieldJson["size"].is_null()) {
+    // Shallow copy
+    FieldJson["user_check"] = true;
+    return;
+  }
   if (Json["user_check"] == true) {
     FieldJson["user_check"] = true;
     // It's user_check, then can't be in, out, or OCallRet
@@ -134,9 +139,6 @@ void DriverGenerator::inheritDirectionAttr(json::json_pointer jsonPtr,
     }
     if (Json["out"] == true) {
       FieldJson["out"] = true;
-    }
-    if (Json["isOCallRet"] == true) {
-      FieldJson["isOCallRet"] = true;
     }
   }
 }
@@ -162,6 +164,10 @@ bool DriverGenerator::IsECall(json::json_pointer jsonPtr) {
 }
 
 bool DriverGenerator::EnableFuzzInput(json::json_pointer jsonPtr) {
+  static std::unordered_map<std::string, bool> map;
+  if (map.count(jsonPtr.to_string())) {
+    return map[jsonPtr.to_string()];
+  }
   bool isEcall = IsECall(jsonPtr);
   bool feedRandom = isEcall;
   json &Json = edlJson[jsonPtr];
@@ -178,6 +184,7 @@ bool DriverGenerator::EnableFuzzInput(json::json_pointer jsonPtr) {
       feedRandom = true;
     // Only in / Default => false
   }
+  map[jsonPtr.to_string()] = feedRandom;
   return feedRandom;
 }
 
@@ -217,9 +224,9 @@ Value *DriverGenerator::createParamContent(
 
   // process type case by case, and store content into type pointer
   if (auto pointerTy = dyn_cast<PointerType>(type)) {
-    inheritDirectionAttr(jsonPtr, 0);
     // get element size and type
     auto eleTy = pointerTy->getElementType();
+    inheritDirectionAttr(jsonPtr, 0, eleTy);
     if (isa<StructType>(eleTy) and cast<StructType>(eleTy)->isOpaque()) {
       // Opaque element type's pointer must be user_check
       auto OpaqueStructTy = cast<StructType>(eleTy);
@@ -362,7 +369,7 @@ Value *DriverGenerator::createParamContent(
       SmallVector<Type *> StructElementTypes{structTy->elements().begin(),
                                              structTy->elements().end()};
       for (size_t index = 0; index < structTy->getNumElements(); index++) {
-        inheritDirectionAttr(jsonPtr, index);
+        inheritDirectionAttr(jsonPtr, index, structTy->getElementType(index));
         IRB.SetInsertPoint(insertPt);
         createParamContent(
             StructElementTypes, jsonPtr / "field" / index,
@@ -374,8 +381,8 @@ Value *DriverGenerator::createParamContent(
       fillAtOnce(typePtr, jsonPtr, jsonPtrAsID, insertPt);
     }
   } else if (auto arrTy = dyn_cast<ArrayType>(type)) {
-    inheritDirectionAttr(jsonPtr, 0);
     auto eleTy = arrTy->getElementType();
+    inheritDirectionAttr(jsonPtr, 0, eleTy);
     auto eleCnt = IRB.getInt64(arrTy->getNumElements());
     if (!ClEnableFillAtOnce or hasPointerElement(arrTy)) {
       // fall back
@@ -400,6 +407,18 @@ Value *DriverGenerator::createParamContent(
   return typePtr;
 }
 
+bool DriverGenerator::IsOCallReturn(json::json_pointer jsonPtr) {
+  if (not IsECall(jsonPtr)) {
+    while (not jsonPtr.empty()) {
+      if (jsonPtr.back() == "return") {
+        return true;
+      }
+      jsonPtr = jsonPtr.parent_pointer();
+    }
+  }
+  return false;
+}
+
 void DriverGenerator::fillAtOnce(Value *dstPtr, json::json_pointer jsonPtr,
                                  Value *jsonPtrAsID, Instruction *insertPt,
                                  Type *type, Value *arrCnt, bool isOcall) {
@@ -413,10 +432,10 @@ void DriverGenerator::fillAtOnce(Value *dstPtr, json::json_pointer jsonPtr,
   FuzzDataTy byteType = edlJson[jsonPtr / "isEdlSizeAttr"] == true ? FUZZ_SIZE
                         : edlJson[jsonPtr / "isEdlCountAttr"] == true
                             ? FUZZ_COUNT
-                        : edlJson[jsonPtr / "isOCallRet"] == true ? FUZZ_RET
-                        : (isa<ArrayType>(type) or arrCnt)        ? FUZZ_ARRAY
-                        : isa<StructType>(type)                   ? FUZZ_DATA
-                                                                  : FUZZ_DATA;
+                        : IsOCallReturn(jsonPtr)           ? FUZZ_RET
+                        : (isa<ArrayType>(type) or arrCnt) ? FUZZ_ARRAY
+                        : isa<StructType>(type)            ? FUZZ_DATA
+                                                           : FUZZ_DATA;
   if (arrCnt) {
     tySize = IRB.CreateMul(tySize, arrCnt);
   }
@@ -511,7 +530,7 @@ Function *DriverGenerator::createEcallFuzzWrapperFunc(std::string ecallName) {
   if (returnParamPtrArg) {
     json::json_pointer jsonPtr =
         json::json_pointer("/trusted") / ecallName / "return";
-    edlJson[jsonPtr / "out"] = true;
+    edlJson[jsonPtr / "user_check"] = true;
     auto returnParamPtr = createParamContent({returnParamPtrArg->getType()},
                                              jsonPtr, nullptr, retVoidI);
     IRB.SetInsertPoint(retVoidI);
@@ -547,7 +566,8 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
       // Enclave
       if (edlJson[jsonPtr / "out"] == true) {
         // dump(edlJson, jsonPtr);
-        inheritDirectionAttr(jsonPtr, 0);
+        auto eleTy = pointerTy->getElementType();
+        inheritDirectionAttr(jsonPtr, 0, eleTy);
         IRBuilder<> IRB(insertPt);
 
         auto jsonPtrAsID = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
@@ -562,7 +582,6 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
         insertPt = ptrCanSet;
         IRB.SetInsertPoint(insertPt);
 
-        auto eleTy = pointerTy->getElementType();
         if (isa<StructType>(eleTy) and cast<StructType>(eleTy)->isOpaque()) {
           auto OpaqueStructTy = cast<StructType>(eleTy);
           // Recover from json record
@@ -686,8 +705,7 @@ void DriverGenerator::createOcallFunc(std::string realOCallName) {
     retI = retVoidI;
   } else {
     auto jsonPtr = json::json_pointer("/untrusted") / realOCallName / "return";
-    edlJson[jsonPtr / "out"] = true;
-    edlJson[jsonPtr / "isOCallRet"] = true;
+    edlJson[jsonPtr / "user_check"] = true;
     IRB.SetInsertPoint(retVoidI);
     auto JsonPtrStr = IRB.CreateGlobalStringPtr(jsonPtr.to_string());
     auto EnableModifyOCallRet =

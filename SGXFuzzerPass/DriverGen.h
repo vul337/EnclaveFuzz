@@ -10,7 +10,8 @@ public:
   void initialize(Module &M);
   // propagate [in]/[out]/[user_check] to it's element
   void inheritDirectionAttr(nlohmann::json::json_pointer jsonPtr,
-                            size_t field_index);
+                            size_t field_index, Type *eleTy);
+  bool IsOCallReturn(nlohmann::json::json_pointer jsonPtr);
   std::string RootToken(nlohmann::json::json_pointer jsonPtr);
   bool IsECall(nlohmann::json::json_pointer jsonPtr);
   bool EnableFuzzInput(nlohmann::json::json_pointer jsonPtr);
