@@ -71,3 +71,9 @@ extern "C" bool check_ecall(ECallCheckType ty, uint32_t targetECallIdx,
   }
   }
 }
+
+extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
+extern "C" void TSticker__llvm_profile_write_file() {
+  if (__llvm_profile_write_file)
+    __llvm_profile_write_file();
+}

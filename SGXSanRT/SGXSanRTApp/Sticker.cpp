@@ -457,3 +457,15 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   gEnclaveHandler = nullptr;
   return SGX_SUCCESS;
 }
+
+extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
+void (*TSticker__llvm_profile_write_file)(void);
+extern "C" void libFuzzerCrashCallback() {
+  TSticker__llvm_profile_write_file =
+      (decltype(TSticker__llvm_profile_write_file))dlsym(
+          gEnclaveHandler, "TSticker__llvm_profile_write_file");
+  if (TSticker__llvm_profile_write_file)
+    TSticker__llvm_profile_write_file();
+  if (__llvm_profile_write_file)
+    __llvm_profile_write_file();
+}
