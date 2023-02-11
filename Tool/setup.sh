@@ -50,7 +50,7 @@ cd $EVALTOP
 cat > show_cov.sh <<EOF
 #!/usr/bin/env bash
 
-llvm-profdata-13 merge -sparse -output=./result/all.profdata ./result/profraw/*
+llvm-profdata-13 merge -sparse -output=./result/all.profdata ./result/profraw/
 llvm-cov-13 report ./$ENCLAVENAME -instr-profile=./result/all.profdata -use-color
 
 EOF
