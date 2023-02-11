@@ -2,28 +2,23 @@
 
 # set -ex
 
-if [[ " $*" == *" -h"* ]]; then
-    echo "$(basename "$0") <fuzzbin> <enclave.so> Name ID"
+if [[ "$1" == "-h" ]] || [ $# -ne 4 ]; then
+    echo "$(basename "$0") <fuzzbin> <enclave.so> WorkDir ID"
     exit 0
 fi
-if [ $# -ne 4 ]; then
-     echo "Illegal number of parameters"
-     exit 0
-fi
 
-BASE=$(realpath ./)
 
-FUZZERNAME=$1
-ENCLAVENAME=$2
-NAME=$3
+FUZZERBIN=$(realpath -s "$1")
+ENCLAVEBIN=$(realpath -s "$2")
+WORKDIR=$(realpath -s "$3")
 TEST=$4
 
 
-FUZZERBIN=$(realpath "$BASE/$FUZZERNAME")
-ENCLAVEBIN=$(realpath "$BASE/$ENCLAVENAME")
+FUZZERNAME=$(basename ${FUZZERBIN})
+ENCLAVENAME=$(basename ${ENCLAVEBIN})
 
 
-EVALTOP="$BASE/$NAME-T$TEST-$(date +%F)"
+EVALTOP="$WORKDIR-T$TEST-$(date +%F)"
 SEEDS="$EVALTOP/result/seeds"
 CRASHES="$EVALTOP/result/crashes"
 PROFILE="$EVALTOP/result/profraw"
