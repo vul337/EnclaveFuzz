@@ -16,3 +16,6 @@
 [submodule "magic_enum"]
 	path = magic_enum
 	url = git@github.com:Neargye/magic_enum.git
+[submodule "linux-sgx"]
+	path = linux-sgx
+	url = git@github.com:intel/linux-sgx.git

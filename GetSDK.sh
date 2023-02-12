@@ -11,7 +11,7 @@ done
 PWD=$(pwd)
 SGXSAN_DIR="$(realpath ${PWD})"
 PATCH_DIR="$(realpath ${SGXSAN_DIR}/SGXSanRT/linux-sgx-mini/)"
-LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/..)
+LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/linux-sgx)
 PREFIX="${PREFIX:-${SGXSAN_DIR}/install}"
 
 MODE=${MODE:="RELEASE"}
@@ -32,7 +32,7 @@ CC=clang-13
 CXX=clang++-13
 Jobs=$(nproc)
 ADD_LLVM_FLAGS="-Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-deprecated-declarations -fno-discard-value-names -flegacy-pass-manager -Xclang -load -Xclang ${PREFIX}/lib64/libSGXSanPass.so"
-ADD_MAKE_FLAGS=
+ADD_MAKE_FLAGS="-Orecurse"
 if [[ "${MODE}" = "DEBUG" ]]
 then
     ADD_LLVM_FLAGS+=" -g -O0"
