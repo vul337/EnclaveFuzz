@@ -8,9 +8,6 @@
 // 4 -> LOG_LEVEL_TRACE,
 #define USED_LOG_LEVEL 2
 
-#define SHOW_TID 0
-
-// after modification, need rebuild both rt and pass
 #define SHADOW_OFFSET 0x7FFF8000ULL
 
-#define ENCLAVE_FILENAME "enclave.signed.so"
+#define SHOW_TID 0

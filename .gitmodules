@@ -7,3 +7,9 @@
 [submodule "edger8r"]
 	path = edger8r
 	url = git@github.com:LeoneChen/edger8r.git
+[submodule "magic_enum"]
+	path = magic_enum
+	url = git@github.com:Neargye/magic_enum.git
+[submodule "SGXFuzzerRT/libFuzzer"]
+	path = SGXFuzzerRT/libFuzzer
+	url = git@github.com:LeoneChen/libFuzzer.git

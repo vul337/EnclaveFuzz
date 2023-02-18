@@ -1,0 +1,3 @@
+#pragma once
+
+#define SGXSAN_DIR "@SGXSAN_DIR@"

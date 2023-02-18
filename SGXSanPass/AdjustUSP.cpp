@@ -1,6 +1,5 @@
 #include "AdjustUSP.hpp"
-#include "PassCommon.hpp"
-#include "SGXSanInstVisitor.hpp"
+#include "PassUtil.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include <assert.h>
@@ -8,6 +7,7 @@
 using namespace llvm;
 
 bool adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F) {
+  static SGXSanInstVisitor IV;
   // initialize
   Module *M = F.getParent();
   IRBuilder<> IRB(M->getContext());
@@ -18,7 +18,7 @@ bool adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F) {
 
   // get interesting callinst
   SmallVector<CallInst *> OcallocVec, OcfreeVec,
-      CallInstVec = SGXSanInstVisitor::visitFunction(F).CallInstVec;
+      CallInstVec = IV.visitFunction(F).CallInstVec;
   for (auto CI : CallInstVec) {
     StringRef callee_name = getDirectCalleeName(CI);
     if (callee_name == "sgx_ocalloc") {

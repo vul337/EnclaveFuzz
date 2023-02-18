@@ -1,11 +1,12 @@
 #pragma once
 
+#include "LLVMStructTypeSerialize.h"
+#include "nlohmann/json.hpp"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
@@ -74,8 +75,6 @@ static inline std::string toString(Value *val) {
   return ss.str();
 }
 
-static inline void dump(Value *val) { dbgs() << toString(val) << "\n\n"; }
-
 static inline SmallVector<User *> getNonCastUsers(Value *value) {
   SmallVector<User *> users;
   for (User *user : value->users()) {
@@ -117,12 +116,12 @@ struct VisitInfo {
   SmallVector<Instruction *> BroadReturnInstVec;
   SmallVector<CallInst *> CallInstVec;
   std::unordered_map<AllocaInst *, SmallVector<IntrinsicInst *>>
-      AILifeTimeStart;
+      AILifeTimeStart, AILifeTimeEnd;
 };
 
 class SGXSanInstVisitor {
 public:
-  static VisitInfo &visitBasicBlock(BasicBlock &BB) {
+  VisitInfo &visitBasicBlock(BasicBlock &BB) {
     if (BasicBlockVisitInfoMap.count(&BB) == 0) {
       VisitInfo &info = BasicBlockVisitInfoMap[&BB];
       for (auto &I : BB) {
@@ -137,13 +136,21 @@ public:
           info.CallInstVec.push_back(CallI);
 
           auto IntrinsicI = dyn_cast<IntrinsicInst>(CallI);
-          if (IntrinsicI &&
-              IntrinsicI->getIntrinsicID() == Intrinsic::lifetime_start) {
-            // it's a lifetime_start IntrinsicInst
-            AllocaInst *AllocaI =
-                findAllocaForValue(IntrinsicI->getArgOperand(1), true);
-            if (AllocaI)
-              info.AILifeTimeStart[AllocaI].push_back(IntrinsicI);
+          if (IntrinsicI) {
+            auto IntrinsicID = IntrinsicI->getIntrinsicID();
+            if (IntrinsicID == Intrinsic::lifetime_start) {
+              // it's a lifetime_start IntrinsicInst
+              AllocaInst *AllocaI =
+                  findAllocaForValue(IntrinsicI->getArgOperand(1), true);
+              if (AllocaI)
+                info.AILifeTimeStart[AllocaI].push_back(IntrinsicI);
+            } else if (IntrinsicID == Intrinsic::lifetime_end) {
+              // it's a lifetime_end IntrinsicInst
+              AllocaInst *AllocaI =
+                  findAllocaForValue(IntrinsicI->getArgOperand(1), true);
+              if (AllocaI)
+                info.AILifeTimeEnd[AllocaI].push_back(IntrinsicI);
+            }
           }
         }
       }
@@ -151,13 +158,16 @@ public:
     return BasicBlockVisitInfoMap[&BB];
   }
 
-  static VisitInfo &visitFunction(Function &F) {
+  VisitInfo &visitFunction(Function &F) {
     if (FunctionVisitInfoMap.count(&F) == 0) {
       auto &FVisitInfo = FunctionVisitInfoMap[&F];
       for (auto &BB : F) {
         auto &BBVisitInfo = visitBasicBlock(BB);
         for (auto pair : BBVisitInfo.AILifeTimeStart) {
           FVisitInfo.AILifeTimeStart[pair.first].append(pair.second);
+        }
+        for (auto pair : BBVisitInfo.AILifeTimeEnd) {
+          FVisitInfo.AILifeTimeEnd[pair.first].append(pair.second);
         }
         FVisitInfo.BroadReturnInstVec.append(BBVisitInfo.BroadReturnInstVec);
         FVisitInfo.ReturnInstVec.append(BBVisitInfo.ReturnInstVec);
@@ -167,13 +177,16 @@ public:
     return FunctionVisitInfoMap[&F];
   }
 
-  static VisitInfo &visitModule(Module &M) {
+  VisitInfo &visitModule(Module &M) {
     if (ModuleVisitInfoMap.count(&M) == 0) {
       auto &MVisitInfo = ModuleVisitInfoMap[&M];
       for (auto &F : M) {
         auto &FVisitInfo = visitFunction(F);
         for (auto pair : FVisitInfo.AILifeTimeStart) {
           MVisitInfo.AILifeTimeStart[pair.first].append(pair.second);
+        }
+        for (auto pair : FVisitInfo.AILifeTimeEnd) {
+          MVisitInfo.AILifeTimeEnd[pair.first].append(pair.second);
         }
         MVisitInfo.BroadReturnInstVec.append(FVisitInfo.BroadReturnInstVec);
         MVisitInfo.ReturnInstVec.append(FVisitInfo.ReturnInstVec);
@@ -184,9 +197,22 @@ public:
   }
 
 private:
-  static std::map<BasicBlock *, VisitInfo> BasicBlockVisitInfoMap;
-  static std::map<Function *, VisitInfo> FunctionVisitInfoMap;
-  static std::map<Module *, VisitInfo> ModuleVisitInfoMap;
+  std::map<BasicBlock *, VisitInfo> BasicBlockVisitInfoMap;
+  std::map<Function *, VisitInfo> FunctionVisitInfoMap;
+  std::map<Module *, VisitInfo> ModuleVisitInfoMap;
 };
 
 } // namespace llvm
+
+void dump(nlohmann::ordered_json json);
+void dump(nlohmann::ordered_json json,
+          nlohmann::ordered_json::json_pointer ptr);
+
+void dump(nlohmann::json json);
+void dump(nlohmann::json json, nlohmann::json::json_pointer ptr);
+
+void dump(llvm::Value *val);
+
+std::vector<std::string> GetFileNames(std::filesystem::path dir,
+                                      std::string substr);
+std::string ReadFile(std::string fileName);

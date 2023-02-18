@@ -1,6 +1,9 @@
+#include "SGXSanRTCom.h"
+#include "SGXSanRTUBridge.hpp"
 #include <algorithm>
 #include <array>
 #include <assert.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fstream>
 #include <iostream>
@@ -16,9 +19,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "SGXSanRTCom.h"
-#include "SGXSanRTUBridge.hpp"
-
 struct SGXSanMMapInfo {
   uint64_t start = 0;
   uint64_t end = 0;
@@ -28,8 +28,6 @@ struct SGXSanMMapInfo {
   bool is_shared = false;
   bool is_private = false;
 };
-
-std::string enclave_name(ENCLAVE_FILENAME);
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
 static uint64_t g_enclave_low_guard_start = 0, g_enclave_high_guard_end = 0;
@@ -267,26 +265,37 @@ std::string sgxsan_exec(const char *cmd) {
 }
 
 /* addr2line */
-std::string addr2line(uint64_t addr) {
+std::string addr2line(uint64_t addr, std::string fileName) {
   std::stringstream cmd;
-  cmd << "addr2line -afCpe " << enclave_name.c_str() << " " << std::hex << addr;
+  cmd << "addr2line -afCpe " << fileName.c_str() << " " << std::hex << addr;
   std::string cmd_str = cmd.str();
   return sgxsan_exec(cmd_str.c_str());
 }
 
-std::string addr2func_name(uint64_t addr) {
-  auto line = addr2line(addr);
-  std::regex line_pattern("(\\S+?):[ ]+(\\S+)[ ]+(\\S+)[ ]+(\\S+)");
-  std::smatch match;
-  if (std::regex_search(line, match, line_pattern)) {
-    return match[2].str();
+static std::string _addr2fname(uptr addr, std::string fileName) {
+  std::stringstream cmd;
+  cmd << "addr2line -fCe " << fileName.c_str() << " " << std::hex << addr
+      << " | head -n 1";
+  std::string cmd_str = cmd.str();
+  return sgxsan_exec(cmd_str.c_str());
+}
+
+std::string addr2fname(void *addr) {
+  std::string fname = "";
+  Dl_info info;
+  if (dladdr(addr, &info) != 0) {
+    fname = _addr2fname(
+        (uptr)addr -
+            ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
+        info.dli_fname);
+    fname.erase(std::remove(fname.begin(), fname.end(), '\n'), fname.end());
   }
-  return "";
+  return fname;
 }
 
 void sgxsan_ocall_addr2func_name(uint64_t addr, char *func_name,
                                  size_t buf_size) {
-  std::string str = addr2func_name(addr);
+  std::string str = addr2fname((void *)addr);
   size_t cp_size = std::min(buf_size - 1, str.length());
   strncpy(func_name, str.c_str(), cp_size);
   func_name[cp_size] = '\0';
@@ -294,8 +303,15 @@ void sgxsan_ocall_addr2func_name(uint64_t addr, char *func_name,
 
 void sgxsan_ocall_addr2line(uint64_t *addr_arr, size_t arr_cnt, int level) {
   (void)level;
+  Dl_info info;
   for (size_t i = 0; i < arr_cnt; i++) {
-    std::cerr << "    #" << i << " " << addr2line(addr_arr[i]);
+    if (dladdr((void *)addr_arr[i], &info) != 0) {
+      std::string str = addr2line(
+          (uptr)addr_arr[i] -
+              ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
+          info.dli_fname);
+      log_always_np(str.c_str());
+    }
   }
 }
 
@@ -303,7 +319,7 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr,
                                     size_t byte_arr_size, int bucket_num,
                                     bool is_cipher) {
   static int prefix = 0;
-  std::string func_name = addr2func_name(addr), byte_str = "[",
+  std::string func_name = addr2fname((void *)addr), byte_str = "[",
               dir = "sgxsan_data_" + std::to_string(getpid());
   for (size_t i = 0; i < byte_arr_size; i++) {
     byte_str = byte_str + std::to_string(byte_arr[i]) +

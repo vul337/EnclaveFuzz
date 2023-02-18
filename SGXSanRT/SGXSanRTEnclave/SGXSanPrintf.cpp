@@ -41,6 +41,8 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
   sgxsan_ocall_print_string(buf);
 }
 
+void SGXSanLogEnter(const char *str) { log_always("Enter %s\n", str); }
+
 /*
  * sgxsan_printf:
  *   Invokes OCALL to display the enclave buffer to the terminal.

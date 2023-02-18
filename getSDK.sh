@@ -49,6 +49,7 @@ echo "-- APP_COMPILE_FLAGS: ${APP_COMPILE_FLAGS}"
 echo "-- ADD_COMPILE_FLAGS: ${ADD_COMPILE_FLAGS}"
 echo "-- ADD_MAKE_FLAGS: ${ADD_MAKE_FLAGS}"
 
+
 # prepare directory
 ${MKDIR} -p ${PREFIX}/lib64 ${PREFIX}/bin/x64
 # remove old

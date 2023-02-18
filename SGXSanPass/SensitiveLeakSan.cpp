@@ -1,6 +1,6 @@
 #include "SensitiveLeakSan.hpp"
 #include "AddressSanitizer.h"
-#include "config.h"
+#include "SGXSanPassConfig.h"
 #include "nlohmann/json.hpp"
 #include <filesystem>
 
@@ -131,8 +131,7 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(
     // TODO: extend at next time
     assert(shadowBytesPair == nullptr);
     auto AILifeTimeStart =
-        SGXSanInstVisitor::visitFunction(*(objAI->getFunction()))
-            .AILifeTimeStart;
+        mInstVisitor.visitFunction(*(objAI->getFunction())).AILifeTimeStart;
     for (auto start : AILifeTimeStart[objAI]) {
       objLivePoints.push_back(start->getNextNode());
     }
@@ -194,13 +193,23 @@ void SensitiveLeakSan::poisonSensitiveStackOrHeapObj(
   cleanStackObjectSensitiveShadow(objPN);
 }
 
+Value *SensitiveLeakSan::getAllocaSizeInBytes(AllocaInst *AI,
+                                              Instruction *insertPt) {
+  IRBuilder<> IRB(insertPt);
+  Value *ArraySize = ConstantInt::get(IntptrTy, 1);
+  if (AI->isArrayAllocation()) {
+    ArraySize = const_cast<Value *>(AI->getArraySize());
+  }
+  Type *Ty = AI->getAllocatedType();
+  uint64_t SizeInBytes = AI->getModule()->getDataLayout().getTypeAllocSize(Ty);
+  return IRB.CreateMul(ConstantInt::get(IntptrTy, SizeInBytes), ArraySize);
+}
+
 Value *SensitiveLeakSan::getStackOrHeapInstObjSize(Instruction *objI,
                                                    IRBuilder<> &IRB) {
   Value *objSize = nullptr;
   if (AllocaInst *AI = dyn_cast<AllocaInst>(objI)) {
-    auto _objSize = getAllocaSizeInBytes(*AI);
-    assert(_objSize > 0);
-    objSize = IRB.getInt64(_objSize);
+    objSize = getAllocaSizeInBytes(AI, objI->getNextNode());
   } else if (CallInst *CI = dyn_cast<CallInst>(objI)) {
     objSize =
         IRB.CreateIntCast(getHeapObjSize(CI, IRB), IRB.getInt64Ty(), false);
@@ -240,7 +249,7 @@ std::string SensitiveLeakSan::extractAnnotation(Value *annotationStrVal) {
 }
 
 bool SensitiveLeakSan::isTBridgeFunc(Function &F) {
-  auto CallInstVec = SGXSanInstVisitor::visitFunction(F).CallInstVec;
+  auto CallInstVec = mInstVisitor.visitFunction(F).CallInstVec;
   for (auto CI : CallInstVec) {
     StringRef callee_name = getDirectCalleeName(CI);
     if (F.getName() ==
@@ -616,7 +625,7 @@ StringRef SensitiveLeakSan::getObjMeaningfulName(SVF::ObjVar *objPN) {
     for (auto user : getNonCastUsers(obj)) {
       if (auto StoreI = dyn_cast<StoreInst>(user)) {
         if (stripCast(StoreI->getValueOperand()) == obj) {
-          objName = ::SGXSanGetName(StoreI->getPointerOperand());
+          objName = StoreI->getPointerOperand()->getName();
           if (objName != "")
             break;
         }
@@ -638,7 +647,7 @@ void SensitiveLeakSan::addAndPoisonSensitiveObj(Value *obj) {
 }
 
 void SensitiveLeakSan::collectAndPoisonSensitiveObj() {
-  auto CallInstVec = SGXSanInstVisitor::visitModule(*M).CallInstVec;
+  auto CallInstVec = mInstVisitor.visitModule(*M).CallInstVec;
   for (auto CI : CallInstVec) {
     SmallVector<Function *> calleeVec;
     getDirectAndIndirectCalledFunction(CI, calleeVec);
@@ -650,7 +659,7 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj() {
           }
         } else {
           for (Argument &arg : callee->args()) {
-            StringRef argName = ::SGXSanGetName(&arg);
+            StringRef argName = arg.getName();
             if (argName != "" && getSensitiveLevel(argName) != NOT_SENSITIVE) {
               addAndPoisonSensitiveObj(CI->getArgOperand(arg.getArgNo()));
             }
@@ -693,8 +702,6 @@ void SensitiveLeakSan::collectAndPoisonSensitiveObj() {
     }
   }
 }
-
-void dump(ordered_json js) { dbgs() << js.dump(4) << "\n"; }
 
 void SensitiveLeakSan::initSVF() {
   collectHeapAllocators();
@@ -821,7 +828,7 @@ bool SensitiveLeakSan::isHeapAllocatorWrapper(Function &F) {
   if (!F.getFunctionType()->getReturnType()->isPointerTy())
     return false;
 
-  auto &visitInfo = SGXSanInstVisitor::visitFunction(F);
+  auto &visitInfo = mInstVisitor.visitFunction(F);
   auto CallInstVec = visitInfo.CallInstVec;
   auto RetInstVec = visitInfo.ReturnInstVec;
 
@@ -1012,7 +1019,7 @@ Instruction *SensitiveLeakSan::findInstByName(Function *F,
                                               std::string InstName) {
   for (auto &BB : *F) {
     for (auto &I : BB) {
-      if (::SGXSanGetName(&I).str() == InstName) {
+      if (I.getName().str() == InstName) {
         return &I;
       }
     }
@@ -1254,15 +1261,13 @@ void SensitiveLeakSan::cleanStackObjectSensitiveShadow(SVF::ObjVar *objPN) {
     // stack object must be a AllocInst
     if (AI && cleanedStackObjs.count(AI) == 0) {
       auto ReturnInstVec =
-          SGXSanInstVisitor::visitFunction(*(AI->getFunction())).ReturnInstVec;
+          mInstVisitor.visitFunction(*(AI->getFunction())).ReturnInstVec;
       for (ReturnInst *RI : ReturnInstVec) {
         IRBuilder<> IRB(RI);
         assert(AI->getAllocatedType()->isSized() && !AI->isSwiftError());
-        auto _objSize = getAllocaSizeInBytes(*AI);
-        assert(_objSize > 0);
-        IRB.CreateCall(
-            ShallowUnPoisonShadow,
-            {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()), IRB.getInt64(_objSize)});
+        Value *objSize = getAllocaSizeInBytes(AI, RI);
+        IRB.CreateCall(ShallowUnPoisonShadow,
+                       {IRB.CreatePtrToInt(AI, IRB.getInt64Ty()), objSize});
       }
       cleanedStackObjs.emplace(AI);
     }
@@ -1541,7 +1546,7 @@ void SensitiveLeakSan::dumpRevPts(SVF::SVFVar *PN) {
 
 StringRef SensitiveLeakSan::SGXSanGetName(SVF::SVFVar *PN) {
   if (PN->hasValue()) {
-    return ::SGXSanGetName(const_cast<Value *>(PN->getValue()));
+    return PN->getValue()->getName();
   } else
     return "";
 }

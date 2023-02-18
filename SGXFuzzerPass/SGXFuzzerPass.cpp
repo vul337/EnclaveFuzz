@@ -21,7 +21,7 @@ static cl::opt<bool> ClAtEnclave(
     cl::Hidden, cl::init(false));
 
 static cl::opt<bool> ClEnableEnclaveTesterGenerator(
-    "enable-enclave-tester-generator",
+    "enable-harness",
     cl::desc("Auto generate enclave test function (Only when at app side)"),
     cl::Hidden, cl::init(false));
 

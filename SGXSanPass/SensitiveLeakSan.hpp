@@ -19,15 +19,13 @@
 #include "DDA/DDAClient.h"
 #include "Graphs/SVFG.h"
 #include "MemoryModel/ConditionalPT.h"
+#include "PassUtil.h"
 #include "SABER/LeakChecker.h"
 #include "SVF-FE/LLVMUtil.h"
 #include "SVF-FE/SVFIRBuilder.h"
 #include "Util/DPItem.h"
 #include "Util/config.h"
 #include "WPA/Andersen.h"
-
-#include "PassCommon.hpp"
-#include "SGXSanInstVisitor.hpp"
 
 #include <regex>
 #include <unordered_map>
@@ -138,7 +136,7 @@ public:
                              std::pair<uint8_t *, size_t> *shadowBytesPair);
   SensitiveLevel getSensitiveLevel(StringRef str);
   StringRef getObjMeaningfulName(SVF::ObjVar *objPN);
-  static bool isTBridgeFunc(Function &F);
+  bool isTBridgeFunc(Function &F);
   void getSensitiveDataInfo(IRBuilder<> &IRB, Value *data,
                             SensitiveDataType &type, Value *&info1,
                             Value *&info2) {
@@ -163,6 +161,7 @@ public:
       abort();
     }
   }
+  Value *getAllocaSizeInBytes(AllocaInst *AI, Instruction *insertPt);
 
 private:
   std::unordered_set<SVF::ObjVar *> SensitiveObjs, WorkList, ProcessedList;
@@ -212,5 +211,6 @@ private:
   std::unordered_set<DIType *> processedDITypes;
   size_t propagateCnt = 0;
   std::string ExtAPIJsonFile;
+  SGXSanInstVisitor mInstVisitor;
 };
 } // namespace llvm

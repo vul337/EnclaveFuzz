@@ -30,7 +30,8 @@ enum log_level {
   LOG_LEVEL_TRACE,
 };
 
-void sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt, ...);
+extern "C" void sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt,
+                            ...);
 
 /// have prefix in output
 #define log_always(...) sgxfuzz_log(LOG_LEVEL_ALWAYS, true, __VA_ARGS__)

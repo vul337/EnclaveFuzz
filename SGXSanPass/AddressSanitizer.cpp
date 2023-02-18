@@ -17,8 +17,6 @@
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "AddressSanitizer.h"
-#include "PassCommon.hpp"
-#include "SGXSanInstVisitor.hpp"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -86,6 +84,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -132,7 +131,7 @@ static const uintptr_t kRetiredStackFrameMagic = 0x45E0360E;
 
 const char kAsanModuleCtorName[] = "asan.module_ctor";
 const char kAsanModuleDtorName[] = "asan.module_dtor";
-static const uint64_t kAsanCtorAndDtorPriority = 102;
+static const uint64_t kAsanCtorAndDtorPriority = 1;
 // On Emscripten, the system needs more than one priorities for constructors.
 static const uint64_t kAsanEmscriptenCtorAndDtorPriority = 50;
 const char kAsanReportErrorTemplate[] = "__asan_report_";
@@ -1839,14 +1838,13 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
 
   if (UseCalls) {
     if (Exp == 0)
-      IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][0][AccessSizeIndex],
-                     {AddrLong, IRB.getInt1(hasCmpUser(OrigIns)),
-                      curFuncGlobalNameStrPtr});
+      IRB.CreateCall(
+          AsanMemoryAccessCallback[IsWrite][0][AccessSizeIndex],
+          {AddrLong, IRB.getInt1(hasCmpUser(OrigIns)), globalFuncName});
     else
       IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][1][AccessSizeIndex],
                      {AddrLong, IRB.getInt1(hasCmpUser(OrigIns)),
-                      curFuncGlobalNameStrPtr,
-                      ConstantInt::get(IRB.getInt32Ty(), Exp)});
+                      globalFuncName, ConstantInt::get(IRB.getInt32Ty(), Exp)});
     return;
   }
 
@@ -1901,14 +1899,13 @@ void AddressSanitizer::instrumentUnusualSizeOrAlignment(
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   if (UseCalls) {
     if (Exp == 0)
-      IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][0],
-                     {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
-                      curFuncGlobalNameStrPtr});
+      IRB.CreateCall(
+          AsanMemoryAccessCallbackSized[IsWrite][0],
+          {AddrLong, Size, IRB.getInt1(hasCmpUser(I)), globalFuncName});
     else
       IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][1],
                      {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
-                      curFuncGlobalNameStrPtr,
-                      ConstantInt::get(IRB.getInt32Ty(), Exp)});
+                      globalFuncName, ConstantInt::get(IRB.getInt32Ty(), Exp)});
   } else {
     Value *LastByte = IRB.CreateIntToPtr(
         IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, TypeSize / 8 - 1)),
@@ -2906,7 +2903,6 @@ bool AddressSanitizer::suppressInstrumentationSiteForDebug(int &Instrumented) {
 
 bool AddressSanitizer::instrumentFunction(Function &F,
                                           const TargetLibraryInfo *TLI) {
-  isFuncAtEnclaveTBridge = false;
   if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage)
     return false;
   if (!ClDebugFunc.empty() && ClDebugFunc == F.getName())
@@ -3010,10 +3006,8 @@ bool AddressSanitizer::instrumentFunction(Function &F,
             ("sgx_" /* ecall wrapper prefix */ + callee_name.str())) {
           // it's an ecall wrapper
           RealEcallInsts.push_back(CI);
-          isFuncAtEnclaveTBridge = true;
         } else if (callee_name == "sgx_ocall") {
           SGXOcallInsts.push_back(CI);
-          isFuncAtEnclaveTBridge = true;
         } else if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
                    callee_name == "memmove_s") {
           SecIntrinToInstrument.push_back(CI);
@@ -3035,9 +3029,7 @@ bool AddressSanitizer::instrumentFunction(Function &F,
 
   // Instrument.
   IRBuilder<> IRB(*C);
-  curFuncGlobalNameStrPtr =
-      IRB.CreateGlobalStringPtr(F.getName(), F.getName(), 0, F.getParent());
-
+  globalFuncName = IRB.CreateGlobalStringPtr(F.getName(), "", 0, F.getParent());
   int NumInstrumented = 0;
   for (auto &Operand : OperandsToInstrument) {
     if (!suppressInstrumentationSiteForDebug(NumInstrumented))
@@ -3058,10 +3050,9 @@ bool AddressSanitizer::instrumentFunction(Function &F,
 
   FunctionStackPoisoner FSP(F, *this);
   bool ChangedStack = FSP.runOnFunction();
-
   for (auto RealEcallInst : RealEcallInsts) {
     // when it is an ecall wrapper
-    instrumentRealEcall(RealEcallInst);
+    instrumentRealECall(RealEcallInst);
     FunctionModified = true;
   }
 
@@ -3777,59 +3768,56 @@ bool AddressSanitizer::isSafeAccess(ObjectSizeOffsetVisitor &ObjSizeVis,
          Size - uint64_t(Offset) >= TypeSize / 8;
 }
 
-// Instrument memset_s/memmove_s/memcpy_s
 void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI) {
   StringRef callee_name = getDirectCalleeName(CI);
   IRBuilder<> IRB(CI);
-  CallInst *tempCI = nullptr;
+  FunctionCallee *hookWrapper = nullptr;
   if (callee_name == "memcpy_s") {
-    tempCI =
-        IRB.CreateCall(SGXSanMemcpyS, {CI->getOperand(0), CI->getOperand(1),
-                                       CI->getOperand(2), CI->getOperand(3)});
+    hookWrapper = &SGXSanMemcpyS;
   } else if (callee_name == "memset_s") {
-    tempCI =
-        IRB.CreateCall(SGXSanMemsetS, {CI->getOperand(0), CI->getOperand(1),
-                                       CI->getOperand(2), CI->getOperand(3)});
+    hookWrapper = &SGXSanMemsetS;
   } else if (callee_name == "memmove_s") {
-    tempCI =
-        IRB.CreateCall(SGXSanMemmoveS, {CI->getOperand(0), CI->getOperand(1),
-                                        CI->getOperand(2), CI->getOperand(3)});
+    hookWrapper = &SGXSanMemmoveS;
   } else
     abort();
-  CI->replaceAllUsesWith(tempCI);
+  CI->replaceAllUsesWith(IRB.CreateCall(
+      *hookWrapper,
+      {IRB.CreatePointerCast(CI->getOperand(0), IRB.getInt8PtrTy()),
+       IRB.CreateIntCast(CI->getOperand(1), IntptrTy, false),
+       callee_name == "memset_s"
+           ? IRB.CreateIntCast(CI->getOperand(2), IRB.getInt32Ty(), true)
+           : IRB.CreatePointerCast(CI->getOperand(2), IRB.getInt8PtrTy()),
+       IRB.CreateIntCast(CI->getOperand(3), IntptrTy, false)}));
   CI->eraseFromParent();
 }
 
-// instrument `EnclaveTLSConstructorAtTBridgeBegin` and
-// `EnclaveTLSDestructorAtTBridgeEnd` at ecallWrapper function begin and end
-// respectively
-void AddressSanitizer::__instrumentTLSMgr(Function *ecallWrapper) {
+void AddressSanitizer::instrumentTDECallMgr(Function *ecallWrapper) {
   assert(ecallWrapper);
-  if (TLSMgrInstrumentedEcall.count(ecallWrapper) == 0) {
-    auto &firstFuncInsertPoint = ecallWrapper->front().front();
-    IRBuilder<> IRB(&firstFuncInsertPoint);
-    IRB.CreateCall(EnclaveTLSConstructorAtTBridgeBegin);
+  if (TDMgrInstrumentedEcall.count(ecallWrapper) != 0)
+    return;
 
-    for (auto RetInst :
-         SGXSanInstVisitor::visitFunction(*ecallWrapper).BroadReturnInstVec) {
-      IRB.SetInsertPoint(RetInst);
-      IRB.CreateCall(EnclaveTLSDestructorAtTBridgeEnd);
-    }
-    TLSMgrInstrumentedEcall.emplace(ecallWrapper);
+  IRBuilder<> IRB(&ecallWrapper->front().front());
+  IRB.CreateCall(TDECallConstructor);
+
+  for (auto RetInst :
+       mInstVisitor.visitFunction(*ecallWrapper).BroadReturnInstVec) {
+    IRB.SetInsertPoint(RetInst);
+    IRB.CreateCall(TDECallDestructor);
   }
+  TDMgrInstrumentedEcall.emplace(ecallWrapper);
 }
 
-bool AddressSanitizer::instrumentRealEcall(CallInst *CI) {
-  if (CI == nullptr)
+bool AddressSanitizer::instrumentRealECall(CallInst *RealECall) {
+  if (RealECall == nullptr)
     return false;
 
-  __instrumentTLSMgr(CI->getFunction());
+  instrumentTDECallMgr(RealECall->getFunction());
 
-  // instrument `MemAccessMgrActive` before RealEcall
-  IRBuilder<> IRB(CI);
+  /// Instrument \c MemAccessMgrActive before RealEcall, \c MemAccessMgrDeactive
+  /// after RealEcall
+  IRBuilder<> IRB(RealECall);
   IRB.CreateCall(MemAccessMgrActive);
-  // instrument `MemAccessMgrDeactive` after RealEcall
-  IRB.SetInsertPoint(CI->getNextNode());
+  IRB.SetInsertPoint(RealECall->getNextNode());
   IRB.CreateCall(MemAccessMgrDeactive);
 
   return true;
@@ -3840,7 +3828,7 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
   IRB.CreateCall(MemAccessMgrDeactive);
 
   for (auto RetInst :
-       SGXSanInstVisitor::visitFunction(OcallWrapper).BroadReturnInstVec) {
+       mInstVisitor.visitFunction(OcallWrapper).BroadReturnInstVec) {
     IRB.SetInsertPoint(RetInst);
     IRB.CreateCall(MemAccessMgrActive);
   }
@@ -3850,16 +3838,24 @@ bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
 void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   IRBuilder<> IRB(*C);
 
-  EnclaveTLSConstructorAtTBridgeBegin = M.getOrInsertFunction(
+  // TD ECall Manager
+  TDECallConstructor = M.getOrInsertFunction(
       "EnclaveTLSConstructorAtTBridgeBegin", IRB.getVoidTy());
-  EnclaveTLSDestructorAtTBridgeEnd = M.getOrInsertFunction(
+  TDECallDestructor = M.getOrInsertFunction(
       "EnclaveTLSDestructorAtTBridgeEnd", IRB.getVoidTy());
 
+  // MemAccessMgr functions
   MemAccessMgrActive =
       M.getOrInsertFunction("MemAccessMgrActive", IRB.getVoidTy());
   MemAccessMgrDeactive =
       M.getOrInsertFunction("MemAccessMgrDeactive", IRB.getVoidTy());
+  MemAccessMgrOutEnclaveAccess = M.getOrInsertFunction(
+      "MemAccessMgrOutEnclaveAccess", IRB.getVoidTy(), IRB.getInt8PtrTy(),
+      IntptrTy, IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
+  MemAccessMgrInEnclaveAccess =
+      M.getOrInsertFunction("MemAccessMgrInEnclaveAccess", IRB.getVoidTy());
 
+  // Hooked security version memory intrinsics
   SGXSanMemcpyS = M.getOrInsertFunction("sgxsan_memcpy_s", IRB.getInt32Ty(),
                                         IRB.getInt8PtrTy(), IRB.getInt64Ty(),
                                         IRB.getInt8PtrTy(), IRB.getInt64Ty());

@@ -31,14 +31,11 @@ void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs,
 void sgxsan_print_stack_trace(log_level ll) {
 #if (DUMP_STACK_TRACE)
   std::vector<uint64_t> ret_addrs;
-  libunwind_backtrace(ret_addrs, g_enclave_base);
+  libunwind_backtrace(ret_addrs);
   size_t ret_addr_arr_size = ret_addrs.size();
   if (ret_addr_arr_size > 0) {
     sgxsan_log(ll, false, "============= Stack Trace Begin ==============\n");
-    uint64_t addr_arr[ret_addr_arr_size];
-    for (size_t i = 0; i < ret_addr_arr_size; i++)
-      addr_arr[i] = ret_addrs[i] - 1;
-    sgxsan_ocall_addr2line(addr_arr, ret_addr_arr_size);
+    sgxsan_ocall_addr2line(ret_addrs.data(), ret_addr_arr_size);
     sgxsan_log(ll, false, "============== Stack Trace End ===============\n");
   }
 #else
@@ -50,13 +47,13 @@ void sgxsan_print_stack_trace(log_level ll) {
 uint64_t get_last_return_address(uint64_t enclave_base_addr,
                                  unsigned int level) {
   std::vector<uint64_t> ret_addrs;
-  libunwind_backtrace(ret_addrs, enclave_base_addr, level + 2);
+  libunwind_backtrace(ret_addrs, level + 2);
   sgxsan_assert(ret_addrs.size() == level + 2);
-  return ret_addrs[level + 1];
+  return ret_addrs[level + 1] - enclave_base_addr;
 }
 
 // https://eli.thegreenplace.net/2015/programmatic-access-to-the-call-stack-in-c/
-void libunwind_backtrace(std::vector<uint64_t> &ret_addrs, uint64_t base_addr,
+void libunwind_backtrace(std::vector<uint64_t> &ret_addrs,
                          size_t max_collect_count) {
   unw_context_t context;
   if (unw_getcontext(&context) != 0)
@@ -79,7 +76,7 @@ void libunwind_backtrace(std::vector<uint64_t> &ret_addrs, uint64_t base_addr,
     unw_get_reg(&cursor, UNW_REG_IP, &pc);
     if (pc == 0 or not sgx_is_within_enclave((const void *)pc, 1))
       break;
-    ret_addrs.push_back(pc - base_addr);
+    ret_addrs.push_back(pc);
     if (max_collect_count && ret_addrs.size() >= max_collect_count)
       break;
     // check before unw_step to avoid sgxsdk's abort

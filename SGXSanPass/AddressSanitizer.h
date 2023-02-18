@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PassUtil.h"
+#include "nlohmann/json.hpp"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/IR/IRBuilder.h"
@@ -72,9 +74,12 @@ struct AddressSanitizer {
   bool maybeInsertDynamicShadowAtFunctionEntry(Function &F);
   void markEscapedLocalAllocas(Function &F);
   void declareAdditionalSymbol(Module &M);
+  /// \brief Instrument \c memset_s/memmove_s/memcpy_s
   void instrumentSecMemIntrinsic(CallInst *CI);
-  void __instrumentTLSMgr(Function *ecallWrapper);
-  bool instrumentRealEcall(CallInst *CI);
+  /// \brief Instrument \c TDECallConstructor and \c TDECallDestructor at begin
+  /// and end of ecall wrapper respectively
+  void instrumentTDECallMgr(Function *ecallWrapper);
+  bool instrumentRealECall(CallInst *CI);
   bool instrumentOcallWrapper(Function &OcallWrapper);
 
 private:
@@ -132,12 +137,14 @@ private:
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
 
-  FunctionCallee MemAccessMgrActive, MemAccessMgrDeactive, SGXSanMemcpyS,
-      SGXSanMemsetS, SGXSanMemmoveS, EnclaveTLSConstructorAtTBridgeBegin,
-      EnclaveTLSDestructorAtTBridgeEnd;
-  std::unordered_set<Function *> TLSMgrInstrumentedEcall;
-  bool isFuncAtEnclaveTBridge = false;
-  Constant *curFuncGlobalNameStrPtr = nullptr;
+  FunctionCallee MemAccessMgrActive, MemAccessMgrDeactive,
+      MemAccessMgrOutEnclaveAccess, MemAccessMgrInEnclaveAccess, SGXSanMemcpyS,
+      SGXSanMemsetS, SGXSanMemmoveS, TDECallConstructor, TDECallDestructor,
+      PushOCAllocStack, PopOCAllocStack;
+  std::unordered_set<Function *> TDMgrInstrumentedEcall;
+  Constant *globalFuncName = nullptr;
+  std::map<Type *, bool> typeHasPointerMap;
+  SGXSanInstVisitor mInstVisitor;
 };
 
 class ModuleAddressSanitizer {
