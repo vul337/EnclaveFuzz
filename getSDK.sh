@@ -14,6 +14,8 @@ PATCH_DIR="$(realpath ${SGXSAN_DIR}/SDKPatch/)"
 LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/..)
 PREFIX="${PREFIX:-${SGXSAN_DIR}/install}"
 
+MODE=${MODE:="RELEASE"}
+
 echo "-- MODE: ${MODE}"
 echo "-- PREFIX: ${PREFIX}"
 
@@ -27,12 +29,12 @@ CC=gcc
 CXX=g++
 Jobs=$(nproc)
 ADD_COMPILE_FLAGS=
-APP_COMPILE_FLAGS=
+HOST_COMPILE_FLAGS=
 ADD_MAKE_FLAGS=" -j${Jobs} -Orecurse -s"
 
 if [[ "${HOST_ASAN}" = "1" ]]
 then
-    APP_COMPILE_FLAGS+=" -fsanitize=address"
+    HOST_COMPILE_FLAGS+=" -fsanitize=address"
     CC=clang-13
     CXX=clang++-13
 fi
@@ -45,7 +47,7 @@ fi
 
 echo "-- CC: ${CC}"
 echo "-- CXX: ${CXX}"
-echo "-- APP_COMPILE_FLAGS: ${APP_COMPILE_FLAGS}"
+echo "-- HOST_COMPILE_FLAGS: ${HOST_COMPILE_FLAGS}"
 echo "-- ADD_COMPILE_FLAGS: ${ADD_COMPILE_FLAGS}"
 echo "-- ADD_MAKE_FLAGS: ${ADD_MAKE_FLAGS}"
 
@@ -82,7 +84,7 @@ fi
 echo "== Get libsgx_enclave_common.{so,a} =="
 cd ${LINUX_SGX_SRC_DIR}/psw/enclave_common
 ${MAKE} clean -s
-${MAKE} ${ADD_MAKE_FLAGS} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${APP_COMPILE_FLAGS} ${ADD_COMPILE_FLAGS}"
+${MAKE} ${ADD_MAKE_FLAGS} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${HOST_COMPILE_FLAGS} ${ADD_COMPILE_FLAGS}"
 ${CP} libsgx_enclave_common.{so,a} ${PREFIX}/lib64/
 ln -fs ${PREFIX}/lib64/libsgx_enclave_common.so ${PREFIX}/lib64/libsgx_enclave_common.so.1
 
@@ -92,14 +94,14 @@ then
     echo "== Get libsgx_urts.so =="
     cd ${LINUX_SGX_SRC_DIR}/psw/urts/linux
     ${MAKE} clean -s
-    ${MAKE} ${ADD_MAKE_FLAGS} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${APP_COMPILE_FLAGS} ${ADD_COMPILE_FLAGS}"
+    ${MAKE} ${ADD_MAKE_FLAGS} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${HOST_COMPILE_FLAGS} ${ADD_COMPILE_FLAGS}"
     ${CP} libsgx_urts.so ${PREFIX}/lib64/
 
     # get libsgx_uae_service.so
     echo "== Get libsgx_uae_service.so =="
     cd ${LINUX_SGX_SRC_DIR}/psw/uae_service/linux
     ${MAKE} clean -s
-    ${MAKE} ${ADD_MAKE_FLAGS} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${APP_COMPILE_FLAGS} ${ADD_COMPILE_FLAGS}"
+    ${MAKE} ${ADD_MAKE_FLAGS} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${HOST_COMPILE_FLAGS} ${ADD_COMPILE_FLAGS}"
     ${CP} libsgx_{uae_service,epid,launch,quote_ex}.so ${PREFIX}/lib64/
 fi
 
@@ -126,4 +128,4 @@ cd ${LINUX_SGX_SRC_DIR}/sdk
 ${MAKE} tcxx ${ADD_MAKE_FLAGS}
 ${CP} ${LINUX_SGX_SRC_DIR}/build/linux/libsgx_tcxx.a ${PREFIX}/lib64/
 
-echo "== Successfully get SGXSDK =="
+echo "== Successfully get SGXSDK ${MODE} =="
