@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -51,7 +52,7 @@ double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
 
 // Fuzz sequence
-enum FuzzMode { TEST_RANDOM, TEST_USER };
+enum FuzzMode { TEST_RANDOM, TEST_USER, TEST_SPEED };
 static std::vector<int> gFuzzerSeq;
 static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
@@ -542,7 +543,6 @@ size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size, size_t MaxSize,
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
-
 extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   log_always("Start LLVMFuzzerTestOneInput\n");
@@ -559,25 +559,42 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
   // Test body
-  std::vector<int> callSeq;
-  if (gFuzzMode == TEST_USER) {
-    callSeq = gFuzzerSeq;
-  } else {
-    data_factory.getCallSequence(callSeq, gFuzzECallNum);
-  }
-  for (int i : callSeq) {
-    sgxfuzz_assert(i < gFuzzECallNum);
-    if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
-        gFilterOutIndices.end()) {
-      // Filter it out
-      continue;
+  if (gFuzzMode == TEST_SPEED) {
+    struct timeval tval_before, tval_after, tval_result;
+    gettimeofday(&tval_before, NULL);
+    for (size_t i = 0; i < 1000000; i++) {
+      ret = gFuzzECallArray[0]();
+      sgxfuzz_error(ret != SGX_SUCCESS and
+                        ret != SGX_ERROR_INVALID_PARAMETER and
+                        ret != SGX_ERROR_ECALL_NOT_ALLOWED,
+                    "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
     }
+    gettimeofday(&tval_after, NULL);
+    timersub(&tval_after, &tval_before, &tval_result);
+    log_always("Time elapsed(ECALL): %ld.%06ld seconds\n",
+               (long int)tval_result.tv_sec, (long int)tval_result.tv_usec);
+  } else {
+    std::vector<int> callSeq;
+    if (gFuzzMode == TEST_USER) {
+      callSeq = gFuzzerSeq;
+    } else {
+      data_factory.getCallSequence(callSeq, gFuzzECallNum);
+    }
+    for (int i : callSeq) {
+      sgxfuzz_assert(i < gFuzzECallNum);
+      if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
+          gFilterOutIndices.end()) {
+        // Filter it out
+        continue;
+      }
 
-    log_always("Try %s\n", gFuzzECallNameArray[i]);
-    ret = gFuzzECallArray[i]();
-    sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
-                      ret != SGX_ERROR_ECALL_NOT_ALLOWED,
-                  "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
+      log_always("Try %s\n", gFuzzECallNameArray[i]);
+      ret = gFuzzECallArray[i]();
+      sgxfuzz_error(ret != SGX_SUCCESS and
+                        ret != SGX_ERROR_INVALID_PARAMETER and
+                        ret != SGX_ERROR_ECALL_NOT_ALLOWED,
+                    "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
+    }
   }
 
   // Destroy Enclave
