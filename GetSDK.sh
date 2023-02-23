@@ -15,12 +15,10 @@ LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/linux-sgx)
 PREFIX="${PREFIX:-${SGXSAN_DIR}/install}"
 
 MODE=${MODE:="RELEASE"}
-SDK_COV=${SDK_COV:="TRUE"}
 SILENT=${SILENT:="TRUE"}
 
 echo "-- MODE: ${MODE}"
 echo "-- PREFIX: ${PREFIX}"
-echo "-- SDK_COV: ${SDK_COV}"
 
 MAKE=make
 CP=cp
@@ -37,11 +35,6 @@ if [[ "${MODE}" = "DEBUG" ]]
 then
     ADD_LLVM_FLAGS+=" -g -O0"
     ADD_MAKE_FLAGS+=" DEBUG=1"
-fi
-
-if [[ "${SDK_COV}" = "TRUE" ]]
-then
-    ADD_LLVM_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp"
 fi
 
 if [[ "${SILENT}" = "TRUE" ]]

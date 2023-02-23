@@ -6,7 +6,6 @@ set(CMAKE_CXX_COMPILER "clang++-13")
 
 set(LINUX_SGX_MINI "${CMAKE_CURRENT_SOURCE_DIR}/SGXSanRT/linux-sgx-mini/")
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-configure_file(SGXSanConfig.h.in SGXSanConfig.h @ONLY)
 
 # get LLVM_DIR
 set(LLVM_DIR "$ENV{LLVM_DIR}")
@@ -51,4 +50,14 @@ install(FILES Tool/sgx_edger8r
         DESTINATION bin/x64)
 
 install(FILES ${LINUX_SGX_MINI}/common/buildenv.mk
+        DESTINATION .)
+
+install(FILES kAFLUSpaceUtil/libnyx_agent.a
+        kAFLUSpaceUtil/libnyx_agent.so
+        DESTINATION lib64)
+
+install(FILES kAFLUSpaceUtil/vmcall
+        DESTINATION bin)
+
+install(FILES Tool/rand_file
         DESTINATION .)

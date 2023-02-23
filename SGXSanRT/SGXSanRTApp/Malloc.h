@@ -38,7 +38,6 @@ void __libc_free(void *ptr) throw();
 void *__libc_calloc(size_t nmemb, size_t size) throw();
 void *__libc_realloc(void *ptr, size_t size) throw();
 void updateBackEndHeapAllocator();
-void ClearHeapObject();
 void *MALLOC(size_t size) throw();
 void FREE(void *ptr) throw();
 void *CALLOC(size_t n_elements, size_t elem_size) throw();

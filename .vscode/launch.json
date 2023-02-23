@@ -67,7 +67,7 @@
             "name": "(gdb) Attach",
             "type": "cppdbg",
             "request": "attach",
-            "program": "${workspaceFolder}/SGX_APP/mbedtls-SGX/mbedtls-SGX-T0-2023-02-11/fuzz_mbedtls-SGX",
+            "program": "${workspaceFolder}/kAFL/kafl/qemu/x86_64-softmmu/qemu-system-x86_64",
             "MIMode": "gdb",
             "setupCommands": [
                 {
@@ -79,6 +79,9 @@
                     "description": "Set Disassembly Flavor to Intel",
                     "text": "-gdb-set disassembly-flavor intel",
                     "ignoreFailures": true
+                },
+                {
+                    "text": "handle SIGUSR1 nostop",
                 }
             ]
         },
@@ -694,6 +697,81 @@
                     "ignoreFailures": true
                 }
             ]
+        },
+        {
+            "name": "kafl fuzz",
+            "type": "python",
+            "request": "launch",
+            "program": "/home/leone/Documents/SGXSan3/kAFL/kafl/.venv/bin/kafl",
+            "args": [
+                "fuzz",
+                "-w",
+                "/home/leone/Documents/SGXSan3/kAFL/kafl/examples/linux-user/example/workdir",
+                "--kernel",
+                "/boot/vmlinuz-5.10.73-kafl+",
+                "--initrd",
+                "/home/leone/Documents/SGXSan3/kAFL/kafl/examples/linux-user/example/example.cpio.gz",
+                "--memory",
+                "512",
+                "--sharedir",
+                "/home/leone/Documents/SGXSan3/kAFL/kafl/examples/linux-user/example/sharedir",
+                "--seed-dir",
+                "/home/leone/Documents/SGXSan3/kAFL/kafl/examples/linux-user/example/seeds",
+                "-p",
+                "1",
+                "--redqueen",
+                "--grimoire",
+                "--radamsa",
+                "-D",
+                "--funky",
+                "--purge",
+                "--log-hprintf",
+                "-R",
+                "1",
+            ],
+            "env": {
+                "KAFL_CONFIG_FILE": "/home/leone/Documents/SGXSan3/kAFL/kafl/examples/linux-user/example/kafl.yaml"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": true,
+        },
+        {
+            "name": "kafl fuzz sgx-wallet",
+            "type": "python",
+            "request": "launch",
+            "program": "/home/leone/Documents/SGXSan3/kAFL/kafl/.venv/bin/kafl",
+            "args": [
+                "fuzz",
+                "-w",
+                "workdir",
+                "--kernel",
+                "/home/leone/vmlinuz-5.10.75-051075-generic",
+                "--initrd",
+                "sgx-wallet.cpio.gz",
+                "--memory",
+                "512",
+                "--sharedir",
+                "./sharedir",
+                "--seed-dir",
+                "./seeds",
+                "-p",
+                "1",
+                "--redqueen",
+                "--grimoire",
+                "--radamsa",
+                "-D",
+                "--funky",
+                "--purge",
+                "--log-hprintf",
+                "-R",
+                "1",
+                "--debug",
+                "-v",
+                "--gdbserver"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/SGX_APP/sgx-wallet"
         },
     ]
 }

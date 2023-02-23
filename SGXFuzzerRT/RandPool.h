@@ -1,6 +1,5 @@
 #pragma once
-#include "SGXSanConfig.h"
-#include "libFuzzerCallback.h"
+#include "Harness.h"
 #include <fcntl.h>
 #include <string>
 #include <sys/mman.h>
@@ -10,7 +9,7 @@
 class RandPool {
 public:
   RandPool() {
-    mRandFilePath = std::string(SGXSAN_DIR "/SGXFuzzerRT/rand_file");
+    mRandFilePath = std::string("./rand_file");
     int fd = open(mRandFilePath.c_str(), O_RDONLY);
     sgxfuzz_assert(fd != -1);
     sgxfuzz_assert(lseek(fd, 0, mRandPoolSize) == 0);
@@ -72,6 +71,11 @@ public:
     T res;
     getBytes(&res, sizeof(T), offset);
     return res;
+  }
+
+  template <typename T> T getIntegral(size_t offset) {
+    return getIntergerInRange(std::numeric_limits<T>::min(),
+                              std::numeric_limits<T>::max(), offset);
   }
 
   template <class T> T getIntergerInRange(T min, T max, size_t offset) {

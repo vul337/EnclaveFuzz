@@ -45,9 +45,6 @@ static pthread_mutex_t heap_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
 const size_t kHeapObjectChunkMagic = 0xDEADBEEF;
 
-std::set<uptr, std::less<uptr>, ContainerAllocator<uptr>> gHeapObjs;
-static pthread_mutex_t gHeapObjsUpdateMutex = PTHREAD_MUTEX_INITIALIZER;
-
 struct chunk {
   size_t magic; // ensure queried user_beg is correct
   uptr alloc_beg;
@@ -141,19 +138,6 @@ void *MALLOC(size_t size) {
   PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg,
                kAsanHeapLeftRedzoneMagic);
 
-  if (RunInEnclave) {
-    void *callPt = __builtin_return_address(0);
-    if (isInEnclaveDSORange((uptr)callPt, 1) and MemAccessMgrInited()) {
-      pthread_mutex_lock(&gHeapObjsUpdateMutex);
-      bool successInsert;
-      std::tie(std::ignore, successInsert) = gHeapObjs.emplace(user_beg);
-      if (not successInsert) {
-        abort();
-      }
-      pthread_mutex_unlock(&gHeapObjsUpdateMutex);
-    }
-  }
-
   return (void *)user_beg;
 }
 
@@ -198,12 +182,6 @@ void FREE(void *ptr) {
   qe.alloc_size = m->alloc_size;
   qe.user_beg = user_beg;
   qe.user_size = m->user_size;
-
-  pthread_mutex_lock(&gHeapObjsUpdateMutex);
-  if (gHeapObjs.count(user_beg)) {
-    gHeapObjs.erase(user_beg);
-  }
-  pthread_mutex_unlock(&gHeapObjsUpdateMutex);
 
   gQCache->put(qe);
   goto exit;
@@ -266,30 +244,4 @@ size_t MALLOC_USABLE_SIZE(void *mem) throw() {
   chunk *m = (chunk *)((uptr)mem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
   return m->user_size;
-}
-
-void ClearHeapObject() {
-  pthread_mutex_lock(&gHeapObjsUpdateMutex);
-  for (auto user_beg : gHeapObjs) {
-    if ((void *)user_beg == nullptr)
-      continue;
-
-    uptr alignment = SHADOW_GRANULARITY;
-    chunk *m = (chunk *)(user_beg - sizeof(chunk));
-    if (m->magic != kHeapObjectChunkMagic) {
-      abort();
-    }
-
-    if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
-      GET_CALLER_PC_BP_SP;
-      ReportDoubleFree(pc, bp, sp, user_beg);
-    }
-    sgxsan_assert(IsAligned(user_beg, alignment));
-
-    PoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
-                 kAsanHeapLeftRedzoneMagic);
-    BACKEND_FREE((void *)m->alloc_beg);
-  }
-  gHeapObjs.clear();
-  pthread_mutex_unlock(&gHeapObjsUpdateMutex);
 }

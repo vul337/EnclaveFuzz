@@ -32,6 +32,7 @@
 
 namespace fs = std::filesystem;
 
+EnclaveInfo gEnclaveInfo;
 /// TCS Manager
 
 TrustThreadPool _g_thread_pool;
@@ -214,77 +215,8 @@ sgx_status_t sgx_cpuid(int cpuinfo[4], int leaf) {
 }
 
 /// life time management
-static void *gEnclaveHandler = nullptr;
-static std::map<uptr, uptr, std::less<uptr>,
-                ContainerAllocator<std::pair<const uptr, uptr>>>
-    EnclaveDSOStart2End;
-
-bool isInEnclaveDSORange(uptr addr, size_t len) {
-  for (auto pair : EnclaveDSOStart2End) {
-    // Shouldn't overlap different segments
-    if (pair.first <= addr and (addr + len) < pair.second) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static int dlItCBGetEnclaveDSO(struct dl_phdr_info *info, size_t size,
-                               void *data) {
-  auto EnclaveDSOStart = *(uptr *)data;
-  if (EnclaveDSOStart == info->dlpi_addr) {
-    // Found interesting DSO
-    for (int i = 0; i < info->dlpi_phnum; i++) {
-      const ElfW(Phdr) *phdr = &info->dlpi_phdr[i];
-      if (phdr->p_type == PT_LOAD) {
-        // Found loadable segment
-        uptr beg = RoundDownTo(EnclaveDSOStart + phdr->p_vaddr, phdr->p_align);
-        uptr end = RoundUpTo(
-            EnclaveDSOStart + phdr->p_vaddr + phdr->p_memsz - 1, phdr->p_align);
-
-        // Poison Enclave DSO
-        sgxsan_assert(EnclaveDSOStart2End.count(beg) == 0);
-        EnclaveDSOStart2End[beg] = end;
-      }
-    }
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
-void _PoisonEnclaveDSOCodeSegment() {
-  for (auto pair : EnclaveDSOStart2End) {
-    uptr beg = pair.first, end = pair.second;
-    bool origInEnclave = false;
-    if (RunInEnclave == false)
-      RunInEnclave = true;
-    else
-      origInEnclave = true;
-    PoisonShadow(beg, end - beg, kAsanNotPoisonedMagic);
-    RunInEnclave = origInEnclave;
-  }
-}
-
-void PoisonEnclaveDSOCodeSegment() {
-  // Currently, called from __asan_init, we still in dlopen, so we can't get
-  // dlopen-ed handler, and we also have to call this func before poisoning
-  // global, since we directly write shadow byte of globals to map
-  std::string enclaveFileName = getEnclaveFileName();
-  sgxsan_assert(enclaveFileName != "");
-
-  // Current Enclave is in dlopen-ing, and should already have been mmap-ed
-  // We get start address of current Enclave
-  auto handler = (struct link_map *)dlopen(enclaveFileName.c_str(),
-                                           RTLD_LAZY | RTLD_NOLOAD);
-  sgxsan_assert(handler);
-  uptr EnclaveStartAddr = handler->l_addr;
-  sgxsan_assert(dlclose(handler) == 0);
-
-  // To find Enclave DSO and poison it with InEnclave flag
-  sgxsan_assert(EnclaveDSOStart2End.size() == 0);
-  dl_iterate_phdr(dlItCBGetEnclaveDSO, &EnclaveStartAddr);
-  _PoisonEnclaveDSOCodeSegment();
+int dlItCBGetEnclaveDSO(struct dl_phdr_info *info, size_t size, void *data) {
+  return gEnclaveInfo.DLItCBGetEnclaveDSO(info, size, data);
 }
 
 extern "C" __attribute__((weak)) void *GetOCallTableAddr();
@@ -295,18 +227,20 @@ extern "C" sgx_status_t __sgx_create_enclave_ex(
     const void *ex_features_p[32]) {
   std::string file_abs_path = fs::absolute(fs::path(file_name));
   sgxsan_assert(fs::exists(file_abs_path));
-  setEnclaveFileName(file_abs_path);
+  gEnclaveInfo.SetEnclaveFileName(file_abs_path);
   if (GetOCallTableAddr) {
     g_enclave_ocall_table = (sgx_ocall_table_t *)GetOCallTableAddr();
   }
   RunInEnclave = true;
-  gEnclaveHandler = dlopen(file_abs_path.c_str(), RTLD_LAZY);
+  auto EnclaveHandler =
+      (struct link_map *)dlopen(file_abs_path.c_str(), RTLD_LAZY);
   RunInEnclave = false;
-  sgxsan_error(gEnclaveHandler == nullptr, "%s\n", dlerror());
+  sgxsan_error(EnclaveHandler == nullptr, "%s\n", dlerror());
+  gEnclaveInfo.SetHandler(EnclaveHandler);
 
   sgxsan_assert(tsticker_ecall = (decltype(tsticker_ecall))dlsym(
-                    gEnclaveHandler, "tsticker_ecall"));
-  sgxsan_assert(check_ecall = (decltype(check_ecall))dlsym(gEnclaveHandler,
+                    EnclaveHandler, "tsticker_ecall"));
+  sgxsan_assert(check_ecall = (decltype(check_ecall))dlsym(EnclaveHandler,
                                                            "check_ecall"));
   RunInEnclave = true;
   tsticker_ecall(0, ECMD_INIT_ENCLAVE, nullptr, nullptr);
@@ -335,96 +269,6 @@ extern "C" sgx_status_t sgx_create_enclave_ex(
                                  ex_features, ex_features_p);
 }
 
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_8bit_counters_unregister(uint8_t *Start);
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_pcs_init(const uintptr_t *pcs_beg, const uintptr_t *pcs_end);
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_pcs_unregister(const uintptr_t *pcs_beg);
-
-class SanCovMapRepeater {
-
-  struct PCTableEntry {
-    uintptr_t PC, PCFlags;
-  };
-
-public:
-  void RegisterSanCov8Bit(uint8_t *Start, uint8_t *Stop) {
-    if (!__sanitizer_cov_8bit_counters_init or
-        !__sanitizer_cov_8bit_counters_unregister)
-      return;
-    if (m8BitStart2Stop.count(Start) != 0) {
-      // Already registered
-      sgxsan_assert(m8BitStart2Stop[Start] == Stop);
-      return;
-    }
-    m8BitStart2Stop[Start] = Stop;
-    __sanitizer_cov_8bit_counters_init(Start, Stop);
-    if (mShowed8BitCntrs.count(Start) == 0) {
-      log_always("Enclave __sanitizer_cov_8bit_counters_init, %ld inline "
-                 "8-bit counts [%p, %p)\n",
-                 (uptr)Stop - (uptr)Start, Start, Stop);
-      mShowed8BitCntrs.emplace(Start);
-    }
-  }
-
-  void RegisterSanCovPCs(const uintptr_t *pcs_beg, const uintptr_t *pcs_end) {
-    if (!__sanitizer_cov_pcs_init or !__sanitizer_cov_pcs_unregister)
-      return;
-    if (mPCsBeg2End.count(pcs_beg) != 0) {
-      // Already registered
-      sgxsan_assert(mPCsBeg2End[pcs_beg] == pcs_end);
-      return;
-    }
-    mPCsBeg2End[pcs_beg] = pcs_end;
-    __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
-    if (mShowedPCs.count(pcs_beg) == 0) {
-      log_always("Enclave __sanitizer_cov_pcs_init, %ld PCs [%p, %p)\n",
-                 (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
-                 pcs_end);
-      mShowedPCs.emplace(pcs_beg);
-    }
-  }
-
-  void UnregisterSanCov8Bit() {
-    if (!__sanitizer_cov_8bit_counters_unregister)
-      return;
-    for (auto &pair : m8BitStart2Stop) {
-      __sanitizer_cov_8bit_counters_unregister(pair.first);
-    }
-    m8BitStart2Stop.clear();
-  }
-
-  void UnregisterSanCovPCs() {
-    if (!__sanitizer_cov_pcs_unregister)
-      return;
-    for (auto &pair : mPCsBeg2End) {
-      __sanitizer_cov_pcs_unregister(pair.first);
-    }
-    mPCsBeg2End.clear();
-  }
-
-private:
-  std::map<uint8_t *, uint8_t *> m8BitStart2Stop;
-  std::map<const uintptr_t *, const uintptr_t *> mPCsBeg2End;
-  std::set<uint8_t *> mShowed8BitCntrs;
-  std::set<const uintptr_t *> mShowedPCs;
-};
-
-SanCovMapRepeater gRepeater;
-
-extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
-                                                           uint8_t *Stop) {
-  gRepeater.RegisterSanCov8Bit(Start, Stop);
-}
-
-extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
-                                                 const uintptr_t *pcs_end) {
-  gRepeater.RegisterSanCovPCs(pcs_beg, pcs_end);
-}
-
 void ClearSticker() {
   g_enclave_ocall_table = nullptr;
   RunInEnclave = false;
@@ -433,16 +277,13 @@ void ClearSticker() {
   ocallHistory.clear();
   g_thread_pool->clear();
   ClearOCAllocStack();
-  EnclaveDSOStart2End.clear();
+  gEnclaveInfo.Clear();
 }
 
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
-  gRepeater.UnregisterSanCov8Bit();
-  gRepeater.UnregisterSanCovPCs();
-
   // Since we will access object belong to Enclave, so set RunInEnclave to true
   RunInEnclave = true;
-  sgxsan_assert(dlclose(gEnclaveHandler) == 0);
+  sgxsan_assert(dlclose(gEnclaveInfo.GetHandler()) == 0);
   RunInEnclave = false;
 
   // Clear SGXSanRT's global status belong to Enclave
@@ -453,19 +294,9 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   if (not gHostASanInited) {
     ClearStackPoison();
   }
-  ClearHeapObject();
-  gEnclaveHandler = nullptr;
   return SGX_SUCCESS;
 }
 
-extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
-void (*TSticker__llvm_profile_write_file)(void);
-extern "C" void libFuzzerCrashCallback() {
-  TSticker__llvm_profile_write_file =
-      (decltype(TSticker__llvm_profile_write_file))dlsym(
-          gEnclaveHandler, "TSticker__llvm_profile_write_file");
-  if (TSticker__llvm_profile_write_file)
-    TSticker__llvm_profile_write_file();
-  if (__llvm_profile_write_file)
-    __llvm_profile_write_file();
+extern "C" void GetEnclaveDSORange(uptr *start, uptr *end) {
+  gEnclaveInfo.GetEnclaveDSORange(start, end);
 }

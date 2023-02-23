@@ -79,7 +79,6 @@ enum log_level {
 extern "C" {
 #endif
 void register_sgxsan_sigaction();
-int hook_enclave();
 
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void SGXSanLogEnter(const char *str);
@@ -227,7 +226,3 @@ void ClearStackPoison();
 /* addr2line & backtrace Util */
 std::string addr2fname_try(void *addr);
 void *sgxsan_backtrace_i(int idx);
-
-/* Set or get global Enclave file name */
-void setEnclaveFileName(std::string fileName);
-std::string getEnclaveFileName();
