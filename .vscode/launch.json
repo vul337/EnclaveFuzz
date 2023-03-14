@@ -773,5 +773,29 @@
             "justMyCode": true,
             "cwd": "${workspaceFolder}/SGX_APP/sgx-wallet"
         },
+        {
+            "name": "(RemoteAttestation) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/leone/Documents/SGXSan3/linux-sgx/SampleCode/RemoteAttestation/app",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "/home/leone/Documents/SGXSan3/linux-sgx/SampleCode/RemoteAttestation",
+            "environment": [],
+            "externalConsole": false,
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
     ]
 }

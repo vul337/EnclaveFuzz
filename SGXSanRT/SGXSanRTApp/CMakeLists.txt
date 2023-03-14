@@ -10,7 +10,6 @@ include_directories(
     ${LINUX_SGX_MINI}/sdk/trts
     ${PLTHOOK_DIR}
     ../
-    ../../kAFLUSpaceUtil/
     ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(

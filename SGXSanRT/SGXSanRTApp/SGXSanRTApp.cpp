@@ -4,7 +4,6 @@
 #include "Malloc.h"
 #include "MemAccessMgr.h"
 #include "Sticker.h"
-#include "nyx_api.h"
 #include "plthook.h"
 #include <atomic>
 #include <boost/algorithm/string.hpp>
@@ -267,27 +266,40 @@ extern "C" void PrintArg(char *info, void *func_ptr, int pos) {
             "ArgIdx: %ld\n",
             info, func_ptr, pos);
 }
-
+extern "C" __attribute__((weak)) void
+sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
+  if (sgxfuzz_log) {
+    if (with_prefix) {
+#if (SHOW_TID)
+      sgxfuzz_log(ll, false, "[TID=0x%x] ", gettid());
+#endif
+      sgxfuzz_log(ll, false, "%s", log_level_to_prefix[ll]);
+    }
+
+    char buf[BUFSIZ];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, BUFSIZ, fmt, ap);
+    va_end(ap);
+    sgxfuzz_log(ll, false, "%s", buf);
+    return;
+  }
+
   if (ll > USED_LOG_LEVEL)
     return;
 
   if (with_prefix) {
 #if (SHOW_TID)
-    // fprintf(stderr, "[TID=0x%x] ", gettid());
-    hprintf("[TID=0x%x] ", gettid());
+    fprintf(stderr, "[TID=0x%x] ", gettid());
 #endif
-    // fprintf(stderr, "%s", log_level_to_prefix[ll]);
-    hprintf("%s", log_level_to_prefix[ll]);
+    fprintf(stderr, "%s", log_level_to_prefix[ll]);
   }
 
-  char buf[BUFSIZ];
   va_list ap;
   va_start(ap, fmt);
-  // vfprintf(stderr, fmt, ap);
-  vsnprintf(buf, BUFSIZ, fmt, ap);
+  vfprintf(stderr, fmt, ap);
   va_end(ap);
-  hprintf("%s", buf);
 }
 
 void SGXSanLogEnter(const char *str) { log_always("Enter %s\n", str); }
