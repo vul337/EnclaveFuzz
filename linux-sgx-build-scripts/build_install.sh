@@ -29,4 +29,4 @@ make deb_local_repo ${FLAGS} -j$(nproc) -Orecurse -s || make deb_local_repo ${FL
 # install sgxpsw
 sudo apt-get update
 sudo apt-get install libssl-dev libcurl4-openssl-dev libprotobuf-dev -y
-sudo apt-get install libsgx-launch* libsgx-urts* libsgx-epid* libsgx-quote-ex* -y
+sudo apt-get install libsgx-launch.* libsgx-urts.* libsgx-epid.* libsgx-quote-ex.* -y
