@@ -11,7 +11,7 @@ done
 PWD=$(pwd)
 SGXSAN_DIR="$(realpath ${PWD})"
 PATCH_DIR="$(realpath ${SGXSAN_DIR}/SDKPatch/)"
-LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/..)
+LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/linux-sgx)
 PREFIX="${PREFIX:-${SGXSAN_DIR}/install}"
 
 MODE=${MODE:="RELEASE"}

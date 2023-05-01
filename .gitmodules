@@ -13,3 +13,6 @@
 [submodule "SGXFuzzerRT/libFuzzer"]
 	path = SGXFuzzerRT/libFuzzer
 	url = git@github.com:LeoneChen/libFuzzer.git
+[submodule "linux-sgx"]
+	path = linux-sgx
+	url = git@github.com:intel/linux-sgx.git

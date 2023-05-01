@@ -37,6 +37,7 @@ include_directories(
     libFuzzer
     ../json/single_include
     ../magic_enum/include
+    ../linux-sgx/common/inc
     ${CMAKE_CURRENT_BINARY_DIR}/..
     ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)
 

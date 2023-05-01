@@ -7,5 +7,5 @@ if(HOST_ASAN)
     message(STATUS "HOST_ASAN Enabled")
 endif()
 
-include_directories(../SGXSanRTCommon ../)
+include_directories(../SGXSanRTCommon ../ ../../linux-sgx/common/inc)
 add_library(SGXSanRTApp SHARED SGXSanRTApp.cpp)
