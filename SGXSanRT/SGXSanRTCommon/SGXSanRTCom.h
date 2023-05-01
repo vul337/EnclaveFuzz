@@ -105,6 +105,7 @@ typedef signed long long s64;
 /* Some define */
 #define NOINLINE __attribute__((noinline))
 #define INTERFACE_ATTRIBUTE __attribute__((visibility("default")))
+#define NORETURN __attribute__((noreturn))
 
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)

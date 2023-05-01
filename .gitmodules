@@ -16,3 +16,6 @@
 [submodule "linux-sgx"]
 	path = linux-sgx
 	url = git@github.com:intel/linux-sgx.git
+[submodule "kAFL"]
+	path = kAFL
+	url = git@github.com:IntelLabs/kAFL.git

@@ -18,9 +18,6 @@
 #include <sys/types.h>
 #include <vector>
 
-// libFuzzer API
-extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
-
 // log util
 enum log_level {
   LOG_LEVEL_ALWAYS,

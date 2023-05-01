@@ -1,71 +1,70 @@
 #!/bin/bash
 
-# set -ex
+set -e
 
+# Print Help
 if [[ "$1" == "-h" ]] || [ $# -ne 4 ]; then
     echo "$(basename "$0") <fuzzbin> <enclave.so> WorkDir ID"
     exit 0
 fi
 
-
-FUZZERBIN=$(realpath -s "$1")
-ENCLAVEBIN=$(realpath -s "$2")
+# ARG
+SRC_FUZZERBIN=$(realpath -s "$1")
+SRC_ENCLAVEBIN=$(realpath -s "$2")
 WORKDIR=$(realpath -s "$3")
 TEST=$4
 
-
-FUZZERNAME=$(basename ${FUZZERBIN})
-ENCLAVENAME=$(basename ${ENCLAVEBIN})
-
+FUZZERNAME=$(basename ${SRC_FUZZERBIN})
+ENCLAVENAME=$(basename ${SRC_ENCLAVEBIN})
 
 EVALTOP="$WORKDIR-T$TEST-$(date +%F)"
-SEEDS="$EVALTOP/result/seeds"
-CRASHES="$EVALTOP/result/crashes"
-PROFILE="$EVALTOP/result/profraw"
 
+# Make Dir
 mkdir -p $EVALTOP
-mkdir -p $SEEDS
-mkdir -p $CRASHES
-mkdir -p $PROFILE
+mkdir -p "$EVALTOP/result/seeds"
+mkdir -p "$EVALTOP/result/crashes"
+mkdir -p "$EVALTOP/result/profraw"
 
+# Copy
+echo "[SRC] Fuzzing Binary: $SRC_FUZZERBIN"
+echo "[SRC] Enclave Binary: $SRC_ENCLAVEBIN"
+echo "Evaluation Directory: $EVALTOP"
+echo "[DST] Fuzzing Binary: $EVALTOP/$FUZZERNAME"
+echo "[DST] Enclave Binary: $EVALTOP/$ENCLAVENAME"
 
-echo "Use fuzzing binary: $FUZZERNAME, enclave binary: $ENCLAVENAME"
-echo "Fuzzing binary: $FUZZERBIN, enclave binary: $ENCLAVEBIN"
-echo "Evaluation directory: $EVALTOP"
-
-
-cp $FUZZERBIN $EVALTOP/$FUZZERNAME
-cp $ENCLAVEBIN $EVALTOP/$ENCLAVENAME
+cp $SRC_FUZZERBIN $EVALTOP/$FUZZERNAME
+cp $SRC_ENCLAVEBIN $EVALTOP/$ENCLAVENAME
 
 cd $EVALTOP
 # echo ""
 # echo "LLVM_PROFILE_FILE=\"./result/profraw/%p\" ./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -fork=1 "
 
-
+# Create show_cov.sh
 cat > show_cov.sh <<EOF
 #!/usr/bin/env bash
 
 # llvm-profdata-13 merge --failure-mode=all -sparse -output=./result/all.profdata ./result/profraw/
-llvm-cov-13 report ./$ENCLAVENAME -instr-profile=./result/all.profdata -use-color
+llvm-cov-13 report ./$ENCLAVENAME -instr-profile=./result/all.profdata
 
 EOF
 chmod +x show_cov.sh
 
-
+# Create fuzz.sh
 cat > fuzz.sh <<EOF
 #!/usr/bin/env bash
 
 set -ex
 
-LLVM_PROFILE_FILE="./result/profraw/%p" nohup ./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ \$@ >> coverage_exp.log 2>&1 & 
+LLVM_PROFILE_FILE="./result/profraw/%p" nohup ./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@ >> coverage_exp.log 2>&1 & 
 fuzz_pid=\$!
 echo \$fuzz_pid > fuzz.pid
-echo "./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ \$@" >> fuzz.cmd
-ln -s /tmp/libFuzzerTemp.FuzzWithFork\$fuzz_pid.dir ./libFuzzerTemp
-tail -f coverage_exp.log
+echo "./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@" >> fuzz.cmd
+ln -sf /tmp/libFuzzerTemp.FuzzWithFork\$fuzz_pid.dir ./libFuzzerTemp
+# tail -f coverage_exp.log
 EOF
 chmod +x fuzz.sh
 
+# Create stop.sh
 cat > stop.sh <<EOF
 #!/usr/bin/env bash
 
@@ -76,6 +75,7 @@ rm fuzz.pid
 EOF
 chmod +x stop.sh
 
+# Create merge.sh
 cat > merge.sh <<EOF
 #!/usr/bin/env bash
 

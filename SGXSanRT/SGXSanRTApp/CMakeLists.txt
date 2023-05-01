@@ -9,3 +9,6 @@ endif()
 
 include_directories(../SGXSanRTCommon ../ ../../linux-sgx/common/inc)
 add_library(SGXSanRTApp SHARED SGXSanRTApp.cpp)
+if(KAFL_FUZZER)
+target_compile_definitions(SGXSanRTApp PUBLIC KAFL_FUZZER)
+endif()

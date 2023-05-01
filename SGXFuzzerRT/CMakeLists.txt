@@ -41,10 +41,21 @@ include_directories(
     ${CMAKE_CURRENT_BINARY_DIR}/..
     ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)
 
+if(KAFL_FUZZER)
+include_directories(
+    ${KAFL_EXAMPLES_DIR}/linux-user/libnyx_agent/src/
+    ${KAFL_EXAMPLES_DIR}
+)
+add_library(
+    SGXFuzzerRT STATIC 
+    ${FUZZER_RT_SRC})
+target_compile_definitions(SGXFuzzerRT PUBLIC KAFL_FUZZER)
+else()
 add_library(
     SGXFuzzerRT STATIC 
     ${LIBFUZZER_SRC}
     ${FUZZER_RT_SRC})
+endif()
 
 set_target_properties(
     SGXFuzzerRT PROPERTIES

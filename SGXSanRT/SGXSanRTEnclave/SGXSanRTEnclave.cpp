@@ -80,3 +80,9 @@ void __asan_init() {
   // sgxsdk already ensure each ctor only run once
   AsanInitInternal();
 }
+
+extern "C" void sgxsan_ecall_get_enclave_range(uintptr_t *enclave_base,
+                                               size_t *enclave_size) {
+  *enclave_base = g_enclave_base;
+  *enclave_size = g_enclave_size;
+}

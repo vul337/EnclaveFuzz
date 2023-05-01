@@ -1,6 +1,6 @@
 *.o
 *.a
 *.so
-*build
-install
+*-build
+*install
 .vscode/settings.json

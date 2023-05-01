@@ -12,4 +12,4 @@ EOF
 
 # install sgxpsw
 sudo apt-get update
-sudo apt-get install libsgx-launch.* libsgx-urts.* libsgx-epid.* libsgx-quote-ex.* -y
+sudo apt-get install libsgx-launch.* libsgx-urts.* libsgx-epid.* libsgx-quote-ex.* libsgx-enclave-common.* libsgx-uae-service.* libsgx-ae-qe3.* libsgx-ae-qve.* libsgx-dcap-ql.* libsgx-dcap-default-qpl.* libsgx-dcap-quote-verify.* libsgx-ra-network.* libsgx-ra-uefi.* libsgx-qe3-logic.* -y

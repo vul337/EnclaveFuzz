@@ -10,7 +10,11 @@
 class RandPool {
 public:
   RandPool() {
-    mRandFilePath = std::string(SGXSAN_DIR "/SGXFuzzerRT/rand_file");
+#ifdef KAFL_FUZZER
+    mRandFilePath = std::string("./rand_file");
+#else
+    mRandFilePath = std::string(SGXSAN_DIR "/Tool/rand_file");
+#endif
     int fd = open(mRandFilePath.c_str(), O_RDONLY);
     sgxfuzz_assert(fd != -1);
     sgxfuzz_assert(lseek(fd, 0, mRandPoolSize) == 0);
@@ -72,6 +76,11 @@ public:
     T res;
     getBytes(&res, sizeof(T), offset);
     return res;
+  }
+
+  template <typename T> T getIntegral(size_t offset) {
+    return getIntergerInRange(std::numeric_limits<T>::min(),
+                              std::numeric_limits<T>::max(), offset);
   }
 
   template <class T> T getIntergerInRange(T min, T max, size_t offset) {

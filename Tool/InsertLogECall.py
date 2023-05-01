@@ -33,7 +33,7 @@ def main():
             content = f.read()
             modified = False
             for ecall in ecalls:
-                LogEnterFuncName = "SGXSanLogEnter" if args.kind == "Fuzzer2.0" else "LogEnter"
+                LogEnterFuncName = "LogEnter"
                 content, n = re.subn(
                     r"(\b" + ecall+r"\s*?\([^(){}]*?\)[^(){}]*?\{(?!\n    "+LogEnterFuncName+r"))", r"\1\n    "+LogEnterFuncName+r"(__func__);", content, flags=re.DOTALL)
                 if n > 0:
@@ -50,7 +50,8 @@ def main():
                     "void SGXSanLogEnter(const char *str);\n" \
                     "#if defined(__cplusplus)\n" \
                     "}\n" \
-                    "#endif\n" if args.kind == "Fuzzer2.0" else "#include \"kafl_hc.h\"\n"
+                    "#endif\n" \
+                    "#define LogEnter SGXSanLogEnter\n" if args.kind == "Fuzzer2.0" else "#include \"kafl_hc.h\"\n"
                 content = head + content
                 f.write(content)
 

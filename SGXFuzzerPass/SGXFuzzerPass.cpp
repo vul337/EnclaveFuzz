@@ -30,6 +30,14 @@ class SGXFuzzerPass : public ModulePass {
 public:
   SGXFuzzerPass() : ModulePass(ID) {}
 
+#ifdef KAFL_FUZZER
+  bool runOnModule(Module &M) override {
+    // run DriverGenerator
+    dbgs() << "== DriverGenerator: " << M.getName() << " ==\n";
+    DriverGenerator gen;
+    return gen.runOnModule(M);
+  }
+#else
   bool runOnModule(Module &M) override {
     bool changed = false;
     if (not ClAtEnclave && ClEnableEnclaveTesterGenerator) {
@@ -56,6 +64,7 @@ public:
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
   }
+#endif
 
   static char ID; // Pass identification, replacement for typeid
 };

@@ -1,0 +1,69 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(libFuzzer) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/media/leone/Data/Fuzzer1.0-WAMR-HW-DBG-T0-2023-06-12/iwasm",
+            "args": [
+                "--cb_enclave=enclave.signed.so",
+                "-max_len=10000000",
+                "./result/crashes/crash-0dee2b5e2e12d1b9c0dde526d0712e42197b1bf1"
+            ],
+            "stopAtEntry": false,
+            "cwd": "/media/leone/Data/Fuzzer1.0-WAMR-HW-DBG-T0-2023-06-12",
+            "environment": [],
+            "externalConsole": false,
+            // "MIMode": "gdb",
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(kAFL) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/SGX_APP/wasm-micro-runtime/product-mini/platforms/linux-sgx/enclave-sample/iwasm",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            // "MIMode": "gdb",
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                },
+                {
+                    "text": "handle SIGILL nostop",
+                }
+            ],
+            "hardwareBreakpoints": {
+                "require": true,
+            },
+            "miDebuggerServerAddress": "localhost:5555"
+        }
+    ]
+}
