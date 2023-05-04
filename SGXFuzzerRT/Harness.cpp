@@ -48,7 +48,7 @@ namespace fs = std::filesystem;
 RandPool gRandPool;
 
 sgx_enclave_id_t global_eid = 0;
-std::string ClEnclaveFileName;
+std::string ClEnclaveFileName, ClDebugInput;
 size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
 int ClUsedLogLevel;
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
@@ -107,17 +107,26 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
   if (with_prefix) {
     std::string prefix = std::string(log_level_to_prefix[level]) + "[" +
                          time_in_HH_MM_SS_MMM() + "] ";
-    // fprintf(stderr, "%s", prefix.c_str());
+#if IN_KAFL_QEMU
     hprintf("%s", prefix.c_str());
+#else
+    fprintf(stderr, "%s", prefix.c_str());
+#endif
   }
 
+#if IN_KAFL_QEMU
   char buf[BUFSIZ];
   va_list ap;
   va_start(ap, format);
-  // vfprintf(stderr, format, ap);
   vsnprintf(buf, BUFSIZ, format, ap);
   va_end(ap);
   hprintf("%s", buf);
+#else
+  va_list ap;
+  va_start(ap, format);
+  vfprintf(stderr, format, ap);
+  va_end(ap);
+#endif
 }
 
 extern "C" __attribute__((weak)) bool AddrIsInHeapQuarantine(uint64_t addr);
@@ -388,12 +397,18 @@ void ShowAllECalls() {
 // libFuzzer Callbacks
 extern "C" {
 
-void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }
+void FuzzerCrashCB() {
+#ifdef IN_KAFL_QEMU
+  kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1);
+#endif
+}
 void FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv) {
+#ifdef IN_KAFL_QEMU
   ucontext_t *uc = (ucontext_t *)priv;
   uint64_t reason = 0x8000000000000000ULL | uc->uc_mcontext.gregs[REG_RIP] |
                     ((uint64_t)siginfo->si_signo << 47);
   kAFL_hypercall(HYPERCALL_KAFL_PANIC, reason);
+#endif
 }
 
 int FuzzerInitialize(int *argc, char ***argv) {
@@ -451,6 +466,9 @@ int FuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_max_payload_size",
           po::value<size_t>(&ClMaxPayloadSize)->default_value(10000000),
           "Allocate buffer with cb_max_payload_size, to prepare fuzz data");
+  add_opt("cb_dbg_input",
+          po::value<std::string>(&ClDebugInput)->default_value(""),
+          "Specify input to debug bug");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -621,7 +639,9 @@ int agent_init(int verbose) {
 
 extern "C" void GetEnclaveDSORange(uintptr_t *start, uintptr_t *end);
 int FuzzerTestOneInput() {
+#ifdef IN_KAFL_QEMU
   agent_init(1);
+#endif
   log_always("Start FuzzerTestOneInput\n");
 
   // Initialize Enclave
@@ -630,6 +650,7 @@ int FuzzerTestOneInput() {
       NULL, NULL, &global_eid, NULL);
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
+#ifdef IN_KAFL_QEMU
   uintptr_t EnclaveStart, EnclaveEnd;
   GetEnclaveDSORange(&EnclaveStart, &EnclaveEnd);
   hrange_submit(0, EnclaveStart, EnclaveEnd);
@@ -645,6 +666,15 @@ int FuzzerTestOneInput() {
 
   log_always("Data %p %d\n", pbuf->data, pbuf->size);
   data_factory.init(pbuf->data, pbuf->size);
+#else
+  sgxfuzz_assert(ClDebugInput != "");
+  std::ifstream ifd(ClDebugInput, std::ios::binary);
+  uintmax_t bufSize = fs::file_size(fs::path(ClDebugInput));
+  uint8_t *buf = (uint8_t *)data_factory.managedMalloc(bufSize);
+  ifd.read((char *)buf, bufSize);
+  log_always("Data %p %d\n", buf, bufSize);
+  data_factory.init(buf, bufSize);
+#endif
 
   // Test body
   std::vector<int> callSeq;
@@ -668,6 +698,7 @@ int FuzzerTestOneInput() {
                   "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
   }
 
+#ifdef IN_KAFL_QEMU
   bool isStarve = false;
   if (data_factory.GetExpectedFuzzDataSize() > pbuf->size) {
     log_always("Expected size:%d, given size: %d\n",
@@ -676,6 +707,7 @@ int FuzzerTestOneInput() {
   }
   kAFL_hypercall(HYPERCALL_KAFL_RELEASE, isStarve);
   log_error("After release, shouldn't reach here\n");
+#endif
   data_factory.clear();
 
   // Destroy Enclave

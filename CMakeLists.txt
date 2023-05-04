@@ -35,6 +35,7 @@ install(TARGETS
         SGXSanRTApp
         SGXSanRTEnclave
         SGXFuzzerPass
+        SGXFuzzerRTHost
         SGXFuzzerRT
         FuncRenamePass
         GetOCallTable

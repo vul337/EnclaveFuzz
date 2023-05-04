@@ -8,11 +8,11 @@ include_directories(
     ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)
 
 add_library(
-    SGXFuzzerRT STATIC 
+    SGXFuzzerRTHost STATIC 
     Harness.cpp)
 
 set_target_properties(
-    SGXFuzzerRT PROPERTIES
+    SGXFuzzerRTHost PROPERTIES
     POSITION_INDEPENDENT_CODE True
     COMPILE_FLAGS "-Wall -Wno-unused-result -std=c++17")
 
@@ -21,3 +21,14 @@ if(LIBFUZZER_CB_ASAN)
     set_source_files_properties(${FUZZER_RT_SRC} PROPERTIES
         COMPILE_FLAGS "-flegacy-pass-manager -Xclang -load -Xclang ${SGXSanPassPath} -mllvm -in-enclave=false")
 endif()
+
+add_library(
+    SGXFuzzerRT STATIC 
+    Harness.cpp)
+
+set_target_properties(
+    SGXFuzzerRT PROPERTIES
+    POSITION_INDEPENDENT_CODE True
+    COMPILE_FLAGS "-Wall -Wno-unused-result -std=c++17")
+
+target_compile_definitions(SGXFuzzerRT PUBLIC IN_KAFL_QEMU)
