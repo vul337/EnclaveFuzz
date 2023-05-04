@@ -433,9 +433,9 @@
             "name": "(sgx-wallet) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/sgx-wallet",
+            "program": "/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/sgx-walletHost",
             "args": [
-                "--cb_dbg_input=/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/workdir/corpus/crash/payload_00033",
+                "--cb_dbg_input=/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/seeds/seed",
             ],
             "stopAtEntry": false,
             "cwd": "/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/",

@@ -212,10 +212,10 @@ static void sgxsan_init_shadow_memory() {
                     MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1,
                     0) == MAP_FAILED,
                "Shadow Memory is not available\n");
-  sgxsan_error(madvise((void *)kLowShadowGuardBeg,
-                       kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
-                       MADV_NOHUGEPAGE) == -1,
-               "Fail to madvise MADV_NOHUGEPAGE\n");
+  madvise((void *)kLowShadowGuardBeg,
+          kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
+          MADV_NOHUGEPAGE); // Return -1 if CONFIG_TRANSPARENT_HUGEPAGE was not
+                            // configured in kernel
   sgxsan_error(mprotect((void *)kLowShadowGuardBeg, page_size, PROT_NONE) ||
                    mprotect((void *)(kHighShadowEnd + 1), page_size, PROT_NONE),
                "Failed to make guard page for shadow map\n");

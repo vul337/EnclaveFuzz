@@ -50,7 +50,7 @@ RandPool gRandPool;
 sgx_enclave_id_t global_eid = 0;
 std::string ClEnclaveFileName, ClDebugInput;
 size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
-int ClUsedLogLevel;
+int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
 
