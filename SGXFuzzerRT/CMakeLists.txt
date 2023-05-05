@@ -2,7 +2,7 @@ include_directories(
     libFuzzer
     ../json/single_include
     ../magic_enum/include
-    ../kAFLUSpaceUtil/
+    ../kAFLUSpaceUtil/include
     ${CMAKE_CURRENT_BINARY_DIR}/..
     ${LINUX_SGX_MINI}/common/inc
     ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)

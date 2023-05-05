@@ -22,6 +22,7 @@ add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
 add_subdirectory(SGXFuzzerPass)
 add_subdirectory(SGXFuzzerRT)
+add_subdirectory(kAFLUSpaceUtil)
 
 if(LIBFUZZER_CB_ASAN)
     message(STATUS "LIBFUZZER_CB_ASAN: Enable")
@@ -39,6 +40,9 @@ install(TARGETS
         SGXFuzzerRT
         FuncRenamePass
         GetOCallTable
+        nyx_agent
+        nyx_agent_static
+        vmcall
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
 
@@ -53,12 +57,9 @@ install(FILES Tool/sgx_edger8r
 install(FILES ${LINUX_SGX_MINI}/common/buildenv.mk
         DESTINATION .)
 
-install(FILES kAFLUSpaceUtil/libnyx_agent.a
-        kAFLUSpaceUtil/libnyx_agent.so
-        DESTINATION lib64)
-
-install(FILES kAFLUSpaceUtil/vmcall
-        DESTINATION bin)
+install(DIRECTORY kAFLUSpaceUtil/initrd/
+        USE_SOURCE_PERMISSIONS
+        DESTINATION initrd)
 
 install(FILES Tool/rand_file
         DESTINATION .)
