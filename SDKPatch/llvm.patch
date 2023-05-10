@@ -1,8 +1,8 @@
 diff --git a/common/inc/sgx_random_buffers.h b/common/inc/sgx_random_buffers.h
-index 721de3d7..783f2df9 100644
+index 1940aa03..24c2a50b 100644
 --- a/common/inc/sgx_random_buffers.h
 +++ b/common/inc/sgx_random_buffers.h
-@@ -281,7 +281,7 @@ private:
+@@ -274,7 +274,7 @@ private:
          }
      };
  

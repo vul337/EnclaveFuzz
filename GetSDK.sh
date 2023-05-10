@@ -79,7 +79,7 @@ ${OBJCOPY} --redefine-sym __tls_get_addr=_deleted__tls_get_addr \
     ${PREFIX}/lib64/libsgx_trts_sim.a
 
 # get libsgx_tservice_sim.a
-cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/tservice_sim
+cd ${LINUX_SGX_SRC_DIR}/sdk/simulation/tae_service_sim
 ${MAKE} clean -s
 ${MAKE} -j${Jobs} CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ADD_LLVM_FLAGS}" ${ADD_MAKE_FLAGS}
 ${CP} libsgx_tservice_sim.a ${PREFIX}/lib64
