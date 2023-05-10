@@ -731,42 +731,33 @@
             "justMyCode": true,
         },
         {
-            "name": "kafl fuzz sgx-wallet",
-            "type": "python",
+            "name": "(kAFL sgx-wallet) Launch",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "/home/leone/Documents/SGXSan3/kAFL/kafl/.venv/bin/kafl",
-            "args": [
-                "fuzz",
-                "-w",
-                "workdir",
-                "--kernel",
-                "/home/leone/vmlinuz-5.10.75-051075-generic",
-                "--initrd",
-                "sgx-wallet.cpio.gz",
-                "--memory",
-                "512",
-                "--sharedir",
-                "./sharedir",
-                "--seed-dir",
-                "./seeds",
-                "-p",
-                "1",
-                "--redqueen",
-                "--grimoire",
-                "--radamsa",
-                "-D",
-                "--funky",
-                "--purge",
-                "--log-hprintf",
-                "-R",
-                "1",
-                "--debug",
-                "-v",
-                "--gdbserver"
+            "program": "/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/sgx-wallet",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet",
+            "environment": [],
+            "externalConsole": false,
+            // "MIMode": "gdb",
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
             ],
-            "console": "integratedTerminal",
-            "justMyCode": true,
-            "cwd": "${workspaceFolder}/SGX_APP/sgx-wallet"
+            "hardwareBreakpoints": {
+                "require": true,
+            },
+            "miDebuggerServerAddress": "localhost:5555"
         },
         {
             "name": "(RemoteAttestation) Launch",
@@ -776,6 +767,30 @@
             "args": [],
             "stopAtEntry": false,
             "cwd": "/home/leone/Documents/SGXSan3/linux-sgx/SampleCode/RemoteAttestation",
+            "environment": [],
+            "externalConsole": false,
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(SampleEnclave) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/leone/Documents/SGXSan/linux-sgx/SampleCode/SampleEnclave/app",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "/home/leone/Documents/SGXSan/linux-sgx/SampleCode/SampleEnclave",
             "environment": [],
             "externalConsole": false,
             "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
