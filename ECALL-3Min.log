@@ -1,0 +1,33 @@
+WAMR 3Min
+F2-KAFL
+136754 Enter ecall_handle_command
+56006 Enter ecall_iwasm_main
+F1-KAFL
+156575 Enter ecall_handle_command
+104886 Enter ecall_iwasm_main
+F2-LIBFUZZER
+93553 Enter ecall_handle_command
+96160 Enter ecall_iwasm_main
+F1-LIBFUZZER
+11861 Enter ecall_iwasm_main
+13068 Enter ecall_handle_command
+F1-LIBFUZZER-HW
+1506 Enter ecall_handle_command
+1540 Enter ecall_iwasm_main
+
+SGX-WALLET 3Min
+F2-KAFL
+154971 Enter ecall_add_item
+82838 Enter ecall_show_wallet
+76091 Enter ecall_remove_item
+77458 Enter ecall_create_wallet
+90039 Enter ecall_change_master_password
+F1-KAFL
+F2-LIBFUZZER
+22682 Enter ecall_show_wallet
+24889 Enter ecall_add_item
+21066 Enter ecall_remove_item
+23307 Enter ecall_change_master_password
+22987 Enter ecall_create_wallet
+F1-LIBFUZZER
+F1-LIBFUZZER-HW

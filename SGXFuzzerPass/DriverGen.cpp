@@ -520,8 +520,8 @@ Function *DriverGenerator::createEcallFuzzWrapperFunc(std::string ecallName) {
     }
   }
   // 3. prepare Enclave ID parameter
-  auto eid = cast<GlobalVariable>(
-      M->getOrInsertGlobal("global_eid", Type::getInt64Ty(*C)));
+  auto eid = cast<GlobalVariable>(M->getOrInsertGlobal(
+      "__hidden_sgxfuzzer_harness_global_eid", Type::getInt64Ty(*C)));
   eid->setLinkage(GlobalValue::ExternalLinkage);
   IRBuilder<> IRB(retVoidI);
   SmallVector<Value *> preparedParams = {

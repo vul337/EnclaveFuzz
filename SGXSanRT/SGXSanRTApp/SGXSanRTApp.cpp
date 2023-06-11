@@ -71,6 +71,7 @@ static void PrintAddressSpaceLayout(log_level ll = LOG_LEVEL_DEBUG) {
              (void *)kHighMemBeg, (void *)kHighMemEnd);
 }
 
+#ifndef KAFL_FUZZER
 typedef void (*DieCallbackType)(void);
 static DieCallbackType UserDieCallback;
 void SetUserDieCallback(DieCallbackType callback) {
@@ -82,32 +83,33 @@ void NORETURN Die() {
     UserDieCallback();
   _Exit(1);
 }
+#endif
 
-extern "C" {
 // https://maskray.me/blog/2022-04-10-unwinding-through-signal-handler
-void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf, size_t bt_cnt) {
-  fprintf(stderr, "== SGXSan Backtrace BEG ==\n");
+extern "C" void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf,
+                                               size_t bt_cnt) {
+  log_always_np("== SGXSan Backtrace BEG ==\n");
   for (size_t i = 0; i < bt_cnt; i++) {
     uint64_t addr = bt_buf[i];
     Dl_info info;
     if (dladdr((void *)addr, &info) != 0) {
       if (info.dli_saddr) {
-        fprintf(stderr, "0x%016lx: %s (offset 0x%lx) at %s\n",
-                addr - (uint64_t)info.dli_fbase,
-                info.dli_sname ? info.dli_sname : "?",
-                (uint64_t)info.dli_saddr - (uint64_t)info.dli_fbase,
-                info.dli_fname ? info.dli_fname : "?");
+        log_always_np("0x%016lx: %s (offset 0x%lx) at %s\n",
+                      addr - (uint64_t)info.dli_fbase,
+                      info.dli_sname ? info.dli_sname : "?",
+                      (uint64_t)info.dli_saddr - (uint64_t)info.dli_fbase,
+                      info.dli_fname ? info.dli_fname : "?");
       } else {
-        fprintf(stderr, "0x%016lx: %s at %s\n", addr - (uint64_t)info.dli_fbase,
-                info.dli_sname ? info.dli_sname : "?",
-                info.dli_fname ? info.dli_fname : "?");
+        log_always_np("0x%016lx: %s at %s\n", addr - (uint64_t)info.dli_fbase,
+                      info.dli_sname ? info.dli_sname : "?",
+                      info.dli_fname ? info.dli_fname : "?");
       }
     }
   }
-  fprintf(stderr, "== SGXSan Backtrace END ==\n");
+  log_always_np("== SGXSan Backtrace END ==\n");
 }
 
-void sgxsan_signal_safe_dump_bt() {
+extern "C" void sgxsan_signal_safe_dump_bt() {
   size_t max_bt_count = 100;
   uint64_t bt_buf[max_bt_count];
   size_t bt_cnt =
@@ -116,23 +118,94 @@ void sgxsan_signal_safe_dump_bt() {
   sgxsan_signal_safe_dump_bt_buf(bt_buf, bt_cnt);
 }
 
-__attribute__((alias("sgxsan_signal_safe_dump_bt")))
+#ifdef KAFL_FUZZER
+
+extern "C" int DFGetInt32();
+extern "C" __attribute__((weak)) void
+FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv);
+extern "C" __attribute__((weak)) void FuzzerCrashCB();
+
+void NORETURN Die() {
+  if (FuzzerCrashCB)
+    FuzzerCrashCB();
+  _Exit(1);
+}
+
+/// \brief Signal handler to report illegal memory access
+static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
+  ucontext_t *uc = (ucontext_t *)priv;
+  const greg_t rip = uc->uc_mcontext.gregs[REG_RIP];
+  greg_t *const rip_p = &uc->uc_mcontext.gregs[REG_RIP];
+  if (siginfo->si_signo == SIGSEGV) {
+    if (siginfo->si_code == SI_KERNEL) {
+      // If si_code is SI_KERNEL, #PF address is not true
+      log_error("#PF Addr Unknown at pc %p\n", rip);
+    } else {
+      size_t page_size = getpagesize();
+      // process siginfo
+      void *_page_fault_addr = siginfo->si_addr;
+      log_error("#PF Addr %p at pc %p => ", _page_fault_addr, rip);
+
+      uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
+      if (0 <= page_fault_addr and page_fault_addr < page_size) {
+        log_error_np("Null-Pointer Dereference\n");
+      } else if ((kLowShadowGuardBeg <= page_fault_addr &&
+                  page_fault_addr < kLowShadowBeg) ||
+                 (kHighShadowEnd < page_fault_addr &&
+                  page_fault_addr <= kHighShadowGuardEnd)) {
+        log_error_np("ShadowMap's Guard Dereference\n");
+      } else if ((kHighShadowEnd + 1 - page_size) <= page_fault_addr &&
+                 page_fault_addr <= kHighShadowEnd) {
+        log_error_np("Cross ShadowMap's Guard Dereference\n");
+      } else if (kShadowGapBeg <= page_fault_addr &&
+                 page_fault_addr < kShadowGapEnd) {
+        log_error_np("ShadowMap's GAP Dereference\n");
+      } else {
+        log_error_np("Unknown page fault\n");
+      }
+    }
+  } else if (siginfo->si_signo == SIGILL) {
+    if (*(uint32_t *)rip == 0x29ae0f48 /* XRSTOR64 RCX */) {
+      *rip_p += 4;
+      return;
+    } else if ((*(uint32_t *)rip & 0xFFFFFF) == 0xf0c70f /* RDRAND EAX */) {
+      uc->uc_mcontext.gregs[REG_RAX] = DFGetInt32();
+      uc->uc_mcontext.gregs[REG_EFL] = 1; // CF->1 others->0
+      *rip_p += 3;
+      return;
+    } else if ((*(uint32_t *)rip & 0xFFFFFF) == 0xf6c70f /* RDRAND ESI */) {
+      uc->uc_mcontext.gregs[REG_RSI] = DFGetInt32();
+      uc->uc_mcontext.gregs[REG_EFL] = 1; // CF->1 others->0
+      *rip_p += 3;
+      return;
+    }
+    log_error("SIGILL opcode is %lx\n", *(uint32_t *)rip);
+  } else {
+    log_error("Signal %d\n", siginfo->si_signo);
+  }
+
+  sgxsan_signal_safe_dump_bt();
+  if (FuzzerSignalCB)
+    FuzzerSignalCB(signum, siginfo, priv);
+  Die();
+}
+#else
+
+extern "C" __attribute__((alias("sgxsan_signal_safe_dump_bt")))
 SANITIZER_INTERFACE_ATTRIBUTE void
 __sanitizer_print_stack_trace();
 
 // https://github.com/google/sanitizers/issues/788
 // __sanitizer_acquire_crash_state is important
-SANITIZER_INTERFACE_ATTRIBUTE
-int __sanitizer_acquire_crash_state() {
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE int __sanitizer_acquire_crash_state() {
   static std::atomic<int> in_crash_state = 0;
   return !std::atomic_exchange_explicit(&in_crash_state, 1,
                                         std::memory_order_relaxed);
 }
 
-SANITIZER_INTERFACE_ATTRIBUTE
-void __sanitizer_set_death_callback(void (*callback)(void)) {
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE void
+__sanitizer_set_death_callback(void (*callback)(void)) {
   SetUserDieCallback(callback);
-}
 }
 
 /// \brief Signal handler to report illegal memory access
@@ -209,6 +282,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   }
 #endif
 }
+#endif
 
 void register_sgxsan_sigaction() {
   static bool AlreadyRegisterSignalHandler = false;
@@ -224,8 +298,17 @@ void register_sgxsan_sigaction() {
   // make sure SIGSEGV is not blocked
   sigdelset(&sig_act.sa_mask, SIGSEGV);
   // hool SIGSEGV
-  sgxsan_error(0 != sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]),
-               "Fail to regist SIGSEGV action\n");
+  sgxsan_assert(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]));
+#ifdef KAFL_FUZZER
+  sgxsan_assert(0 == sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]));
+  sgxsan_assert(0 == sigaction(SIGBUS, &sig_act, &g_old_sigact[SIGBUS]));
+  sgxsan_assert(0 == sigaction(SIGILL, &sig_act, &g_old_sigact[SIGILL]));
+  sgxsan_assert(0 == sigaction(SIGABRT, &sig_act, &g_old_sigact[SIGABRT]));
+  sgxsan_assert(0 == sigaction(SIGIOT, &sig_act, &g_old_sigact[SIGIOT]));
+  sgxsan_assert(0 == sigaction(SIGTRAP, &sig_act, &g_old_sigact[SIGTRAP]));
+  sgxsan_assert(0 == sigaction(SIGSYS, &sig_act, &g_old_sigact[SIGSYS]));
+  sgxsan_assert(0 == sigaction(SIGUSR2, &sig_act, &g_old_sigact[SIGUSR2]));
+#endif
   AlreadyRegisterSignalHandler = true;
 }
 
@@ -241,10 +324,10 @@ static void sgxsan_init_shadow_memory() {
                     MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANON, -1,
                     0) == MAP_FAILED,
                "Shadow Memory is not available\n");
-  sgxsan_error(madvise((void *)kLowShadowGuardBeg,
-                       kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
-                       MADV_NOHUGEPAGE) == -1,
-               "Fail to madvise MADV_NOHUGEPAGE\n");
+  madvise((void *)kLowShadowGuardBeg,
+          kHighShadowGuardEnd - kLowShadowGuardBeg + 1,
+          MADV_NOHUGEPAGE); // Return -1 if CONFIG_TRANSPARENT_HUGEPAGE was not
+                            // configured in kernel
   sgxsan_error(mprotect((void *)kLowShadowGuardBeg, page_size, PROT_NONE) ||
                    mprotect((void *)(kHighShadowEnd + 1), page_size, PROT_NONE),
                "Failed to make guard page for shadow map\n");
@@ -264,14 +347,10 @@ static void sgxsan_init_shadow_memory() {
   }
 }
 
-/* Updated by sgx_create_enclave and used by hook_enclave */
-static std::string __gEnclaveFileName = "";
-std::string getEnclaveFileName() { return __gEnclaveFileName; }
-void setEnclaveFileName(std::string fileName) { __gEnclaveFileName = fileName; }
-
+#ifndef KAFL_FUZZER
 int hook_enclave() {
   plthook_t *plthook;
-  std::string fileName = getEnclaveFileName();
+  std::string fileName = gEnclaveInfo.GetEnclaveFileName();
   sgxsan_assert(fileName != "");
   if (plthook_open(&plthook, fileName.c_str()) != 0) {
     log_error("plthook_open error: %s\n", plthook_error());
@@ -292,6 +371,7 @@ int hook_enclave() {
   plthook_close(plthook);
   return 0;
 }
+#endif
 
 __attribute__((constructor)) void SGXSanInit() {
   if (asan_inited) {
@@ -324,8 +404,26 @@ extern "C" void PrintArg(char *info, void *func_ptr, int pos) {
             "ArgIdx: %ld\n",
             info, func_ptr, pos);
 }
-
+extern "C" __attribute__((weak)) void
+sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
+  if (sgxfuzz_log) {
+    if (with_prefix) {
+#if (SHOW_TID)
+      sgxfuzz_log(ll, false, "[TID=0x%x] ", gettid());
+#endif
+      sgxfuzz_log(ll, false, "%s", log_level_to_prefix[ll]);
+    }
+
+    char buf[BUFSIZ];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, BUFSIZ, fmt, ap);
+    va_end(ap);
+    sgxfuzz_log(ll, false, "%s", buf);
+    return;
+  }
+
   if (ll > USED_LOG_LEVEL)
     return;
 
@@ -406,6 +504,28 @@ static void PrintShadowMap(log_level ll, uptr addr) {
   sgxsan_log(ll, false, str.c_str());
 }
 
+void ReportError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
+                 uptr access_size, const char *msg, ...) {
+  log_level ll = LOG_LEVEL_ERROR;
+  log_error_np("\n================ Error Report ================\n"
+               "[SGXSan] ERROR: ");
+
+  char buf[BUFSIZ];
+  va_list ap;
+  va_start(ap, msg);
+  vsnprintf(buf, BUFSIZ, msg, ap);
+  va_end(ap);
+  sgxsan_log(ll, false, "%s", buf);
+
+  sgxsan_log(ll, false,
+             " at pc 0x%lx %s 0x%lx with 0x%lx bytes (bp = 0x%lx sp = "
+             "0x%lx)\n\n",
+             pc, (is_write ? "write" : "read"), addr, access_size, bp, sp);
+  sgxsan_backtrace(ll);
+  sgxsan_log(ll, false, "================= Report End =================\n");
+
+  Die();
+}
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal, const char *msg, ...) {
   if (L1F(*(uint8_t *)MEM_TO_SHADOW(addr)) == kAsanHeapFreeMagic) {
@@ -423,12 +543,12 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                    "[SGXSan] WARNING: ");
   }
 
-  if (ll <= USED_LOG_LEVEL) {
-    va_list ap;
-    va_start(ap, msg);
-    vfprintf(stderr, msg, ap);
-    va_end(ap);
-  }
+  char buf[BUFSIZ];
+  va_list ap;
+  va_start(ap, msg);
+  vsnprintf(buf, BUFSIZ, msg, ap);
+  va_end(ap);
+  sgxsan_log(ll, false, "%s", buf);
 
   sgxsan_log(ll, false,
              " at pc 0x%lx %s 0x%lx with 0x%lx bytes (bp = 0x%lx sp = "

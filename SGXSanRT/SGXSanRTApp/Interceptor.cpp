@@ -16,10 +16,8 @@ void InitInterceptor() {
   HasInit = true;
 }
 
-extern "C" {
-
-int snprintf(char *__restrict __s, size_t __maxlen,
-             const char *__restrict __format, ...) {
+extern "C" int snprintf(char *__restrict __s, size_t __maxlen,
+                        const char *__restrict __format, ...) {
   InitInterceptor();
   InOutEnclaveStatus RegionInOutEnclaveStatus;
   uptr RegionPoisonedAddr;
@@ -30,5 +28,4 @@ int snprintf(char *__restrict __s, size_t __maxlen,
   int res = REAL(vsnprintf)(__s, __maxlen, __format, ap);
   va_end(ap);
   return res;
-}
 }

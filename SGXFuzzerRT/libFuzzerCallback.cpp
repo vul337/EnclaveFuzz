@@ -27,12 +27,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#ifdef KAFL_FUZZER
+extern "C" {
+#include "nyx_agent.h"
+}
+#endif
 
 #define X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS 47
 #define ADDR_SPACE_BITS X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS
@@ -43,15 +50,15 @@ namespace fs = std::filesystem;
 
 RandPool gRandPool;
 
-sgx_enclave_id_t global_eid = 0;
+sgx_enclave_id_t __hidden_sgxfuzzer_harness_global_eid = 0;
 std::string ClEnclaveFileName;
-size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize;
-int ClUsedLogLevel;
+size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
+int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
 
 // Fuzz sequence
-enum FuzzMode { TEST_RANDOM, TEST_USER };
+enum FuzzMode { TEST_RANDOM, TEST_USER, TEST_SPEED };
 static std::vector<int> gFuzzerSeq;
 static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
@@ -103,15 +110,32 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
   if (with_prefix) {
     std::string prefix = std::string(log_level_to_prefix[level]) + "[" +
                          time_in_HH_MM_SS_MMM() + "] ";
+#ifdef KAFL_FUZZER
+    hprintf("%s", prefix.c_str());
+#else
     std::cerr << prefix;
+#endif
   }
 
+#ifdef KAFL_FUZZER
+  char buf[BUFSIZ];
+  va_list ap;
+  va_start(ap, format);
+  vsnprintf(buf, BUFSIZ, format, ap);
+  va_end(ap);
+  hprintf("%s", buf);
+#else
   va_list ap;
   va_start(ap, format);
   vfprintf(stderr, format, ap);
   va_end(ap);
+#endif
 }
 
+#ifndef KAFL_FUZZER
+// libFuzzer API
+extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
+#endif
 extern "C" __attribute__((weak)) bool AddrIsInHeapQuarantine(uint64_t addr);
 // DataFactory Util
 class FuzzDataFactory {
@@ -128,6 +152,7 @@ public:
 
   void NeedMoreFuzzData(size_t size) { mExpectedFuzzDataSize += size; }
 
+#ifndef KAFL_FUZZER
   size_t mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
     size_t NewSize = std::min(std::max(mExpectedFuzzDataSize, Size), MaxSize);
     sgxfuzz_assert(NewSize >= Size);
@@ -137,6 +162,7 @@ public:
     LLVMFuzzerMutate(Data, NewSize, MaxSize);
     return NewSize;
   }
+#endif
 
   uint8_t *getBytes(uint8_t *dst, size_t bytesNum, FuzzDataTy dataTy,
                     std::string ParamID = "") {
@@ -209,7 +235,7 @@ public:
       sgxfuzz_assert((bytesNum <= sizeof(size_t)));
       size_t MaxVal = dataTy == FUZZ_SIZE ? ClMaxSize : ClMaxCount;
       size_t data = getIntergerInRange<size_t>(1, MaxVal);
-      data = zoom(data, MaxVal, ClZoomRate, 1.0);
+      data = std::round(zoom(data, MaxVal, ClZoomRate, 1.0));
       if (dst == nullptr)
         dst = (uint8_t *)managedMalloc(bytesNum);
       memcpy(dst, &data, bytesNum);
@@ -249,7 +275,7 @@ public:
   }
 
   template <class T> T getProbability() {
-    if (provider->remaining_bytes() > 0) {
+    if (provider and provider->remaining_bytes() > 0) {
       return 1.0 - provider->ConsumeProbability<T>();
     } else {
       NeedMoreFuzzData((sizeof(T) <= sizeof(uint32_t)) ? sizeof(uint32_t)
@@ -258,8 +284,17 @@ public:
     }
   }
 
+  template <class T> T getInterger() {
+    if (provider and provider->remaining_bytes() > 0) {
+      return provider->ConsumeIntegral<T>();
+    } else {
+      NeedMoreFuzzData(sizeof(T));
+      return gRandPool.getInterger<T>(mRandPoolBytesOffset++);
+    }
+  }
+
   template <class T> T getIntergerInRange(T min, T max) {
-    if (provider->remaining_bytes() > 0) {
+    if (provider and provider->remaining_bytes() > 0) {
       return provider->ConsumeIntegralInRange<T>(min, max);
     } else {
       NeedMoreFuzzData(sizeof(T));
@@ -268,7 +303,7 @@ public:
   }
 
   template <typename T> T getFloatingPointInRange(T min, T max) {
-    if (provider->remaining_bytes() > 0) {
+    if (provider and provider->remaining_bytes() > 0) {
       return provider->ConsumeFloatingPointInRange<T>(min, max);
     } else {
       NeedMoreFuzzData(sizeof(T));
@@ -278,7 +313,7 @@ public:
   }
   bool FillByteArray(uint8_t *bytes, size_t size) {
     size_t wrCnt = 0;
-    if (provider->remaining_bytes() > 0) {
+    if (provider and provider->remaining_bytes() > 0) {
       wrCnt = provider->ConsumeData(bytes, size);
     }
     if (wrCnt < size) {
@@ -359,11 +394,12 @@ public:
     double prob = getProbability<double>();
     return prob < ClModifyDoubleFetchValueProb;
   }
+  size_t GetExpectedFuzzDataSize() { return mExpectedFuzzDataSize; }
 
 private:
-  FuzzedDataProvider *provider;
+  FuzzedDataProvider *provider = nullptr;
   std::vector<uint8_t *> allocatedMemAreas;
-  size_t mExpectedFuzzDataSize, mRandPoolBytesOffset;
+  size_t mExpectedFuzzDataSize, mRandPoolBytesOffset = 0;
   std::unordered_set<std::string> mNotModifyOCallRetSpecs;
   std::unordered_map<std::string, FuzzDataTy> mSpecDataID2Type;
 };
@@ -381,9 +417,7 @@ void ShowAllECalls() {
 }
 
 // libFuzzer Callbacks
-extern "C" {
-
-int LLVMFuzzerInitialize(int *argc, char ***argv) {
+extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   (void)argc;
   (void)argv;
 
@@ -435,6 +469,9 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_zoom_rate", po::value<double>(&ClZoomRate)->default_value(1),
           "Give more or less probability to small count than big count, "
           "rate > 1 => zoom out, 0 < rate < 1 => zoom in");
+  add_opt("cb_max_payload_size",
+          po::value<size_t>(&ClMaxPayloadSize)->default_value(10000000),
+          "Allocate buffer with cb_max_payload_size, to prepare fuzz data");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -542,101 +579,249 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   return 0;
 }
 
-size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size, size_t MaxSize,
-                               unsigned int Seed) {
+#ifndef KAFL_FUZZER
+extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
+                                          size_t MaxSize, unsigned int Seed) {
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
-void LLVMFuzzerEarlyAfterRunOne() {
+extern "C" void LLVMFuzzerEarlyAfterRunOne() {
   // Destroy Enclave
-  sgxfuzz_error(sgx_destroy_enclave(global_eid) != SGX_SUCCESS,
+  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
+                    SGX_SUCCESS,
                 "[FAIL] Enclave destroy");
 }
 
 extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
-int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+#endif
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   log_always("Start LLVMFuzzerTestOneInput\n");
+#ifndef KAFL_FUZZER
   // Remove last round environment remain
   if (SGXFuzzerEnvClearBeforeTest) {
     sgxfuzz_assert(SGXFuzzerEnvClearBeforeTest() == 0);
   }
+#endif
   data_factory.init(Data, Size);
 
+  sgx_status_t ret = SGX_ERROR_UNEXPECTED;
+#ifndef KAFL_FUZZER
   // Initialize Enclave
-  sgx_status_t ret = sgx_create_enclave(
-      ClEnclaveFileName.c_str(), SGX_DEBUG_FLAG /* Debug Support: set to 1 */,
-      NULL, NULL, &global_eid, NULL);
+  ret = sgx_create_enclave(ClEnclaveFileName.c_str(),
+                           SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
+                           NULL, &__hidden_sgxfuzzer_harness_global_eid, NULL);
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
+#endif
   // Test body
-  std::vector<int> callSeq;
-  if (gFuzzMode == TEST_USER) {
-    callSeq = gFuzzerSeq;
-  } else {
-    data_factory.getCallSequence(callSeq, gFuzzECallNum);
-  }
-  for (int i : callSeq) {
-    sgxfuzz_assert(i < gFuzzECallNum);
-    if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
-        gFilterOutIndices.end()) {
-      // Filter it out
-      continue;
+  if (gFuzzMode == TEST_SPEED) {
+    struct timeval tval_before, tval_after, tval_result;
+    gettimeofday(&tval_before, NULL);
+    for (size_t i = 0; i < 1000000; i++) {
+      ret = gFuzzECallArray[0]();
+      sgxfuzz_error(ret != SGX_SUCCESS and
+                        ret != SGX_ERROR_INVALID_PARAMETER and
+                        ret != SGX_ERROR_ECALL_NOT_ALLOWED,
+                    "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
     }
+    gettimeofday(&tval_after, NULL);
+    timersub(&tval_after, &tval_before, &tval_result);
+    log_always("Time elapsed(ECALL): %ld.%06ld seconds\n",
+               (long int)tval_result.tv_sec, (long int)tval_result.tv_usec);
+  } else {
+    std::vector<int> callSeq;
+    if (gFuzzMode == TEST_USER) {
+      callSeq = gFuzzerSeq;
+    } else {
+      data_factory.getCallSequence(callSeq, gFuzzECallNum);
+    }
+    for (int i : callSeq) {
+      sgxfuzz_assert(i < gFuzzECallNum);
+      if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
+          gFilterOutIndices.end()) {
+        // Filter it out
+        continue;
+      }
 
-    log_always("Try %s\n", gFuzzECallNameArray[i]);
-    ret = gFuzzECallArray[i]();
-    sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
-                      ret != SGX_ERROR_ECALL_NOT_ALLOWED,
-                  "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
+      log_always("Try %s\n", gFuzzECallNameArray[i]);
+      ret = gFuzzECallArray[i]();
+      sgxfuzz_error(ret != SGX_SUCCESS and
+                        ret != SGX_ERROR_INVALID_PARAMETER and
+                        ret != SGX_ERROR_ECALL_NOT_ALLOWED,
+                    "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
+    }
   }
 
+#ifdef KAFL_FUZZER
+  bool isStarve = false;
+  if (data_factory.GetExpectedFuzzDataSize() > Size) {
+    log_always("Expected size:%d, given size: %d\n",
+               data_factory.GetExpectedFuzzDataSize(), Size);
+    isStarve = true;
+  }
+  kAFL_hypercall(HYPERCALL_KAFL_RELEASE, isStarve);
+  log_error("After release, shouldn't reach here\n");
+#endif
   data_factory.clear();
+
+#ifdef KAFL_FUZZER
+  // Destroy Enclave
+  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
+                    SGX_SUCCESS,
+                "[FAIL] Enclave destroy");
+#endif
   return 0;
 }
 
 // DriverGen Callbacks
-size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
+extern "C" size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
   return data_factory.getUserCheckCount(eleSize);
 }
 
-uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
-                      FuzzDataTy dataType) {
+extern "C" uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen,
+                                 char *cStrAsParamID, FuzzDataTy dataType) {
   return data_factory.getBytes(ptr, byteArrLen, dataType);
 }
 
-uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen, char *cStrAsParamID,
-                    FuzzDataTy dataType) {
+extern "C" uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen,
+                               char *cStrAsParamID, FuzzDataTy dataType) {
   return data_factory.getBytes(ptr, byteArrLen, dataType, cStrAsParamID);
 }
 
-bool DFEnableSetNull(char *cStrAsParamID) {
+extern "C" bool DFEnableSetNull(char *cStrAsParamID) {
   return data_factory.EnableSetNull();
 }
 
-void *DFManagedMalloc(size_t size) { return data_factory.managedMalloc(size); }
-void *DFManagedCalloc(size_t count, size_t size) {
+extern "C" void *DFManagedMalloc(size_t size) {
+  return data_factory.managedMalloc(size);
+}
+extern "C" void *DFManagedCalloc(size_t count, size_t size) {
   return data_factory.managedCalloc(count, size);
 }
 
-uint64_t DFGetPtToCntECall(uint64_t size, uint64_t count, uint64_t eleSize) {
+extern "C" uint64_t DFGetPtToCntECall(uint64_t size, uint64_t count,
+                                      uint64_t eleSize) {
   sgxfuzz_assert(size and count and eleSize);
   // Maybe size * count != n * eleSize, due to problem of Enclave developer
   uint64_t ptCnt = (size * count + eleSize - 1) / eleSize;
   return ptCnt;
 }
 
-uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count, uint64_t eleSize) {
+extern "C" uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count,
+                                      uint64_t eleSize) {
   sgxfuzz_assert(size and count and eleSize);
   // Maybe size * count != n * eleSize, due to problem of Enclave developer
   uint64_t ptCnt = (size * count) / eleSize;
   return ptCnt;
 }
 
-bool DFEnableModifyOCallRet(char *cParamID) {
+extern "C" bool DFEnableModifyOCallRet(char *cParamID) {
   return data_factory.EnableModifyOCallRet(cParamID);
 }
 
-bool DFEnableModifyDoubleFetchValue() {
+extern "C" bool DFEnableModifyDoubleFetchValue() {
   return data_factory.EnableModifyDoubleFetchValue();
 }
+
+extern "C" int DFGetInt32() { return data_factory.getInterger<int>(); }
+
+#ifdef KAFL_FUZZER
+extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }
+extern "C" void FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv) {
+  ucontext_t *uc = (ucontext_t *)priv;
+  uint64_t reason = 0x8000000000000000ULL | uc->uc_mcontext.gregs[REG_RIP] |
+                    ((uint64_t)siginfo->si_signo << 47);
+  kAFL_hypercall(HYPERCALL_KAFL_PANIC, reason);
 }
+
+int agent_init(int verbose) {
+  // Handshake with front end
+  kAFL_hypercall(HYPERCALL_KAFL_ACQUIRE, 0);
+  kAFL_hypercall(HYPERCALL_KAFL_RELEASE, 0);
+
+  get_nyx_cpu_type();
+
+  // Get host config
+  host_config_t host_config;
+  kAFL_hypercall(HYPERCALL_KAFL_GET_HOST_CONFIG, (uintptr_t)&host_config);
+
+  if (verbose) {
+    fprintf(stderr, "GET_HOST_CONFIG\n");
+    fprintf(stderr, "\thost magic:  0x%x, version: 0x%x\n",
+            host_config.host_magic, host_config.host_version);
+    fprintf(stderr, "\tbitmap size: 0x%x, ijon:    0x%x\n",
+            host_config.bitmap_size, host_config.ijon_bitmap_size);
+    fprintf(stderr, "\tpayload size: %u KB\n",
+            host_config.payload_buffer_size / 1024);
+    fprintf(stderr, "\tworker id: %d\n", host_config.worker_id);
+  }
+
+  if (host_config.host_magic != NYX_HOST_MAGIC) {
+    hprintf("HOST_MAGIC mismatch: %08x != %08x\n", host_config.host_magic,
+            NYX_HOST_MAGIC);
+    habort((char *)"HOST_MAGIC mismatch!");
+    return -1;
+  }
+
+  if (host_config.host_version != NYX_HOST_VERSION) {
+    hprintf("HOST_VERSION mismatch: %08x != %08x\n", host_config.host_version,
+            NYX_HOST_VERSION);
+    habort((char *)"HOST_VERSION mismatch!");
+    return -1;
+  }
+
+  if (host_config.payload_buffer_size > ClMaxPayloadSize) {
+    hprintf("Fuzzer payload size too large: %lu > %lu\n",
+            host_config.payload_buffer_size, ClMaxPayloadSize);
+    habort((char *)"Host payload size too large!");
+    return -1;
+  }
+
+  agent_config_t agent_config = {0};
+  agent_config.agent_magic = NYX_AGENT_MAGIC;
+  agent_config.agent_version = NYX_AGENT_VERSION;
+  // agent_config.agent_timeout_detection = 0; // timeout by host
+  // agent_config.agent_tracing = 0; // trace by host
+  // agent_config.agent_ijon_tracing = 0; // no IJON
+  agent_config.agent_non_reload_mode = 0; // no persistent mode
+  // agent_config.trace_buffer_vaddr = 0xdeadbeef;
+  // agent_config.ijon_trace_buffer_vaddr = 0xdeadbeef;
+  agent_config.coverage_bitmap_size = host_config.bitmap_size;
+  // agent_config.input_buffer_size;
+  // agent_config.dump_payloads; // set by hypervisor (??)
+
+  kAFL_hypercall(HYPERCALL_KAFL_SET_AGENT_CONFIG, (uintptr_t)&agent_config);
+
+  return 0;
+}
+
+extern "C" void GetEnclaveDSORange(uintptr_t *start, uintptr_t *end);
+int main(int argc, char **argv) {
+  LLVMFuzzerInitialize(&argc, &argv);
+  agent_init(1);
+
+  // Register payload buffer
+  kAFL_payload *pbuf =
+      (kAFL_payload *)malloc_resident_pages(ClMaxPayloadSize / PAGE_SIZE);
+  assert(pbuf);
+  kAFL_hypercall(HYPERCALL_KAFL_GET_PAYLOAD, (uint64_t)pbuf);
+
+  log_always("Start FuzzerTestOneInput\n");
+
+  // Initialize Enclave
+  sgx_status_t ret = sgx_create_enclave(
+      ClEnclaveFileName.c_str(), SGX_DEBUG_FLAG /* Debug Support: set to 1 */,
+      NULL, NULL, &__hidden_sgxfuzzer_harness_global_eid, NULL);
+  sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
+
+  uintptr_t EnclaveStart, EnclaveEnd;
+  GetEnclaveDSORange(&EnclaveStart, &EnclaveEnd);
+  hrange_submit(0, EnclaveStart, EnclaveEnd);
+  hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
+          EnclaveEnd);
+
+  kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
+  log_always("Data %p %d\n", pbuf->data, pbuf->size);
+  LLVMFuzzerTestOneInput(pbuf->data, pbuf->size);
+}
+#endif

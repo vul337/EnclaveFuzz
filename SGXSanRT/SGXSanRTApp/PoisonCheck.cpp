@@ -124,9 +124,8 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
                          "RangeMixedInOutEnclave hint OOB");                   \
     } else {                                                                   \
       GET_CALLER_PC_BP_SP;                                                     \
-      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
-                         "addrInOutEnclaveStatus: %d",                         \
-                         addrInOutEnclaveStatus);                              \
+      ReportError(pc, bp, sp, addr, is_write, size,                            \
+                  "addrInOutEnclaveStatus: %d", addrInOutEnclaveStatus);       \
     }                                                                          \
   }
 

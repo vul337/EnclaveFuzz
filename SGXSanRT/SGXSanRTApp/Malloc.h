@@ -9,6 +9,8 @@
 #include <sys/resource.h>
 #include <unordered_map>
 
+#define DEBUG_COLLECT_STACK 0
+
 #define FRONT_END(sym) sym
 #define BACK_END(sym) back_end_##sym
 
@@ -151,33 +153,49 @@ public:
   SGXSanHeapBacktrace() { pthread_rwlock_init(&mRWLock, nullptr); }
 
   void StoreMallocBT(uptr user_beg) {
+#if DEBUG_COLLECT_STACK
     pthread_rwlock_wrlock(&mRWLock);
     auto &BT = mUserBeg2BT[user_beg];
     BT.malloc_bt_cnt = boost::stacktrace::safe_dump_to(
         BT.malloc_bt, sizeof(decltype(BT.malloc_bt)));
     BT.free_bt_cnt = 0;
     pthread_rwlock_unlock(&mRWLock);
+#else
+    return;
+#endif
   }
 
   void StoreFreeBT(uptr user_beg) {
+#if DEBUG_COLLECT_STACK
     pthread_rwlock_wrlock(&mRWLock);
     auto &BT = mUserBeg2BT[user_beg];
     BT.free_bt_cnt = boost::stacktrace::safe_dump_to(
         BT.free_bt, sizeof(decltype(BT.free_bt)));
     pthread_rwlock_unlock(&mRWLock);
+#else
+    return;
+#endif
   }
 
   void RemoveBT(uptr user_beg) {
+#if DEBUG_COLLECT_STACK
     pthread_rwlock_wrlock(&mRWLock);
     mUserBeg2BT.erase(user_beg);
     pthread_rwlock_unlock(&mRWLock);
+#else
+    return;
+#endif
   }
 
   MallocFreeBTTy GetHeapBacktrace(uptr user_beg) {
+#if DEBUG_COLLECT_STACK
     pthread_rwlock_rdlock(&mRWLock);
     auto bt = mUserBeg2BT[user_beg];
     pthread_rwlock_unlock(&mRWLock);
     return bt;
+#else
+    return MallocFreeBTTy();
+#endif
   }
 
 private:

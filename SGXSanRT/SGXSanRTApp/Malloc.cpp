@@ -45,8 +45,10 @@ static pthread_mutex_t heap_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
 const size_t kHeapObjectChunkMagic = 0xDEADBEEF;
 
+#ifndef KAFL_FUZZER
 std::set<uptr, std::less<uptr>, ContainerAllocator<uptr>> gHeapObjs;
 static pthread_mutex_t gHeapObjsUpdateMutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 struct chunk {
   size_t magic; // ensure queried user_beg is correct
@@ -141,9 +143,11 @@ void *MALLOC(size_t size) {
   PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg,
                kAsanHeapLeftRedzoneMagic);
 
+#ifndef KAFL_FUZZER
   if (RunInEnclave) {
     void *callPt = __builtin_return_address(0);
-    if (isInEnclaveDSORange((uptr)callPt, 1) and MemAccessMgrInited()) {
+    if (gEnclaveInfo.isInEnclaveDSORange((uptr)callPt, 1) and
+        MemAccessMgrInited()) {
       pthread_mutex_lock(&gHeapObjsUpdateMutex);
       bool successInsert;
       std::tie(std::ignore, successInsert) = gHeapObjs.emplace(user_beg);
@@ -153,6 +157,7 @@ void *MALLOC(size_t size) {
       pthread_mutex_unlock(&gHeapObjsUpdateMutex);
     }
   }
+#endif
 
   return (void *)user_beg;
 }
@@ -199,11 +204,13 @@ void FREE(void *ptr) {
   qe.user_beg = user_beg;
   qe.user_size = m->user_size;
 
+#ifndef KAFL_FUZZER
   pthread_mutex_lock(&gHeapObjsUpdateMutex);
   if (gHeapObjs.count(user_beg)) {
     gHeapObjs.erase(user_beg);
   }
   pthread_mutex_unlock(&gHeapObjsUpdateMutex);
+#endif
 
   gQCache->put(qe);
   goto exit;
@@ -227,7 +234,11 @@ void *CALLOC(size_t n_elements, size_t elem_size) {
   //   sgxsan_warning(true, "Calloc 0 size\n");
   //   return nullptr;
   // }
-  sgxsan_assert(req / n_elements == elem_size);
+  if (req / n_elements != elem_size) {
+    // mul overflow
+    sgxsan_warning(true, "Multiple Overflow in calloc\n");
+    return nullptr;
+  }
   void *mem = MALLOC(req);
   if (mem != nullptr) {
     memset(mem, 0, req);
@@ -269,6 +280,7 @@ size_t MALLOC_USABLE_SIZE(void *mem) throw() {
 }
 
 void ClearHeapObject() {
+#ifndef KAFL_FUZZER
   pthread_mutex_lock(&gHeapObjsUpdateMutex);
   for (auto user_beg : gHeapObjs) {
     if ((void *)user_beg == nullptr)
@@ -292,4 +304,5 @@ void ClearHeapObject() {
   }
   gHeapObjs.clear();
   pthread_mutex_unlock(&gHeapObjsUpdateMutex);
+#endif
 }

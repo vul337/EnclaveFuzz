@@ -113,6 +113,8 @@ void sgxsan_backtrace(log_level ll = LOG_LEVEL_ERROR);
 void sgxsan_signal_safe_dump_bt();
 void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf, size_t bt_cnt);
 
+void ReportError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
+                 uptr access_size, const char *msg, ...);
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal = true,
                         const char *msg = "Out of bound", ...);
@@ -227,7 +229,3 @@ void ClearStackPoison();
 /* addr2line & backtrace Util */
 std::string addr2fname_try(void *addr);
 void *sgxsan_backtrace_i(int idx);
-
-/* Set or get global Enclave file name */
-void setEnclaveFileName(std::string fileName);
-std::string getEnclaveFileName();

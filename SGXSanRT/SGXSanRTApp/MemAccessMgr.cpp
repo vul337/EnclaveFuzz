@@ -6,11 +6,12 @@ __thread bool MemAccessMgr::m_inited;
 __thread size_t MemAccessMgr::m_out_enclave_access_cnt;
 __thread size_t MemAccessMgr::m_in_enclave_access_cnt;
 
-extern "C" {
-__attribute__((weak)) bool DFEnableModifyDoubleFetchValue();
-__attribute__((weak)) uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen,
-                                            char *cStrAsParamID, int dataType);
-}
+extern "C" __attribute__((weak)) bool DFEnableModifyDoubleFetchValue();
+extern "C" __attribute__((weak)) uint8_t *DFGetBytesEx(uint8_t *ptr,
+                                                       size_t byteArrLen,
+                                                       char *cStrAsParamID,
+                                                       int dataType);
+
 // C Wrappers
 void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
                                   bool used_to_cmp, char *parent_func) {

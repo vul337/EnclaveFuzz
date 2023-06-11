@@ -6,6 +6,8 @@ set(CMAKE_CXX_COMPILER "clang++-13")
 
 set(LINUX_SGX_MINI "${CMAKE_CURRENT_SOURCE_DIR}/SGXSanRT/linux-sgx-mini/")
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(KAFL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/kAFL)
+set(KAFL_EXAMPLES_DIR ${KAFL_DIR}/kafl/examples)
 configure_file(SGXSanConfig.h.in SGXSanConfig.h @ONLY)
 
 # get LLVM_DIR
@@ -23,6 +25,9 @@ add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
 add_subdirectory(SGXFuzzerPass)
 add_subdirectory(SGXFuzzerRT)
+if(KAFL_FUZZER)
+add_subdirectory(kAFLUSpaceUtil)
+endif()
 
 if(LIBFUZZER_CB_ASAN)
     message(STATUS "LIBFUZZER_CB_ASAN: Enable")
@@ -41,6 +46,23 @@ install(TARGETS
         GetOCallTable
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
+
+if(KAFL_FUZZER)
+install(TARGETS
+        nyx_agent
+        nyx_agent_static
+        vmcall
+        LIBRARY DESTINATION lib64
+        ARCHIVE DESTINATION lib64
+)
+
+install(DIRECTORY kAFLUSpaceUtil/initrd/
+        USE_SOURCE_PERMISSIONS
+        DESTINATION initrd)
+
+install(FILES Tool/rand_file
+        DESTINATION .)
+endif()
 
 install(DIRECTORY
         ${LINUX_SGX_MINI}/common/inc/ DESTINATION include
