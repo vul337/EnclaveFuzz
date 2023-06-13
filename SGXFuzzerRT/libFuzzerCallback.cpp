@@ -56,6 +56,7 @@ size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
 int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
+bool ClEnableNaiveHarness;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER, TEST_SPEED };
@@ -209,7 +210,10 @@ public:
       break;
     }
     case FUZZ_WSTRING: {
-      size_t givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      size_t givedStrlen = 1;
+      if (not ClEnableNaiveHarness) {
+        givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      }
       if (bytesNum != 0)
         givedStrlen %= (bytesNum + 1);
       if (dst == nullptr)
@@ -219,7 +223,10 @@ public:
       break;
     }
     case FUZZ_STRING: {
-      size_t givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      size_t givedStrlen = 1;
+      if (not ClEnableNaiveHarness) {
+        givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      }
       if (bytesNum != 0)
         givedStrlen %= (bytesNum + 1);
       if (dst == nullptr)
@@ -466,6 +473,9 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_max_payload_size",
           po::value<size_t>(&ClMaxPayloadSize)->default_value(10000000),
           "Allocate buffer with cb_max_payload_size, to prepare fuzz data");
+  add_opt("cb_naive_harness",
+          po::value<bool>(&ClEnableNaiveHarness)->default_value(false),
+          "Enable naive harness");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -794,22 +804,48 @@ int main(int argc, char **argv) {
   assert(pbuf);
   kAFL_hypercall(HYPERCALL_KAFL_GET_PAYLOAD, (uint64_t)pbuf);
 
-  // Initialize Enclave
-  sgx_status_t ret = sgx_create_enclave(
-      ClEnclaveFileName.c_str(), SGX_DEBUG_FLAG /* Debug Support: set to 1 */,
-      NULL, NULL, &__hidden_sgxfuzzer_harness_global_eid, NULL);
-  sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
+  int status = 0;
+  pid_t pid = -1;
+  while (1) {
+    hprintf("[IMPORTANT] Parent Process Loop\n");
+    pid = fork();
+    assert(pid != -1);
 
-  reg_sgxsan_sigaction(); // Register SIGILL handler before rdrand in ecall
-  uintptr_t EnclaveStart, EnclaveSize;
-  sgxsan_ecall_get_enclave_range(__hidden_sgxfuzzer_harness_global_eid,
-                                 &EnclaveStart, &EnclaveSize);
-  hrange_submit(0, EnclaveStart, EnclaveStart + EnclaveSize);
-  hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
-          EnclaveStart + EnclaveSize);
+    if (!pid) {
+      // Initialize Enclave
+      sgx_status_t ret = sgx_create_enclave(
+          ClEnclaveFileName.c_str(),
+          SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL, NULL,
+          &__hidden_sgxfuzzer_harness_global_eid, NULL);
+      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
-  kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
-  log_always("Data %p %d\n", pbuf->data, pbuf->size);
-  LLVMFuzzerTestOneInput(pbuf->data, pbuf->size);
+      reg_sgxsan_sigaction(); // Register SIGILL handler before rdrand in ecall
+      uintptr_t EnclaveStart, EnclaveSize;
+      sgxsan_ecall_get_enclave_range(__hidden_sgxfuzzer_harness_global_eid,
+                                     &EnclaveStart, &EnclaveSize);
+      hrange_submit(0, EnclaveStart, EnclaveStart + EnclaveSize);
+      hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
+              EnclaveStart + EnclaveSize);
+
+      kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
+      log_always("Data %p %d\n", pbuf->data, pbuf->size);
+      LLVMFuzzerTestOneInput(pbuf->data, pbuf->size);
+      return -1;
+    } else if (pid > 0) {
+      waitpid(pid, &status, WUNTRACED);
+      if (WIFEXITED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Exit: %d\n",
+                WEXITSTATUS(status));
+      } else if (WIFSIGNALED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Signal: %d\n",
+                WTERMSIG(status));
+      } else if (WIFSTOPPED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Stop: %d\n", WSTOPSIG(status));
+      } else {
+        hprintf("[IMPORTANT] Test Child Process Exit Unexpectedly\n");
+      }
+      kAFL_hypercall(HYPERCALL_KAFL_RELEASE, 0);
+    }
+  }
 }
 #endif

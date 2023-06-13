@@ -102,3 +102,11 @@ void QuarantineCache::freeOldestQuarantineElement() {
   freeQuarantineElement(front_qe);
   m_queue->pop_front();
 }
+
+void QuarantineCache::show() {
+  for (auto &qe : *m_queue) {
+    log_always("[SHOW] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg,
+               qe.user_beg, qe.user_beg + qe.user_size,
+               qe.alloc_beg + qe.alloc_size);
+  }
+}

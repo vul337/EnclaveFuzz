@@ -102,8 +102,10 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   sgxsan_print_stack_trace(ll);
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");
+#if (ENABLE_SAN_CHECK_DIE == 1)
   if (fatal)
     abort();
+#endif
   return;
 }
 

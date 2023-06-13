@@ -8,16 +8,27 @@ import json
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('object', nargs="+", metavar="<xxx.o>")
+    parser.add_argument("object", nargs="+", metavar="<xxx.o/a>")
     parser.add_argument(
-        '-o', '--output', metavar="<e.g. target.json>", required=True)
+        "-o",
+        "--output",
+        default="layout.json",
+        metavar="<e.g. layout.json>",
+    )
+    parser.add_argument(
+        "-d",
+        "--obj-dir",
+        default=".",
+        help="Object Directory",
+        metavar="<e.g. ./SGX_APP/sgx-wallet>",
+    )
     args = parser.parse_args()
 
     objects = args.object
     for object in objects:
-        print("== Process "+object+" ==")
-        object_abs = os.path.abspath(object)
-        output_abs = os.path.abspath(args.output)
+        print("== Process " + object + " ==")
+        object_abs = os.path.abspath(os.path.join(args.obj_dir, object))
+        output_abs = os.path.abspath(os.path.join(args.obj_dir, args.output))
 
         target_json = {}
         if os.path.exists(output_abs):
@@ -27,8 +38,11 @@ def main():
                 except json.decoder.JSONDecodeError:
                     pass
 
+        # print(object_abs)
         res = subprocess.run(
-            ["nm", "-C", "--defined-only", object_abs], capture_output=True)
+            ["nm", "-C", "--defined-only", object_abs],
+            capture_output=True,
+        )
         funcs = []
         lines = res.stdout.decode("utf-8").splitlines()
         for line in lines:

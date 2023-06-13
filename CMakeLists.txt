@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
-set(CMAKE_C_COMPILER "clang-13")
-set(CMAKE_CXX_COMPILER "clang++-13")
-
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(KAFL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kAFL")
 set(KAFL_EXAMPLES_DIR "${KAFL_DIR}/kafl/examples")
@@ -75,3 +72,6 @@ install(DIRECTORY linux-sgx/sdk/tlibcxx/include/
 install(DIRECTORY linux-sgx/external/ippcp_internal/inc/
         DESTINATION include/ipp
         PATTERN "ippcp20u3.patch" EXCLUDE)
+
+install(FILES linux-sgx/common/buildenv.mk
+        DESTINATION .)

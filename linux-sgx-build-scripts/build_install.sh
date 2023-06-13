@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-script_dir=$(realpath -s $(dirname $0))
-linux_sgx_src_dir="$(realpath -s ${script_dir}/../linux-sgx)"
+script_dir=$(realpath $(dirname $0))
+linux_sgx_src_dir="$(realpath ${script_dir}/../linux-sgx)"
 
 sudo pwd
 FLAGS="$@"

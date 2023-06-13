@@ -2,8 +2,8 @@
 set -e
 
 sources_list_dir="/etc/apt/sources.list.d"
-script_dir=$(realpath -s $(dirname $0))
-linux_sgx_src_dir="$(realpath -s ${script_dir}/../linux-sgx)"
+script_dir=$(realpath $(dirname $0))
+linux_sgx_src_dir="$(realpath ${script_dir}/../linux-sgx)"
 
 sudo mkdir -p ${sources_list_dir}
 intel_sgx_list=${sources_list_dir}/intel-sgx.list

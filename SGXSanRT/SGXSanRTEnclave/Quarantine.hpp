@@ -30,6 +30,7 @@ private:
   static void freeDirectly(QuarantineElement qe);
   static void freeOldestQuarantineElement();
   static bool empty() { return m_queue->empty(); }
+  static void show();
 
   static QuarantineQueueTy *m_queue;
   static size_t m_quarantine_cache_used_size;

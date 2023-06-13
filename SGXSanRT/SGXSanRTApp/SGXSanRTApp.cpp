@@ -163,6 +163,7 @@ void sgxsan_print_stack_trace(log_level ll) {
 }
 
 /* Signal */
+static struct sigaction g_old_sigact[_NSIG];
 #ifdef KAFL_FUZZER
 extern "C" {
 int DFGetInt32();
@@ -175,9 +176,7 @@ void NORETURN Die() {
     FuzzerCrashCB();
   _Exit(1);
 }
-#endif
-static struct sigaction g_old_sigact[_NSIG];
-#ifdef KAFL_FUZZER
+
 void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   ucontext_t *uc = (ucontext_t *)priv;
   const greg_t rip = uc->uc_mcontext.gregs[REG_RIP];

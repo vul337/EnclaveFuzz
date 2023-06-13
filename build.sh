@@ -49,7 +49,7 @@ then
     cp edger8r/_build/default/linux/Edger8r.bc Tool/sgx_edger8r
 fi
 # build
-cmake ${CMAKE_FLAGS} -B build_dir/${MODE}-${FUZZER}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/install_dir/${MODE}-${FUZZER}-install
+CC="clang-13" CXX="clang++-13" cmake ${CMAKE_FLAGS} -B build_dir/${MODE}-${FUZZER}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/install_dir/${MODE}-${FUZZER}-install
 cmake --build build_dir/${MODE}-${FUZZER}-build -j$(nproc)
 cmake --install build_dir/${MODE}-${FUZZER}-build
 rm -f install

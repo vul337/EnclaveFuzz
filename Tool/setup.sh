@@ -2,92 +2,99 @@
 
 set -e
 
+show_usage() {
+    echo "$(basename "$0") <FuzzBinary> <Enclave.so> <WorkDir> [TEST=0] [TASKSET=\"taskset -c 0\"]"
+    exit 1
+}
+
 # Print Help
-if [[ "$1" == "-h" ]] || [ $# -ne 4 ]; then
-    echo "$(basename "$0") <fuzzbin> <enclave.so> WorkDir ID"
-    exit 0
-fi
+if [ $# -lt 3 ]; then show_usage; fi
 
-# ARG
-SRC_FUZZERBIN=$(realpath -s "$1")
-SRC_ENCLAVEBIN=$(realpath -s "$2")
-WORKDIR=$(realpath -s "$3")
-TEST=$4
+# BASIC ARG
+BINARY_PATH=$(realpath "$1")
+ENCLAVE_PATH=$(realpath "$2")
+WORKDIR=$(realpath "$3")
+shift 3
 
-FUZZERNAME=$(basename ${SRC_FUZZERBIN})
-ENCLAVENAME=$(basename ${SRC_ENCLAVEBIN})
+for ARG in "$@"
+do
+   KEY="$(echo ${ARG} | cut -f1 -d=)"
+   VAL="$(echo ${ARG} | cut -f2 -d=)"
+   export "${KEY}"="${VAL}"
+done
 
-EVALTOP="$WORKDIR-T$TEST-$(date +%F)"
+TEST=${TEST:="0"}
+TASKSET=${TASKSET:=""}
+BINARY_NAME=$(basename ${BINARY_PATH})
+ENCLAVE_NAME=$(basename ${ENCLAVE_PATH})
+EVAL_TOP="${WORKDIR}-T${TEST}-$(date +%F)"
 
-# Make Dir
-mkdir -p $EVALTOP
-mkdir -p "$EVALTOP/result/seeds"
-mkdir -p "$EVALTOP/result/crashes"
-mkdir -p "$EVALTOP/result/profraw"
+echo "-- BINARY_PATH: ${BINARY_PATH}"
+echo "-- ENCLAVE_PATH: ${ENCLAVE_PATH}"
+echo "-- TEST: ${TEST}"
+echo "-- TASKSET: ${TASKSET}"
+echo "-- BINARY_NAME: ${BINARY_NAME}"
+echo "-- ENCLAVE_NAME: ${ENCLAVE_NAME}"
+echo "-- EVAL_TOP: ${EVAL_TOP}"
 
-# Copy
-echo "[SRC] Fuzzing Binary: $SRC_FUZZERBIN"
-echo "[SRC] Enclave Binary: $SRC_ENCLAVEBIN"
-echo "Evaluation Directory: $EVALTOP"
-echo "[DST] Fuzzing Binary: $EVALTOP/$FUZZERNAME"
-echo "[DST] Enclave Binary: $EVALTOP/$ENCLAVENAME"
+echo "Create WorkDir"
+mkdir -p "${EVAL_TOP}"
+mkdir -p "${EVAL_TOP}/result/seeds"
+mkdir -p "${EVAL_TOP}/result/crashes"
+mkdir -p "${EVAL_TOP}/result/profraw"
 
-cp $SRC_FUZZERBIN $EVALTOP/$FUZZERNAME
-cp $SRC_ENCLAVEBIN $EVALTOP/$ENCLAVENAME
+cd ${EVAL_TOP}
 
-cd $EVALTOP
-# echo ""
-# echo "LLVM_PROFILE_FILE=\"./result/profraw/%p\" ./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -fork=1 "
+echo "Copy Files"
+cp -i ${BINARY_PATH} ${BINARY_NAME}
+cp -i ${ENCLAVE_PATH} ${ENCLAVE_NAME}
 
-# Create show_cov.sh
+echo "Create show_cov.sh"
 cat > show_cov.sh <<EOF
 #!/usr/bin/env bash
+set -e
 
 # llvm-profdata-13 merge --failure-mode=all -sparse -output=./result/all.profdata ./result/profraw/
-llvm-cov-13 report ./$ENCLAVENAME -instr-profile=./result/all.profdata
-
+llvm-cov-13 report ./${ENCLAVE_NAME} -instr-profile=./result/all.profdata
 EOF
 chmod +x show_cov.sh
 
-# Create fuzz.sh
+echo "Create fuzz.sh"
 cat > fuzz.sh <<EOF
 #!/usr/bin/env bash
+set -e
 
-set -ex
-
-LLVM_PROFILE_FILE="./result/profraw/%p" nohup ./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@ >> coverage_exp.log 2>&1 & 
+CUR_DIR=\$(realpath .)
+echo "TMPDIR=\${CUR_DIR}"
+TMPDIR=\${CUR_DIR} LLVM_PROFILE_FILE="./result/profraw/%p" ${TASKSET} nohup ./${BINARY_NAME} --cb_enclave=${ENCLAVE_NAME} ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@ >> coverage_exp.log 2>&1 & 
 fuzz_pid=\$!
-echo \$fuzz_pid > fuzz.pid
-echo "./$FUZZERNAME --cb_enclave=$ENCLAVENAME ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@" >> fuzz.cmd
-ln -sf /tmp/libFuzzerTemp.FuzzWithFork\$fuzz_pid.dir ./libFuzzerTemp
+echo \$fuzz_pid >> fuzz.pid
+echo "TMPDIR=\${CUR_DIR} LLVM_PROFILE_FILE=\"./result/profraw/%p\" ${TASKSET} nohup ./${BINARY_NAME} --cb_enclave=${ENCLAVE_NAME} ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@" >> fuzz.cmd
 # tail -f coverage_exp.log
 EOF
 chmod +x fuzz.sh
 
-# Create stop.sh
+echo "Create stop.sh"
 cat > stop.sh <<EOF
 #!/usr/bin/env bash
+set -e
 
-set -ex
-
-kill -9 \$(cat fuzz.pid)
-rm fuzz.pid
+for i in \$(cat fuzz.pid)
+do
+    echo "Kill \${i}"
+    kill -9 \${i} || echo ""
+done
 EOF
 chmod +x stop.sh
 
 # Create merge.sh
 cat > merge.sh <<EOF
 #!/usr/bin/env bash
+set -e
 
-set +x
-set +e
-
-# PROFRAW_DIR=\$1
 OUTPUT_FILENAME=./result/all.profdata
 
-# Reads the paths to prof data files from INPUT_FILENAME and then merges them
-# into OUTPUT_FILENAME.
-#TARGETS=(\$(find ./result/profraw -type f))
+# Reads the paths to prof data files from INPUT_FILENAME and then merges them into OUTPUT_FILENAME.
 TARGETS=(\$(find ./result/profraw -type f -printf "%T@\t%Tc %6k KiB %p\n" | sort -n | tr -s ' ' | cut -d ' ' -f 6 | head -n -5))
 
 if [[ \${#TARGETS[@]} -eq 0 ]]; then
