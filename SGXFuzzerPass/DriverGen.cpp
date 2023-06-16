@@ -50,6 +50,10 @@ static cl::opt<size_t> ClMaxRecursionDepthForPointer(
     "max-depth-recursively-prepare-pointer", cl::init(5),
     cl::desc("Maximum depth to recursively prepare pointer data"), cl::Hidden);
 
+static cl::opt<bool> ClNaiveHarness("naive-harness", cl::init(false),
+                                    cl::desc("Enable naive harness"),
+                                    cl::Hidden);
+
 void DriverGenerator::initialize(Module &M) {
   this->M = &M;
   C = &M.getContext();
@@ -238,7 +242,8 @@ Value *DriverGenerator::createParamContent(
       }
     }
     if (eleTy->isFunctionTy() or
-        recursion_depth >= ClMaxRecursionDepthForPointer) {
+        recursion_depth >= ClMaxRecursionDepthForPointer or
+        (ClNaiveHarness and recursion_depth > 1)) {
       // Leave content of typePtr (also is a pointer) 0
     } else {
       size_t _eleSize = M->getDataLayout().getTypeAllocSize(eleTy);
@@ -261,66 +266,70 @@ Value *DriverGenerator::createParamContent(
       } else {
         // calculate count of elements the pointer point to
         Value *ptCnt = nullptr;
-        // EDL: C array can't be decorated with [count]/[size], and must have
-        // it's count
-        if (edlJson[jsonPtr / "c_array_count"].is_number()) {
-          size_t _c_array_count = edlJson[jsonPtr / "c_array_count"];
-          if (_c_array_count <= 0) {
-            errs() << "c_array_count must > 0\n";
-            abort();
-          }
-          ptCnt = IRB.getInt64(_c_array_count);
-        } else if (edlJson[jsonPtr / "user_check"] == true) {
-          ptCnt = IRB.CreateCall(DFGetUserCheckCount, {eleSize, jsonPtrAsID});
+        if (ClNaiveHarness) {
+          ptCnt = IRB.getInt64(1);
         } else {
-          Value *count = nullptr, *size = nullptr;
-          if (edlJson[jsonPtr / "count"].is_null()) {
-            count = IRB.getInt64(1);
-          } else if (edlJson[jsonPtr / "count"].is_number()) {
-            count = IRB.getInt64(edlJson[jsonPtr / "count"]);
-          } else {
-            size_t co_param_pos = edlJson[jsonPtr / "count" / "co_param_pos"];
-            edlJson[jsonPtr.parent_pointer() / co_param_pos /
-                    "isEdlCountAttr"] = true;
-            auto co_param_ptr = createParamContent(
-                types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
-                insertPt, recursion_depth - 1);
-            IRB.SetInsertPoint(insertPt);
-            count = IRB.CreateLoad(co_param_ptr->getType()
-                                       ->getScalarType()
-                                       ->getPointerElementType(),
-                                   co_param_ptr);
-          }
-          if (edlJson[jsonPtr / "size"].is_null()) {
-            size = eleSize;
-          } else if (edlJson[jsonPtr / "size"].is_number()) {
-            // means "size" bytes
-            size_t _size = edlJson[jsonPtr / "size"];
-            size = IRB.getInt64(_size);
-            if (eleTy->isIntegerTy() && _size <= 8) {
-              // we can regard it as (size*8)bits integer
-              _eleSize = _size;
-              eleTy = IRB.getIntNTy(_size * 8);
-              eleSize = IRB.getInt64(_size);
+          // EDL: C array can't be decorated with [count]/[size], and must have
+          // it's count
+          if (edlJson[jsonPtr / "c_array_count"].is_number()) {
+            size_t _c_array_count = edlJson[jsonPtr / "c_array_count"];
+            if (_c_array_count <= 0) {
+              errs() << "c_array_count must > 0\n";
+              abort();
             }
+            ptCnt = IRB.getInt64(_c_array_count);
+          } else if (edlJson[jsonPtr / "user_check"] == true) {
+            ptCnt = IRB.CreateCall(DFGetUserCheckCount, {eleSize, jsonPtrAsID});
           } else {
-            size_t co_param_pos = edlJson[jsonPtr / "size" / "co_param_pos"];
-            edlJson[jsonPtr.parent_pointer() / co_param_pos / "isEdlSizeAttr"] =
-                true;
-            auto co_param_ptr = createParamContent(
-                types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
-                insertPt, recursion_depth - 1);
-            IRB.SetInsertPoint(insertPt);
-            size = IRB.CreateLoad(co_param_ptr->getType()
-                                      ->getScalarType()
-                                      ->getPointerElementType(),
-                                  co_param_ptr);
+            Value *count = nullptr, *size = nullptr;
+            if (edlJson[jsonPtr / "count"].is_null()) {
+              count = IRB.getInt64(1);
+            } else if (edlJson[jsonPtr / "count"].is_number()) {
+              count = IRB.getInt64(edlJson[jsonPtr / "count"]);
+            } else {
+              size_t co_param_pos = edlJson[jsonPtr / "count" / "co_param_pos"];
+              edlJson[jsonPtr.parent_pointer() / co_param_pos /
+                      "isEdlCountAttr"] = true;
+              auto co_param_ptr = createParamContent(
+                  types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
+                  insertPt, recursion_depth - 1);
+              IRB.SetInsertPoint(insertPt);
+              count = IRB.CreateLoad(co_param_ptr->getType()
+                                         ->getScalarType()
+                                         ->getPointerElementType(),
+                                     co_param_ptr);
+            }
+            if (edlJson[jsonPtr / "size"].is_null()) {
+              size = eleSize;
+            } else if (edlJson[jsonPtr / "size"].is_number()) {
+              // means "size" bytes
+              size_t _size = edlJson[jsonPtr / "size"];
+              size = IRB.getInt64(_size);
+              if (eleTy->isIntegerTy() && _size <= 8) {
+                // we can regard it as (size*8)bits integer
+                _eleSize = _size;
+                eleTy = IRB.getIntNTy(_size * 8);
+                eleSize = IRB.getInt64(_size);
+              }
+            } else {
+              size_t co_param_pos = edlJson[jsonPtr / "size" / "co_param_pos"];
+              edlJson[jsonPtr.parent_pointer() / co_param_pos /
+                      "isEdlSizeAttr"] = true;
+              auto co_param_ptr = createParamContent(
+                  types, jsonPtr.parent_pointer() / co_param_pos, paramPtrs,
+                  insertPt, recursion_depth - 1);
+              IRB.SetInsertPoint(insertPt);
+              size = IRB.CreateLoad(co_param_ptr->getType()
+                                        ->getScalarType()
+                                        ->getPointerElementType(),
+                                    co_param_ptr);
+            }
+            ptCnt = IRB.CreateCall(
+                DFGetPtToCntECall,
+                {IRB.CreateIntCast(size, IRB.getInt64Ty(), false),
+                 IRB.CreateIntCast(count, IRB.getInt64Ty(), false), eleSize},
+                "ptCnt");
           }
-          ptCnt = IRB.CreateCall(
-              DFGetPtToCntECall,
-              {IRB.CreateIntCast(size, IRB.getInt64Ty(), false),
-               IRB.CreateIntCast(count, IRB.getInt64Ty(), false), eleSize},
-              "ptCnt");
         }
 
         if (ptCnt == IRB.getInt64(1)) {
@@ -361,7 +370,8 @@ Value *DriverGenerator::createParamContent(
       }
     }
   } else if (auto structTy = dyn_cast<StructType>(type)) {
-    if (!ClEnableFillAtOnce or hasPointerElement(structTy)) {
+    if (not ClNaiveHarness and
+        (!ClEnableFillAtOnce or hasPointerElement(structTy))) {
       // fall back
       // structure's member pointers may have size/count attributes(deep copy),
       // so we have to prepare a map to record
@@ -384,7 +394,8 @@ Value *DriverGenerator::createParamContent(
     auto eleTy = arrTy->getElementType();
     inheritDirectionAttr(jsonPtr, 0, eleTy);
     auto eleCnt = IRB.getInt64(arrTy->getNumElements());
-    if (!ClEnableFillAtOnce or hasPointerElement(arrTy)) {
+    if (not ClNaiveHarness and
+        (!ClEnableFillAtOnce or hasPointerElement(arrTy))) {
       // fall back
       FOR_LOOP_BEG(insertPt, eleCnt)
       auto innerInsertPt = &*IRB.GetInsertPoint();
@@ -618,45 +629,49 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
         } else {
           // calculate count of elements the pointer point to
           Value *ptCnt = nullptr;
-          // EDL: c array can't be decorated with [count]/[size], and must have
-          // it's count
-          if (edlJson[jsonPtr / "c_array_count"].is_number()) {
-            ptCnt = IRB.getInt64(edlJson[jsonPtr / "c_array_count"]);
+          if (ClNaiveHarness) {
+            ptCnt = IRB.getInt64(1);
           } else {
-            Value *count =
-                edlJson[jsonPtr / "count"].is_null() ? IRB.getInt64(1)
-                : edlJson[jsonPtr / "count"].is_number()
-                    ? cast<Value>(IRB.getInt64(edlJson[jsonPtr / "count"]))
-                    : IRB.CreateIntCast(
-                          ocallWapper->getArg(
-                              edlJson[jsonPtr / "count" / "co_param_pos"]),
-                          Type::getInt64Ty(*C), false);
-            Value *size = nullptr;
-            if (edlJson[jsonPtr / "size"].is_null()) {
-              size = eleSize;
-            } else if (edlJson[jsonPtr / "size"].is_number()) {
-              // means "size" bytes
-              size_t _size = edlJson[jsonPtr / "size"];
-              size = IRB.getInt64(_size);
-              if (eleTy->isIntegerTy() && _size <= 8) {
-                // we can regard it as (size*8)bits integer
-                _eleSize = _size;
-                eleTy = IRB.getIntNTy(_size * 8);
-                eleSize = IRB.getInt64(_size);
-              }
+            // EDL: c array can't be decorated with [count]/[size], and must
+            // have it's count
+            if (edlJson[jsonPtr / "c_array_count"].is_number()) {
+              ptCnt = IRB.getInt64(edlJson[jsonPtr / "c_array_count"]);
             } else {
-              size = IRB.CreateIntCast(
-                  ocallWapper->getArg(
-                      edlJson[jsonPtr / "size" / "co_param_pos"]),
-                  Type::getInt64Ty(*C), false);
+              Value *count =
+                  edlJson[jsonPtr / "count"].is_null() ? IRB.getInt64(1)
+                  : edlJson[jsonPtr / "count"].is_number()
+                      ? cast<Value>(IRB.getInt64(edlJson[jsonPtr / "count"]))
+                      : IRB.CreateIntCast(
+                            ocallWapper->getArg(
+                                edlJson[jsonPtr / "count" / "co_param_pos"]),
+                            Type::getInt64Ty(*C), false);
+              Value *size = nullptr;
+              if (edlJson[jsonPtr / "size"].is_null()) {
+                size = eleSize;
+              } else if (edlJson[jsonPtr / "size"].is_number()) {
+                // means "size" bytes
+                size_t _size = edlJson[jsonPtr / "size"];
+                size = IRB.getInt64(_size);
+                if (eleTy->isIntegerTy() && _size <= 8) {
+                  // we can regard it as (size*8)bits integer
+                  _eleSize = _size;
+                  eleTy = IRB.getIntNTy(_size * 8);
+                  eleSize = IRB.getInt64(_size);
+                }
+              } else {
+                size = IRB.CreateIntCast(
+                    ocallWapper->getArg(
+                        edlJson[jsonPtr / "size" / "co_param_pos"]),
+                    Type::getInt64Ty(*C), false);
+              }
+              ptCnt = IRB.CreateCall(DFGetPtToCntOCall, {size, count, eleSize},
+                                     "ptCnt");
             }
-            ptCnt = IRB.CreateCall(DFGetPtToCntOCall, {size, count, eleSize},
-                                   "ptCnt");
           }
 
           if (ptCnt == IRB.getInt64(1)) {
             createParamContent({eleTy}, jsonPtr / "field" / 0, nullptr,
-                               insertPt, 0, &arg);
+                               insertPt, 1, &arg);
           } else {
             if (!ClEnableFillAtOnce or hasPointerElement(pointerTy)) {
               // fall back
@@ -664,7 +679,7 @@ void DriverGenerator::saveCreatedInput2OCallPtrParam(Function *ocallWapper,
               auto innerInsertPt = &*IRB.GetInsertPoint();
               IRB.SetInsertPoint(innerInsertPt);
               createParamContent(
-                  {eleTy}, jsonPtr / "field" / 0, nullptr, innerInsertPt, 0,
+                  {eleTy}, jsonPtr / "field" / 0, nullptr, innerInsertPt, 1,
                   IRB.CreateGEP(
                       arg.getType()->getScalarType()->getPointerElementType(),
                       &arg, phi));

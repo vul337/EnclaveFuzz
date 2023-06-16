@@ -5,6 +5,36 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "(llvm-profdata) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/chenliheng/llvm-project/install/bin/llvm-profdata",
+            "args": [
+                "merge",
+                "default.profraw",
+                "-sparse",
+                "-o",
+                "a"
+            ],
+            "stopAtEntry": true,
+            "cwd": "/home/chenliheng/SGXSan/SGX_APP/wasm-micro-runtime/workdir_libFuzzer-T0-2023-06-16",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
             "name": "(mbedtls-SGX) Launch",
             "type": "cppdbg",
             "request": "launch",
@@ -730,7 +760,7 @@
             "name": "(kAFL) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/SGX_APP/wasm-micro-runtime/product-mini/platforms/linux-sgx/enclave-sample/iwasm",
+            "program": "${workspaceFolder}/SGX_APP/ehsm/out/ehsm-core/ehsm_core_test",
             "args": [],
             "stopAtEntry": true,
             "cwd": "${workspaceFolder}",
@@ -748,6 +778,9 @@
                     "description": "Set Disassembly Flavor to Intel",
                     "text": "-gdb-set disassembly-flavor intel",
                     "ignoreFailures": true
+                },
+                {
+                    "text": "handle SIGILL nostop",
                 }
             ],
             "hardwareBreakpoints": {
@@ -783,22 +816,18 @@
             "name": "(libFuzzer) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/media/leone/Data/Fuzzer2.0-SGX-WALLET-DBG-T0-2023-06-12/sgx-wallet",
+            "program": "${workspaceFolder}/SGX_APP/wasm-micro-runtime/workdir_libFuzzer-T0-2023-06-16/iwasm",
             "args": [
                 "--cb_enclave=enclave.so",
-                "./result/seeds",
-                "-print_pcs=1",
-                "-print_coverage=1",
-                "-use_value_profile=1",
-                "-artifact_prefix=./result/crashes/",
-                "-ignore_crashes=1",
                 "-max_len=10000000",
+                "./result/seeds/04420e3af2e6101d5b5342bbbef9cac9beb7b1d5"
             ],
-            "stopAtEntry": false,
-            "cwd": "/media/leone/Data/Fuzzer2.0-SGX-WALLET-DBG-T0-2023-06-12/",
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}/SGX_APP/wasm-micro-runtime/workdir_libFuzzer-T0-2023-06-16",
             "environment": [],
             "externalConsole": false,
-            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            // "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            "MIMode": "gdb",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",

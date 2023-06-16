@@ -56,6 +56,7 @@ size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
 int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
+bool ClEnableSanCheckDie, ClEnableNaiveHarness;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER, TEST_SPEED };
@@ -211,7 +212,10 @@ public:
       break;
     }
     case FUZZ_WSTRING: {
-      size_t givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      size_t givedStrlen = 1;
+      if (not ClEnableNaiveHarness) {
+        givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      }
       if (bytesNum != 0)
         givedStrlen %= (bytesNum + 1);
       if (dst == nullptr)
@@ -221,7 +225,10 @@ public:
       break;
     }
     case FUZZ_STRING: {
-      size_t givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      size_t givedStrlen = 1;
+      if (not ClEnableNaiveHarness) {
+        givedStrlen = getIntergerInRange<size_t>(0, ClMaxStrlen);
+      }
       if (bytesNum != 0)
         givedStrlen %= (bytesNum + 1);
       if (dst == nullptr)
@@ -396,6 +403,8 @@ public:
   }
   size_t GetExpectedFuzzDataSize() { return mExpectedFuzzDataSize; }
 
+  bool EnableSanCheckDie() { return ClEnableSanCheckDie; }
+
 private:
   FuzzedDataProvider *provider = nullptr;
   std::vector<uint8_t *> allocatedMemAreas;
@@ -472,6 +481,12 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_max_payload_size",
           po::value<size_t>(&ClMaxPayloadSize)->default_value(10000000),
           "Allocate buffer with cb_max_payload_size, to prepare fuzz data");
+  add_opt("cb_enable_san_check_die",
+          po::value<bool>(&ClEnableSanCheckDie)->default_value(true),
+          "Enable Die when sanitizer check");
+  add_opt("cb_naive_harness",
+          po::value<bool>(&ClEnableNaiveHarness)->default_value(false),
+          "Enable naive harness");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -725,6 +740,10 @@ extern "C" bool DFEnableModifyDoubleFetchValue() {
 
 extern "C" int DFGetInt32() { return data_factory.getInterger<int>(); }
 
+extern "C" bool DFEnableSanCheckDie() {
+  return data_factory.EnableSanCheckDie();
+}
+
 #ifdef KAFL_FUZZER
 extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }
 extern "C" void FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv) {
@@ -806,22 +825,48 @@ int main(int argc, char **argv) {
   assert(pbuf);
   kAFL_hypercall(HYPERCALL_KAFL_GET_PAYLOAD, (uint64_t)pbuf);
 
-  log_always("Start FuzzerTestOneInput\n");
+  int status = 0;
+  pid_t pid = -1;
+  while (1) {
+    hprintf("[IMPORTANT] Parent Process Loop\n");
+    pid = fork();
+    assert(pid != -1);
 
-  // Initialize Enclave
-  sgx_status_t ret = sgx_create_enclave(
-      ClEnclaveFileName.c_str(), SGX_DEBUG_FLAG /* Debug Support: set to 1 */,
-      NULL, NULL, &__hidden_sgxfuzzer_harness_global_eid, NULL);
-  sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
+    if (!pid) {
+      log_always("Start FuzzerTestOneInput\n");
 
-  uintptr_t EnclaveStart, EnclaveEnd;
-  GetEnclaveDSORange(&EnclaveStart, &EnclaveEnd);
-  hrange_submit(0, EnclaveStart, EnclaveEnd);
-  hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
-          EnclaveEnd);
+      // Initialize Enclave
+      sgx_status_t ret = sgx_create_enclave(
+          ClEnclaveFileName.c_str(),
+          SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL, NULL,
+          &__hidden_sgxfuzzer_harness_global_eid, NULL);
+      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
-  kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
-  log_always("Data %p %d\n", pbuf->data, pbuf->size);
-  LLVMFuzzerTestOneInput(pbuf->data, pbuf->size);
+      uintptr_t EnclaveStart, EnclaveEnd;
+      GetEnclaveDSORange(&EnclaveStart, &EnclaveEnd);
+      hrange_submit(0, EnclaveStart, EnclaveEnd);
+      hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
+              EnclaveEnd);
+
+      kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
+      log_always("Data %p %d\n", pbuf->data, pbuf->size);
+      LLVMFuzzerTestOneInput(pbuf->data, pbuf->size);
+      return -1;
+    } else if (pid > 0) {
+      waitpid(pid, &status, WUNTRACED);
+      if (WIFEXITED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Exit: %d\n",
+                WEXITSTATUS(status));
+      } else if (WIFSIGNALED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Signal: %d\n",
+                WTERMSIG(status));
+      } else if (WIFSTOPPED(status)) {
+        hprintf("[IMPORTANT] Test Child Process Stop: %d\n", WSTOPSIG(status));
+      } else {
+        hprintf("[IMPORTANT] Test Child Process Exit Unexpectedly\n");
+      }
+      kAFL_hypercall(HYPERCALL_KAFL_RELEASE, 0);
+    }
+  }
 }
 #endif

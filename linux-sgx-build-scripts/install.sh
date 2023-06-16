@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-script_dir=$(realpath -s $(dirname $0))
-linux_sgx_src_dir="$(realpath -s ${script_dir}/../linux-sgx)"
+script_dir=$(realpath $(dirname $0))
+linux_sgx_src_dir="$(realpath ${script_dir}/../linux-sgx)"
 
 # install sgxsdk
 sudo ${linux_sgx_src_dir}/linux/installer/bin/sgx_linux_x64_sdk_*.bin <<EOF

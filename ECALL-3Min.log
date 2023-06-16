@@ -1,33 +1,78 @@
 WAMR 3Min
 F2-KAFL
-136754 Enter ecall_handle_command
-56006 Enter ecall_iwasm_main
+108740 Enter ecall_handle_command
+86926 Enter ecall_iwasm_main
 F1-KAFL
-156575 Enter ecall_handle_command
-104886 Enter ecall_iwasm_main
+157237 Enter ecall_handle_command
+116483 Enter ecall_iwasm_main
 F2-LIBFUZZER
-93553 Enter ecall_handle_command
-96160 Enter ecall_iwasm_main
+141351 Enter ecall_iwasm_main
+133580 Enter ecall_handle_command
 F1-LIBFUZZER
-11861 Enter ecall_iwasm_main
-13068 Enter ecall_handle_command
+13220 Enter ecall_handle_command
+12483 Enter ecall_iwasm_main
 F1-LIBFUZZER-HW
-1506 Enter ecall_handle_command
-1540 Enter ecall_iwasm_main
+1802 Enter ecall_handle_command
+1696 Enter ecall_iwasm_main
 
 SGX-WALLET 3Min
 F2-KAFL
-154971 Enter ecall_add_item
-82838 Enter ecall_show_wallet
-76091 Enter ecall_remove_item
-77458 Enter ecall_create_wallet
-90039 Enter ecall_change_master_password
+112083 Enter ecall_add_item
+94928 Enter ecall_show_wallet
+102009 Enter ecall_remove_item
+93034 Enter ecall_create_wallet
+96413 Enter ecall_change_master_password
+(Frequently Crash)
+126263 Enter ecall_add_item
+104951 Enter ecall_show_wallet
+80306 Enter ecall_remove_item
+86477 Enter ecall_create_wallet
+93385 Enter ecall_change_master_password
 F1-KAFL
+125394 Enter ecall_add_item
+137779 Enter ecall_show_wallet
+84749 Enter ecall_remove_item
+93582 Enter ecall_create_wallet
+93722 Enter ecall_change_master_password
+(Frequently Crash)
+111711 Enter ecall_add_item
+145626 Enter ecall_show_wallet
+102063 Enter ecall_remove_item
+104597 Enter ecall_create_wallet
+106658 Enter ecall_change_master_password
 F2-LIBFUZZER
-22682 Enter ecall_show_wallet
-24889 Enter ecall_add_item
-21066 Enter ecall_remove_item
-23307 Enter ecall_change_master_password
-22987 Enter ecall_create_wallet
+313580 Enter ecall_show_wallet
+312498 Enter ecall_change_master_password
+302970 Enter ecall_remove_item
+300871 Enter ecall_create_wallet
+332241 Enter ecall_add_item
+(Frequently Crash, from persistent mode to fork mode)
+114158 Enter ecall_create_wallet
+108941 Enter ecall_remove_item
+109870 Enter ecall_show_wallet
+113149 Enter ecall_change_master_password
+106379 Enter ecall_add_item
 F1-LIBFUZZER
+93578 Enter ecall_show_wallet
+93613 Enter ecall_change_master_password
+94320 Enter ecall_create_wallet
+94261 Enter ecall_remove_item
+94168 Enter ecall_add_item
+(Frequently Crash, from persistent mode to fork mode)
+52645 Enter ecall_change_master_password
+53405 Enter ecall_show_wallet
+54630 Enter ecall_remove_item
+52932 Enter ecall_add_item
+53951 Enter ecall_create_wallet
 F1-LIBFUZZER-HW
+13052 Enter ecall_add_item
+12509 Enter ecall_show_wallet
+13054 Enter ecall_remove_item
+12862 Enter ecall_create_wallet
+12803 Enter ecall_change_master_password
+(Frequently Crash, from persistent mode to fork mode)
+10954 Enter ecall_change_master_password
+11226 Enter ecall_create_wallet
+11019 Enter ecall_show_wallet
+11069 Enter ecall_add_item
+11476 Enter ecall_remove_item

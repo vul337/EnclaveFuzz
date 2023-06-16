@@ -259,7 +259,8 @@ public:
     pthread_mutex_lock(&m_mutex);
     auto it = std::find_if(
         m_queue->begin(), m_queue->end(), [addr](QuarantineElement qe) {
-          return qe.user_beg <= addr and addr < qe.user_beg + qe.user_size;
+          return qe.user_beg <= addr and
+                 addr < qe.user_beg + qe.user_size + (1 << SHADOW_SCALE);
         });
     QuarantineElement ret;
     ret.alloc_beg = -1;
@@ -269,6 +270,8 @@ public:
     pthread_mutex_unlock(&m_mutex);
     return ret;
   }
+
+  void show();
 
   void put(QuarantineElement qe) {
     pthread_mutex_lock(&m_mutex);

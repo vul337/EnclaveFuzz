@@ -1,9 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
-set(CMAKE_C_COMPILER "clang-13")
-set(CMAKE_CXX_COMPILER "clang++-13")
-
+set(LINUX_SGX_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/linux-sgx")
 set(LINUX_SGX_MINI "${CMAKE_CURRENT_SOURCE_DIR}/SGXSanRT/linux-sgx-mini/")
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(KAFL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/kAFL)
@@ -68,9 +66,21 @@ install(DIRECTORY
         ${LINUX_SGX_MINI}/common/inc/ DESTINATION include
         PATTERN common/inc/internal EXCLUDE)
 
+install(DIRECTORY
+        ${LINUX_SGX_SRC_DIR}/common/inc/ DESTINATION include
+        PATTERN common/inc/internal EXCLUDE
+        PATTERN common/inc/stdc++ EXCLUDE
+        PATTERN common/inc/tlibc EXCLUDE)
+
+install(FILES
+        ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm.h
+        ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm_primitives.h
+        ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm_rt_abstraction.h
+        DESTINATION include)
+
 install(FILES Tool/sgx_edger8r
         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
         DESTINATION bin/x64)
 
-install(FILES ${LINUX_SGX_MINI}/common/buildenv.mk
+install(FILES ${LINUX_SGX_SRC_DIR}/common/buildenv.mk
         DESTINATION .)

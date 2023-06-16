@@ -41,6 +41,8 @@ std::unordered_map<void * /* callsite addr */,
 static pthread_rwlock_t output_history_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 static struct sigaction g_old_sigact[_NSIG];
 
+extern "C" __attribute__((weak)) bool DFEnableSanCheckDie();
+
 static std::string sgxsan_exec(const char *cmd) {
   std::array<char, 128> buffer;
   std::string result;
@@ -524,7 +526,9 @@ void ReportError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   sgxsan_backtrace(ll);
   sgxsan_log(ll, false, "================= Report End =================\n");
 
-  Die();
+  if (not DFEnableSanCheckDie or
+      (DFEnableSanCheckDie and DFEnableSanCheckDie()))
+    Die();
 }
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal, const char *msg, ...) {
@@ -557,7 +561,8 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   sgxsan_backtrace(ll);
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");
-  if (fatal)
+  if (fatal and (not DFEnableSanCheckDie or
+                 (DFEnableSanCheckDie and DFEnableSanCheckDie())))
     Die();
   return;
 }
@@ -581,7 +586,9 @@ void ReportUseAfterFree(uptr pc, uptr bp, uptr sp, uptr addr) {
   sgxsan_dump_bt_buf((void **)bt.free_bt, bt.free_bt_cnt);
   PrintShadowMap(ll, addr);
   log_error_np("================= Report End =================\n");
-  Die();
+  if (not DFEnableSanCheckDie or
+      (DFEnableSanCheckDie and DFEnableSanCheckDie()))
+    Die();
   return;
 }
 
@@ -602,7 +609,9 @@ void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr) {
   sgxsan_dump_bt_buf((void **)bt.free_bt, bt.free_bt_cnt);
   PrintShadowMap(ll, addr);
   log_error_np("================= Report End =================\n");
-  Die();
+  if (not DFEnableSanCheckDie or
+      (DFEnableSanCheckDie and DFEnableSanCheckDie()))
+    Die();
   return;
 }
 
