@@ -83,7 +83,7 @@ void SetUserDieCallback(DieCallbackType callback) {
 void NORETURN Die() {
   if (UserDieCallback)
     UserDieCallback();
-  _Exit(1);
+  _Exit(77);
 }
 #endif
 
@@ -216,39 +216,45 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     return;
   }
   ucontext_t *ucontext = (ucontext_t *)priv;
-  sgxsan_assert(siginfo->si_signo == SIGSEGV);
-  if (siginfo->si_code == SI_KERNEL) {
-    // If si_code is SI_KERNEL, #PF address is not true
-    log_error("#PF Addr Unknown at pc %p\n",
-              ucontext->uc_mcontext.gregs[REG_RIP]);
-  } else {
-    size_t page_size = getpagesize();
-    // process siginfo
-    void *_page_fault_addr = siginfo->si_addr;
-    log_error("#PF Addr %p at pc %p => ", _page_fault_addr,
-              ucontext->uc_mcontext.gregs[REG_RIP]);
-
-    uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
-    if (0 <= page_fault_addr and page_fault_addr < page_size) {
-      log_error_np("Null-Pointer Dereference\n");
-    } else if ((kLowShadowGuardBeg <= page_fault_addr &&
-                page_fault_addr < kLowShadowBeg) ||
-               (kHighShadowEnd < page_fault_addr &&
-                page_fault_addr <= kHighShadowGuardEnd)) {
-      log_error_np("ShadowMap's Guard Dereference\n");
-    } else if ((kHighShadowEnd + 1 - page_size) <= page_fault_addr &&
-               page_fault_addr <= kHighShadowEnd) {
-      log_error_np("Cross ShadowMap's Guard Dereference\n");
-    } else if (kShadowGapBeg <= page_fault_addr &&
-               page_fault_addr < kShadowGapEnd) {
-      log_error_np("ShadowMap's GAP Dereference\n");
+  if (signum == SIGSEGV) {
+    sgxsan_assert(siginfo->si_signo == SIGSEGV);
+    if (siginfo->si_code == SI_KERNEL) {
+      // If si_code is SI_KERNEL, #PF address is not true
+      log_error("#PF Addr Unknown at pc %p\n",
+                ucontext->uc_mcontext.gregs[REG_RIP]);
     } else {
-      log_error_np("Unknown page fault\n");
+      size_t page_size = getpagesize();
+      // process siginfo
+      void *_page_fault_addr = siginfo->si_addr;
+      log_error("#PF Addr %p at pc %p => ", _page_fault_addr,
+                ucontext->uc_mcontext.gregs[REG_RIP]);
+
+      uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
+      if (0 <= page_fault_addr and page_fault_addr < page_size) {
+        log_error_np("Null-Pointer Dereference\n");
+      } else if ((kLowShadowGuardBeg <= page_fault_addr &&
+                  page_fault_addr < kLowShadowBeg) ||
+                 (kHighShadowEnd < page_fault_addr &&
+                  page_fault_addr <= kHighShadowGuardEnd)) {
+        log_error_np("ShadowMap's Guard Dereference\n");
+      } else if ((kHighShadowEnd + 1 - page_size) <= page_fault_addr &&
+                 page_fault_addr <= kHighShadowEnd) {
+        log_error_np("Cross ShadowMap's Guard Dereference\n");
+      } else if (kShadowGapBeg <= page_fault_addr &&
+                 page_fault_addr < kShadowGapEnd) {
+        log_error_np("ShadowMap's GAP Dereference\n");
+      } else {
+        log_error_np("Unknown page fault\n");
+      }
     }
+
+    sgxsan_signal_safe_dump_bt();
+    Die();
+  } else if (signum == SIGALRM) {
+    log_error("Timeout\n");
+    _Exit(70);
   }
 
-  sgxsan_signal_safe_dump_bt();
-  Die();
   // Never achieve here
   signal(signum, SIG_DFL);
   raise(signum);
@@ -293,7 +299,7 @@ void register_sgxsan_sigaction() {
   struct sigaction sig_act;
   memset(&sig_act, 0, sizeof(sig_act));
   sig_act.sa_sigaction = sgxsan_sigaction;
-  sig_act.sa_flags = SA_SIGINFO | SA_NODEFER | SA_RESTART;
+  sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
   sigemptyset(&sig_act.sa_mask);
   sgxsan_error(0 != sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask),
                "Fail to get signal mask\n");
@@ -301,6 +307,7 @@ void register_sgxsan_sigaction() {
   sigdelset(&sig_act.sa_mask, SIGSEGV);
   // hool SIGSEGV
   sgxsan_assert(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]));
+  sgxsan_assert(0 == sigaction(SIGALRM, &sig_act, &g_old_sigact[SIGALRM]));
 #ifdef KAFL_FUZZER
   sgxsan_assert(0 == sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]));
   sgxsan_assert(0 == sigaction(SIGBUS, &sig_act, &g_old_sigact[SIGBUS]));

@@ -70,7 +70,9 @@ install(DIRECTORY
         ${LINUX_SGX_SRC_DIR}/common/inc/ DESTINATION include
         PATTERN common/inc/internal EXCLUDE
         PATTERN common/inc/stdc++ EXCLUDE
-        PATTERN common/inc/tlibc EXCLUDE)
+        PATTERN common/inc/tlibc EXCLUDE
+        PATTERN common/inc/sgx_mm* EXCLUDE
+)
 
 install(FILES
         ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm.h
