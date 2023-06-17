@@ -28,28 +28,22 @@ void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs,
   }
 }
 
-void sgxsan_print_stack_trace(log_level ll) {
+void sgxsan_backtrace(log_level ll) {
 #if (DUMP_STACK_TRACE)
-  std::vector<uint64_t> ret_addrs;
+  std::vector<uint64_t> ret_addrs, offset_ret_addrs;
   libunwind_backtrace(ret_addrs);
+  for (auto ret_addr : ret_addrs) {
+    offset_ret_addrs.push_back(ret_addr - g_enclave_base);
+  }
   size_t ret_addr_arr_size = ret_addrs.size();
   if (ret_addr_arr_size > 0) {
     sgxsan_log(ll, false, "============= Stack Trace Begin ==============\n");
-    sgxsan_ocall_addr2line(ret_addrs.data(), ret_addr_arr_size);
+    sgxsan_ocall_addr2line(offset_ret_addrs.data(), ret_addr_arr_size, ll);
     sgxsan_log(ll, false, "============== Stack Trace End ===============\n");
   }
 #else
   (void)ll;
 #endif
-}
-
-// ignore return address of current call
-uint64_t get_last_return_address(uint64_t enclave_base_addr,
-                                 unsigned int level) {
-  std::vector<uint64_t> ret_addrs;
-  libunwind_backtrace(ret_addrs, level + 2);
-  sgxsan_assert(ret_addrs.size() == level + 2);
-  return ret_addrs[level + 1] - enclave_base_addr;
 }
 
 // https://eli.thegreenplace.net/2015/programmatic-access-to-the-call-stack-in-c/

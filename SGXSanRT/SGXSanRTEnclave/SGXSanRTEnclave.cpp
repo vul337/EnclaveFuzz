@@ -21,7 +21,7 @@ int asan_inited = 0;
 // #PF etc. need platform (e.g. SGXv2 CPU) support conditonal exception handling
 int sgxsan_exception_handler(sgx_exception_info_t *info) {
   (void)info;
-  sgxsan_print_stack_trace();
+  sgxsan_backtrace();
   return EXCEPTION_CONTINUE_SEARCH;
 }
 

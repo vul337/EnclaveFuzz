@@ -20,6 +20,7 @@ sudo ./linux/installer/bin/sgx_linux_x64_sdk_*.bin <<EOF
 no
 /opt/intel/
 EOF
+source /opt/intel/sgxsdk/environment
 
 # build sgxpsw, which relies on installed sgxsdk
 # target "deb_local_repo" depends on target "deb_psw_pkg" which indirectly depends on target "psw"

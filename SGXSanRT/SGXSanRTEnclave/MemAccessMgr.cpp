@@ -62,9 +62,11 @@ public:
                                   bool used_to_cmp, char *parent_func) {
     sgxsan_assert(ptr && size > 0 && sgx_is_outside_enclave(ptr, size));
     // there may be ocall and ocall return before enter first ecall
-    if (!m_active)
+    // When before ECall, OCall is called and return, m_active will set to true
+    // but m_inited is still false
+    if (!m_active or !m_inited)
       return false;
-    sgxsan_assert(m_inited && m_control_fetchs);
+    sgxsan_assert(m_control_fetchs);
     if (used_to_cmp) {
       // it's a fetch used to compare, maybe used to 'check'
       while (m_control_fetchs->size() >= CONTROL_FETCH_QUEUE_MAX_SIZE) {

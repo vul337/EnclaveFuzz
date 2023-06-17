@@ -32,6 +32,20 @@ std::vector<std::string> GetFileNames(std::filesystem::path dir,
   return fileNames;
 }
 
+std::vector<std::string> RecGetFilePaths(std::filesystem::path dir,
+                                         std::string substr) {
+  std::vector<std::string> filePaths;
+  for (auto const &entry : std::filesystem::recursive_directory_iterator(dir)) {
+    if (std::filesystem::is_regular_file(entry)) {
+      auto fileName = entry.path().filename().string();
+      if (fileName.find(substr) != fileName.npos) {
+        filePaths.push_back(entry.path().string());
+      }
+    }
+  }
+  return filePaths;
+}
+
 std::string ReadFile(std::string fileName) {
   auto fileBuffer = MemoryBuffer::getFile(fileName);
   if (auto EC = fileBuffer.getError()) {

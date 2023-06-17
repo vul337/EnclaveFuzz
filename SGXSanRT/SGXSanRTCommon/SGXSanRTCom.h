@@ -83,7 +83,7 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
 extern "C" {
 #endif
 
-void sgxsan_print_stack_trace(log_level ll = LOG_LEVEL_ERROR);
+void sgxsan_backtrace(log_level ll = LOG_LEVEL_ERROR);
 
 #if defined(__cplusplus)
 }
@@ -121,7 +121,7 @@ typedef signed long long s64;
   do {                                                                         \
     if (!!(cond)) {                                                            \
       log_error(__VA_ARGS__);                                                  \
-      sgxsan_print_stack_trace();                                              \
+      sgxsan_backtrace();                                                      \
       abort();                                                                 \
     }                                                                          \
   } while (0);
@@ -132,7 +132,7 @@ typedef signed long long s64;
   do {                                                                         \
     if (!!(cond)) {                                                            \
       log_warning(__VA_ARGS__);                                                \
-      sgxsan_print_stack_trace();                                              \
+      sgxsan_backtrace();                                                      \
     }                                                                          \
   } while (0);
 

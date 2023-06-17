@@ -54,6 +54,9 @@ static cl::opt<bool> ClNaiveHarness("naive-harness", cl::init(false),
                                     cl::desc("Enable naive harness"),
                                     cl::Hidden);
 
+static cl::list<std::string> ClTypeInfoDirs("type-info-dirs",
+                                            cl::CommaSeparated);
+
 void DriverGenerator::initialize(Module &M) {
   this->M = &M;
   C = &M.getContext();
@@ -92,15 +95,19 @@ void DriverGenerator::initialize(Module &M) {
   edlJson = json::parse(ReadFile(ClEdlJsonFile));
 
   // load json from *.sgxsan.typeinfo.json
-  std::vector<std::string> TypeJsonNames =
-      GetFileNames(std::filesystem::current_path(), ".sgxsan.typeinfo.json");
   ordered_json TypeJson;
-  if (TypeJsonNames.size() > 1) {
-    abort();
-  } else if (TypeJsonNames.size() == 1) {
-    TypeJson = ordered_json::parse(ReadFile(TypeJsonNames[0]));
-  }
   mDeSerialzer.init(C, TypeJson);
+  if (not ClNaiveHarness) {
+    for (std::string TypeInfoDir : ClTypeInfoDirs) {
+      std::vector<std::string> TypeJsonPaths =
+          RecGetFilePaths(TypeInfoDir, ".sgxsan.typeinfo.json");
+      for (auto TypeJsonPath : TypeJsonPaths) {
+        dbgs() << "== DriverGenerator: Load " << TypeJsonPath << " ==\n";
+        TypeJson = ordered_json::parse(ReadFile(TypeJsonPath));
+        mDeSerialzer.update(TypeJson);
+      }
+    }
+  }
 }
 
 // FOR_LOOP may change insert point of IRBuilder

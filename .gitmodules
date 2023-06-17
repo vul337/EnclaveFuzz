@@ -19,3 +19,6 @@
 [submodule "kAFL"]
 	path = kAFL
 	url = git@github.com:IntelLabs/kAFL.git
+[submodule "intel-sgx-ssl"]
+	path = intel-sgx-ssl
+	url = git@github.com:LeoneChen/intel-sgx-ssl.git

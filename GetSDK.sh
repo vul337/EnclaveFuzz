@@ -27,6 +27,7 @@ echo "-- HOST_ASAN: ${HOST_ASAN}"
 PREFIX="${PREFIX:-${SGXSAN_DIR}/install_dir/${MODE}-${FUZZER}-install}"
 echo "-- PREFIX: ${PREFIX}"
 
+export SGX_SDK=${PREFIX}
 MAKE=make
 CP=cp
 OBJCOPY=objcopy
@@ -113,17 +114,17 @@ get_enclave_lib_orig() {
 }
 
 ########## HOST ##########
-get_host_lib "${LINUX_SGX_SRC_DIR}/psw/urts/linux"                                  "libsgx_urts.so"
-get_host_lib "${LINUX_SGX_SRC_DIR}/psw/enclave_common"                              "libsgx_enclave_common.so libsgx_enclave_common.a"
+get_host_lib "${LINUX_SGX_SRC_DIR}/psw/urts/linux"                                      "libsgx_urts.so"
+get_host_lib "${LINUX_SGX_SRC_DIR}/psw/enclave_common"                                  "libsgx_enclave_common.so libsgx_enclave_common.a"
 ${LN} -sf libsgx_enclave_common.so ${PREFIX}/lib64/libsgx_enclave_common.so.1
-get_host_lib "${LINUX_SGX_SRC_DIR}/psw/uae_service/linux"                           "libsgx_uae_service.so libsgx_epid.so libsgx_launch.so libsgx_quote_ex.so"
-get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/ukey_exchange"                               "libsgx_ukey_exchange.a"
-get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/protected_fs/sgx_uprotected_fs"              "libsgx_uprotected_fs.a"
-get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/libcapable/linux"                            "libsgx_capable.a libsgx_capable.so"
-get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/simulation/uae_service_sim/linux"            "libsgx_uae_service_sim.so libsgx_quote_ex_sim.so libsgx_epid_sim.so"
-Jobs=1 get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/simulation/urtssim/"                  "linux/libsgx_urts_sim.so"
-get_host_lib "${LINUX_SGX_DCAP_SRC_DIR}/QuoteGeneration/quote_wrapper/ql/linux"     "libsgx_dcap_ql.so"
-get_host_lib "${LINUX_SGX_DCAP_SRC_DIR}/QuoteVerification/dcap_quoteverify/linux"   "libsgx_dcap_quoteverify.so libsgx_dcap_qvl_attestation.a libsgx_dcap_qvl_parser.a"
+get_host_lib "${LINUX_SGX_SRC_DIR}/psw/uae_service/linux"                               "libsgx_uae_service.so libsgx_epid.so libsgx_launch.so libsgx_quote_ex.so"
+get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/ukey_exchange"                                   "libsgx_ukey_exchange.a"
+get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/protected_fs/sgx_uprotected_fs"                  "libsgx_uprotected_fs.a"
+get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/libcapable/linux"                                "libsgx_capable.a libsgx_capable.so"
+get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/simulation/uae_service_sim/linux"                "libsgx_uae_service_sim.so libsgx_quote_ex_sim.so libsgx_epid_sim.so"
+Jobs=1 get_host_lib "${LINUX_SGX_SRC_DIR}/sdk/simulation/urtssim/"                      "linux/libsgx_urts_sim.so"
+Jobs=1 get_host_lib "${LINUX_SGX_DCAP_SRC_DIR}/QuoteGeneration/quote_wrapper/ql/linux"  "libsgx_dcap_ql.so"
+get_host_lib "${LINUX_SGX_DCAP_SRC_DIR}/QuoteVerification/dcap_quoteverify/linux"       "libsgx_dcap_quoteverify.so libsgx_dcap_qvl_attestation.a libsgx_dcap_qvl_parser.a"
 ${LN} -sf libsgx_dcap_quoteverify.so ${PREFIX}/lib64/libsgx_dcap_quoteverify.so.1
 
 ########## ENCLAVE ##########
@@ -171,5 +172,16 @@ cd ${LINUX_SGX_SRC_DIR}/sdk/sign_tool/SignTool
 ${MAKE} clean -s
 ${MAKE} -j${Jobs} ${ADD_MAKE_FLAGS}
 ${CP} sgx_sign ${PREFIX}/bin/x64
+
+echo "== Get Intel SGXSSL =="
+cd ${SGXSAN_DIR}/intel-sgx-ssl
+./clean.sh
+./build.sh MODE=${MODE} FUZZER=${FUZZER} SIM=FALSE
+${CP} -rf ${SGXSAN_DIR}/intel-sgx-ssl/Linux/package/* ${PREFIX}/sgxssl/
+cd ${PREFIX}/sgxssl/lib64
+if [[ ! -f libsgx_tsgxssl.a && -f libsgx_tsgxssld.a ]]; then ${LN} -sf libsgx_tsgxssld.a libsgx_tsgxssl.a; fi
+if [[ ! -f libsgx_tsgxssl_crypto.a && -f libsgx_tsgxssl_cryptod.a ]]; then ${LN} -sf libsgx_tsgxssl_cryptod.a libsgx_tsgxssl_crypto.a; fi
+if [[ ! -f libsgx_usgxssl.a && -f libsgx_usgxssld.a ]]; then ${LN} -sf libsgx_usgxssld.a libsgx_usgxssl.a; fi
+if [[ ! -f libsgx_tsgxssl_ssl.a && -f libsgx_tsgxssl_ssld.a ]]; then ${LN} -sf libsgx_tsgxssl_ssld.a libsgx_tsgxssl_ssl.a; fi
 
 echo "== Successfully get SGXSDK ${MODE} =="

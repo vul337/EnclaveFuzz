@@ -73,5 +73,8 @@ install(DIRECTORY linux-sgx/external/ippcp_internal/inc/
         DESTINATION include/ipp
         PATTERN "ippcp20u3.patch" EXCLUDE)
 
+install(DIRECTORY linux-sgx/external/dcap_source/QuoteGeneration/pce_wrapper/inc/
+        DESTINATION include)
+
 install(FILES linux-sgx/common/buildenv.mk
         DESTINATION .)

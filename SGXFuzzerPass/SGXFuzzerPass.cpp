@@ -23,7 +23,7 @@ static cl::opt<bool> ClAtEnclave(
 static cl::opt<bool> ClEnableEnclaveTesterGenerator(
     "enable-harness",
     cl::desc("Auto generate enclave test function (Only when at app side)"),
-    cl::Hidden, cl::init(false));
+    cl::Hidden, cl::init(true));
 
 /// Pass Register
 class SGXFuzzerPass : public ModulePass {
@@ -42,7 +42,6 @@ public:
     bool changed = false;
     if (not ClAtEnclave && ClEnableEnclaveTesterGenerator) {
       // run DriverGenerator
-      dbgs() << "== DriverGenerator: " << M.getName() << " ==\n";
       DriverGenerator gen;
       changed |= gen.runOnModule(M);
     }

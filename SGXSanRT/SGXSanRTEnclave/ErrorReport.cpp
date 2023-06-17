@@ -88,18 +88,30 @@ void PrintShadowMap(log_level ll, uptr addr) {
 }
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
-                        uptr access_size, bool fatal, const char *msg) {
-  log_level ll = fatal ? LOG_LEVEL_ERROR : LOG_LEVEL_WARNING;
+                        uptr access_size, bool fatal, const char *msg, ...) {
+  log_level ll;
+  if (fatal) {
+    ll = LOG_LEVEL_ERROR;
+    log_error_np("\n================ Error Report ================\n"
+                 "[SGXSan] ERROR: ");
+  } else {
+    ll = LOG_LEVEL_WARNING;
+    log_warning_np("\n================ Warning Report ================\n"
+                   "[SGXSan] WARNING: ");
+  }
+
+  char buf[BUFSIZ];
+  va_list ap;
+  va_start(ap, msg);
+  vsnprintf(buf, BUFSIZ, msg, ap);
+  va_end(ap);
+  sgxsan_log(ll, false, "%s", buf);
+
   sgxsan_log(ll, false,
-             "================ Error Report ================\n"
-             "%s\n"
-             "\tpc = 0x%lx\tbp   = 0x%lx\n"
-             "\tsp = 0x%lx\taddr = 0x%lx\n"
-             "\tshadow = 0x%lx\toffset = 0x%lx\n"
-             "\tis_write = %d\t\taccess_size = 0x%lx\n",
-             msg, pc, bp, sp, addr, MEM_TO_SHADOW(addr),
-             addr & (SHADOW_GRANULARITY - 1), is_write, access_size);
-  sgxsan_print_stack_trace(ll);
+             " at pc 0x%lx %s 0x%lx with 0x%lx bytes (bp = 0x%lx sp = "
+             "0x%lx)\n\n",
+             pc, (is_write ? "write" : "read"), addr, access_size, bp, sp);
+  sgxsan_backtrace(ll);
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");
 #if (ENABLE_SAN_CHECK_DIE == 1)

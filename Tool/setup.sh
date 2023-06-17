@@ -2,6 +2,8 @@
 
 set -e
 
+CUR_DIR=$(realpath $(dirname $0))
+
 show_usage() {
     echo "$(basename "$0") <FuzzBinary> <Enclave.so> <WorkDir> [TEST=0] [TASKSET=\"taskset -c 0\"]"
     exit 1
@@ -13,7 +15,7 @@ if [ $# -lt 3 ]; then show_usage; fi
 # BASIC ARG
 BINARY_PATH=$(realpath "$1")
 ENCLAVE_PATH=$(realpath "$2")
-WORKDIR=$(realpath "$3")
+WORKDIR="$3"
 shift 3
 
 for ARG in "$@"
@@ -66,69 +68,19 @@ set -e
 
 CUR_DIR=\$(realpath .)
 echo "TMPDIR=\${CUR_DIR}"
-TMPDIR=\${CUR_DIR} LLVM_PROFILE_FILE="./result/profraw/%p" ${TASKSET} nohup ./${BINARY_NAME} --cb_enclave=${ENCLAVE_NAME} ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@ >> coverage_exp.log 2>&1 & 
+TMPDIR=\${CUR_DIR} LLVM_PROFILE_FILE="./result/profraw/%p" ${TASKSET} nohup ./${BINARY_NAME} --cb_enclave=${ENCLAVE_NAME} ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 -timeout=10 -max_total_time=86400 -fork=1 \$@ >> coverage_exp.log 2>&1 & 
 fuzz_pid=\$!
 echo \$fuzz_pid >> fuzz.pid
-echo "TMPDIR=\${CUR_DIR} LLVM_PROFILE_FILE=\"./result/profraw/%p\" ${TASKSET} nohup ./${BINARY_NAME} --cb_enclave=${ENCLAVE_NAME} ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 \$@" >> fuzz.cmd
+echo "TMPDIR=\${CUR_DIR} LLVM_PROFILE_FILE=\"./result/profraw/%p\" ${TASKSET} nohup ./${BINARY_NAME} --cb_enclave=${ENCLAVE_NAME} ./result/seeds -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 -timeout=10 -max_total_time=86400 -fork=1 \$@" >> fuzz.cmd
 # tail -f coverage_exp.log
 EOF
 chmod +x fuzz.sh
 
-echo "Create stop.sh"
-cat > stop.sh <<EOF
-#!/usr/bin/env bash
-set -e
+echo "Copy stop.sh"
+cp ${CUR_DIR}/stop.sh ${EVAL_TOP}
 
-for i in \$(cat fuzz.pid)
-do
-    echo "Kill \${i}"
-    kill -9 \${i} || echo ""
-done
-EOF
-chmod +x stop.sh
-
-# Create merge.sh
-cat > merge.sh <<EOF
-#!/usr/bin/env bash
-set -e
-
-OUTPUT_FILENAME=./result/all.profdata
-
-# Reads the paths to prof data files from INPUT_FILENAME and then merges them into OUTPUT_FILENAME.
-TARGETS=(\$(find ./result/profraw -type f -printf "%T@\t%Tc %6k KiB %p\n" | sort -n | tr -s ' ' | cut -d ' ' -f 6 | head -n -5))
-
-if [[ \${#TARGETS[@]} -eq 0 ]]; then
-    echo "Error! No *.profraw targets to merge!"
-    exit 1
-fi
-
-echo "New profdata \${#TARGETS[@]}"
-
-if [ -f "\$OUTPUT_FILENAME" ]; then
-    echo "\$OUTPUT_FILENAME exists."
-    for t in "\${TARGETS[@]}"; do
-        echo "Merge \$t"
-        llvm-profdata-13 merge -j=1 -o=\${OUTPUT_FILENAME}.tmp \${t} \${OUTPUT_FILENAME}
-        mv \${OUTPUT_FILENAME}.tmp \${OUTPUT_FILENAME}
-        rm \${t}
-    done
-else
-    echo "\$OUTPUT_FILENAME does not exist."
-    echo "\$TARGETS"
-    FIRST_TARGET=\${TARGETS[0]}
-    llvm-profdata-13 merge -sparse -output=\${OUTPUT_FILENAME} \${FIRST_TARGET}
-    for t in "\${TARGETS[@]:1}"; do
-        echo "Merge \$t"
-        llvm-profdata-13 merge -j=1 -o=\${OUTPUT_FILENAME}.tmp \${t} \${OUTPUT_FILENAME}
-        mv \${OUTPUT_FILENAME}.tmp \${OUTPUT_FILENAME}
-        rm \${t}
-    done
-fi
-
-wait
-
-EOF
-chmod +x merge.sh
+echo "Copy merge.sh"
+cp ${CUR_DIR}/merge.sh ${EVAL_TOP}
 
 
 

@@ -590,6 +590,9 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
 }
 
 extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
+extern "C" void libFuzzerCrashCallback() {
+  sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid);
+}
 #endif
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   log_always("Start LLVMFuzzerTestOneInput\n");
@@ -720,6 +723,8 @@ extern "C" bool DFEnableModifyDoubleFetchValue() {
 
 extern "C" int DFGetInt32() { return data_factory.getInterger<int>(); }
 
+extern "C" const char *DFGetEnclaveName() { return ClEnclaveFileName.c_str(); }
+
 #ifdef KAFL_FUZZER
 
 extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }
@@ -793,7 +798,6 @@ int agent_init(int verbose) {
 extern "C" sgx_status_t sgxsan_ecall_get_enclave_range(sgx_enclave_id_t eid,
                                                        uintptr_t *enclave_base,
                                                        size_t *enclave_size);
-extern "C" void reg_sgxsan_sigaction();
 int main(int argc, char **argv) {
   LLVMFuzzerInitialize(&argc, &argv);
   agent_init(1);
@@ -819,7 +823,6 @@ int main(int argc, char **argv) {
           &__hidden_sgxfuzzer_harness_global_eid, NULL);
       sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
-      reg_sgxsan_sigaction(); // Register SIGILL handler before rdrand in ecall
       uintptr_t EnclaveStart, EnclaveSize;
       sgxsan_ecall_get_enclave_range(__hidden_sgxfuzzer_harness_global_eid,
                                      &EnclaveStart, &EnclaveSize);

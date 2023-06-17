@@ -149,3 +149,47 @@ index ca881a4f..b218ce8b 100644
 +
      return enclave_base;
  }
+ 
+diff --git a/sdk/simulation/urtssim/enclave_creator_sim.cpp b/sdk/simulation/urtssim/enclave_creator_sim.cpp
+index 64b9e0e8..33744a7c 100644
+--- a/sdk/simulation/urtssim/enclave_creator_sim.cpp
++++ b/sdk/simulation/urtssim/enclave_creator_sim.cpp
+@@ -160,6 +160,7 @@ int EnclaveCreatorSim::add_enclave_page(sgx_enclave_id_t enclave_id, void *src,
+ 
+ void reg_sig_handler();
+ void reg_sig_handler_sim();
++extern "C" __attribute__((weak)) void reg_sgxsan_sigaction();
+ int EnclaveCreatorSim::init_enclave(sgx_enclave_id_t enclave_id, enclave_css_t *enclave_css, SGXLaunchToken *lc, le_prd_css_file_t *prd_css_file)
+ {
+     UNUSED(prd_css_file);
+@@ -169,6 +170,8 @@ int EnclaveCreatorSim::init_enclave(sgx_enclave_id_t enclave_id, enclave_css_t *
+     if(false == m_sig_registered)
+     {
+         reg_sig_handler();
++        if (reg_sgxsan_sigaction)
++            reg_sgxsan_sigaction();
+         reg_sig_handler_sim();
+         m_sig_registered = true;
+     }
+diff --git a/sdk/simulation/uinst/u_instructions.cpp b/sdk/simulation/uinst/u_instructions.cpp
+index 1989352b..b26e8d24 100644
+--- a/sdk/simulation/uinst/u_instructions.cpp
++++ b/sdk/simulation/uinst/u_instructions.cpp
+@@ -127,7 +127,7 @@ void call_old_handler(int signum, void* siginfo, void *priv)
+ void sig_handler_sim(int signum, siginfo_t *siginfo, void *priv) __attribute__((optimize(0))) __attribute__((optimize("no-stack-protector")));
+ void sig_handler_sim(int signum, siginfo_t *siginfo, void *priv)
+ {
+-    GP_ON(signum != SIGFPE && signum != SIGSEGV);
++    GP_ON(signum != SIGFPE && signum != SIGSEGV && signum != SIGALRM);
+ 
+     thread_data_t *thread_data = 0;
+     arch_prctl(ARCH_GET_GS, (unsigned long)&thread_data);
+@@ -259,6 +259,8 @@ void reg_sig_handler_sim()
+     if (0 != ret) abort();
+     ret = sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]);
+     if (0 != ret) abort();
++    ret = sigaction(SIGALRM, &sig_act, &g_old_sigact[SIGALRM]);
++    if (0 != ret) abort();
+ }
+ 
+ uintptr_t _EINIT(secs_t* secs, enclave_css_t *css, token_t *launch)

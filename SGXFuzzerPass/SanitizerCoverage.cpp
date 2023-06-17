@@ -577,12 +577,12 @@ bool ModuleSanitizerCoverage::instrumentModule(Module &M,
           GlobalValue::ExternalLinkage);
     }
   } else {
-    dbgs() << "== SGXSanCov: " << CurModule->getName() << " ==\n";
     if (not isAtUBridge(*CurModule)) {
       // do nothing at app side except it's at UBridge, then we will not prepare
       // multiple same structure
       return false;
     } else {
+      dbgs() << "== SGXSanCov: " << CurModule->getName() << " ==\n";
       assert(((size_t)InstrumentJson["SUM"]) > 0);
       // since we directly get total numbers from enclave, so only keep one
       // array for whole module

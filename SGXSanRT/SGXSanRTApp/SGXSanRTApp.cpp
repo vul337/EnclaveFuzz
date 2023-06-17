@@ -154,7 +154,7 @@ void sgxsan_dump_bt_buf(void **array, size_t size) {
 }
 
 /* Stack trace */
-void sgxsan_print_stack_trace(log_level ll) {
+void sgxsan_backtrace(log_level ll) {
   if (ll > USED_LOG_LEVEL)
     return;
   void *array[20];
@@ -253,35 +253,44 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
 }
 #else
 void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
+  ucontext_t *ucontext = (ucontext_t *)priv;
   if (signum == SIGSEGV) {
     // process siginfo
-    void *pf_addr_p = siginfo->si_addr;
-    log_error("#PF Addr: %p\n", pf_addr_p);
-    uint64_t page_fault_addr = (uint64_t)pf_addr_p;
-    if (pf_addr_p == nullptr) {
-      log_error("Null-Pointer dereference\n");
-    } else if ((g_enclave_low_guard_start <= page_fault_addr &&
-                page_fault_addr < g_enclave_base) ||
-               ((g_enclave_base + g_enclave_size) <= page_fault_addr &&
-                page_fault_addr <= g_enclave_high_guard_end)) {
-      log_error("Pointer dereference overflows enclave boundray (Overlapping "
-                "memory access)\n");
-    } else if ((g_enclave_base + g_enclave_size - 0x1000) <= page_fault_addr &&
-               page_fault_addr < (g_enclave_base + g_enclave_size)) {
-      log_error("Infer pointer dereference overflows enclave boundray, as "
-                "mprotect's effort is page-granularity and si_addr only give "
-                "page-granularity address\n");
-    } else if ((kLowShadowGuardBeg <= page_fault_addr &&
-                page_fault_addr < kLowShadowBeg) ||
-               (kHighShadowEnd < page_fault_addr &&
-                page_fault_addr <= kHighShadowGuardEnd)) {
-      log_error("Pointer dereference overflows shadow map boundray "
-                "(Overlapping memory access)\n");
-    } else if ((kHighShadowEnd + 1 - 0x1000) <= page_fault_addr &&
-               page_fault_addr <= kHighShadowEnd) {
-      log_error("Infer pointer dereference overflows shadow map boundray, as "
-                "mprotect's effort is page-granularity and si_addr only give "
-                "page-granularity address\n");
+    if (siginfo->si_code == SI_KERNEL) {
+      // If si_code is SI_KERNEL, #PF address is not true
+      log_error("#PF Addr Unknown at pc %p\n",
+                ucontext->uc_mcontext.gregs[REG_RIP]);
+    } else {
+      void *pf_addr_p = siginfo->si_addr;
+      log_error("#PF Addr %p at pc %p => ", pf_addr_p,
+                ucontext->uc_mcontext.gregs[REG_RIP]);
+      uint64_t page_fault_addr = (uint64_t)pf_addr_p;
+      if (pf_addr_p == nullptr) {
+        log_error("Null-Pointer dereference\n");
+      } else if ((g_enclave_low_guard_start <= page_fault_addr &&
+                  page_fault_addr < g_enclave_base) ||
+                 ((g_enclave_base + g_enclave_size) <= page_fault_addr &&
+                  page_fault_addr <= g_enclave_high_guard_end)) {
+        log_error("Pointer dereference overflows enclave boundray (Overlapping "
+                  "memory access)\n");
+      } else if ((g_enclave_base + g_enclave_size - 0x1000) <=
+                     page_fault_addr &&
+                 page_fault_addr < (g_enclave_base + g_enclave_size)) {
+        log_error("Infer pointer dereference overflows enclave boundray, as "
+                  "mprotect's effort is page-granularity and si_addr only give "
+                  "page-granularity address\n");
+      } else if ((kLowShadowGuardBeg <= page_fault_addr &&
+                  page_fault_addr < kLowShadowBeg) ||
+                 (kHighShadowEnd < page_fault_addr &&
+                  page_fault_addr <= kHighShadowGuardEnd)) {
+        log_error("Pointer dereference overflows shadow map boundray "
+                  "(Overlapping memory access)\n");
+      } else if ((kHighShadowEnd + 1 - 0x1000) <= page_fault_addr &&
+                 page_fault_addr <= kHighShadowEnd) {
+        log_error("Infer pointer dereference overflows shadow map boundray, as "
+                  "mprotect's effort is page-granularity and si_addr only give "
+                  "page-granularity address\n");
+      }
     }
   }
 
@@ -326,7 +335,7 @@ extern "C" void reg_sgxsan_sigaction() {
   struct sigaction sig_act;
   memset(&sig_act, 0, sizeof(sig_act));
   sig_act.sa_sigaction = sgxsan_sigaction;
-  sig_act.sa_flags = SA_SIGINFO | SA_NODEFER | SA_RESTART;
+  sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
   sigemptyset(&sig_act.sa_mask);
   sgxsan_error(0 != sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask),
                "Fail to get signal mask\n");
@@ -463,25 +472,28 @@ std::string addr2fname(void *addr) {
   return fname;
 }
 
+extern "C" __attribute__((weak)) const char *DFGetEnclaveName() {
+  return "enclave.signed.so";
+};
+
+std::string enclave_addr2fname(void *addr) {
+  std::string fname = _addr2fname((uptr)addr - 1, DFGetEnclaveName());
+  fname.erase(std::remove(fname.begin(), fname.end(), '\n'), fname.end());
+  return fname;
+}
+
 void sgxsan_ocall_addr2func_name(uint64_t addr, char *func_name,
                                  size_t buf_size) {
-  std::string str = addr2fname((void *)addr);
+  std::string str = enclave_addr2fname((void *)addr);
   size_t cp_size = std::min(buf_size - 1, str.length());
   strncpy(func_name, str.c_str(), cp_size);
   func_name[cp_size] = '\0';
 }
 
 void sgxsan_ocall_addr2line(uint64_t *addr_arr, size_t arr_cnt, int level) {
-  (void)level;
-  Dl_info info;
   for (size_t i = 0; i < arr_cnt; i++) {
-    if (dladdr((void *)addr_arr[i], &info) != 0) {
-      std::string str = addr2line(
-          (uptr)addr_arr[i] -
-              ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
-          info.dli_fname);
-      log_always_np(str.c_str());
-    }
+    std::string str = addr2line((uptr)addr_arr[i] - 1, DFGetEnclaveName());
+    sgxsan_log((log_level)level, false, str.c_str());
   }
 }
 
@@ -489,7 +501,7 @@ void sgxsan_ocall_depcit_distribute(uint64_t addr, unsigned char *byte_arr,
                                     size_t byte_arr_size, int bucket_num,
                                     bool is_cipher) {
   static int prefix = 0;
-  std::string func_name = addr2fname((void *)addr), byte_str = "[",
+  std::string func_name = enclave_addr2fname((void *)addr), byte_str = "[",
               dir = "sgxsan_data_" + std::to_string(getpid());
   for (size_t i = 0; i < byte_arr_size; i++) {
     byte_str = byte_str + std::to_string(byte_arr[i]) +
