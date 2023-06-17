@@ -17,27 +17,20 @@ echo "New profdata ${#TARGETS[@]}"
 if [ -f "$OUTPUT_FILENAME" ]; then
     echo "$OUTPUT_FILENAME exists."
     for t in "${TARGETS[@]}"; do
-        if llvm-profdata-13 merge -j=1 -o=${OUTPUT_FILENAME}.tmp ${t} ${OUTPUT_FILENAME}; then
-            echo "Merge $t"
+        if llvm-profdata-13 merge -o=${OUTPUT_FILENAME}.tmp ${t} ${OUTPUT_FILENAME}; then
             mv ${OUTPUT_FILENAME}.tmp ${OUTPUT_FILENAME}
-            rm ${t}
-        else
-            echo "Merge $t Fail"
         fi
+        rm ${t}
     done
 else
     echo "$OUTPUT_FILENAME does not exist."
-    echo "$TARGETS"
     FIRST_TARGET=${TARGETS[0]}
-    llvm-profdata-13 merge -sparse -output=${OUTPUT_FILENAME} ${FIRST_TARGET}
+    llvm-profdata-13 merge -sparse -o=${OUTPUT_FILENAME} ${FIRST_TARGET}
     for t in "${TARGETS[@]:1}"; do
-        if llvm-profdata-13 merge -j=1 -o=${OUTPUT_FILENAME}.tmp ${t} ${OUTPUT_FILENAME}; then
-            echo "Merge $t"
+        if llvm-profdata-13 merge -o=${OUTPUT_FILENAME}.tmp ${t} ${OUTPUT_FILENAME}; then
             mv ${OUTPUT_FILENAME}.tmp ${OUTPUT_FILENAME}
-            rm ${t}
-        else
-            echo "Merge $t Fail"
         fi
+        rm ${t}
     done
 fi
 
