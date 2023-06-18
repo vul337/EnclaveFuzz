@@ -251,7 +251,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     sgxsan_signal_safe_dump_bt();
     Die();
   } else if (signum == SIGALRM) {
-    log_error("Timeout\n");
+    // no log to avoid dead lock
     _Exit(70);
   }
 
