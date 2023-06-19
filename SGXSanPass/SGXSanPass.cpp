@@ -43,7 +43,10 @@ struct SGXSanLegacyPass : public ModulePass {
   bool DefaultRenameFunc(Module &M) {
     bool changed = false;
     std::string RenamePrefix = "__hidden_in_enclave_";
-    std::vector<std::string> FuncRenameList{"getpid", "getenv"};
+    std::vector<std::string> FuncRenameList{
+        "getpid", "getenv", "fclose", "fcntl", "fdopen",    "fflush",
+        "fileno", "fopen",  "fseek",  "ftell", "ftruncate", "fwrite",
+        "mkdir",  "mmap",   "munmap", "open",  "setenv"};
     for (auto origName : FuncRenameList) {
       auto F = M.getFunction(origName);
       if (F) {
