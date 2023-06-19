@@ -76,20 +76,10 @@ echo "TMPDIR=\${CUR_DIR} LLVM_PROFILE_FILE=\"./result/profraw/%p\" ${TASKSET} no
 EOF
 chmod +x fuzz.sh
 
-echo "Create stop.sh"
-cat > stop.sh <<EOF
-#!/usr/bin/env bash
-set -e
+echo "Copy stop.sh"
+cp ${CUR_DIR}/stop.sh ${EVAL_TOP}
 
-for i in \$(cat fuzz.pid)
-do
-    echo "Kill \${i}"
-    kill -9 \${i} || echo ""
-done
-EOF
-chmod +x stop.sh
-
-# Create merge.sh
+echo "Copy merge.sh"
 cp ${CUR_DIR}/merge.sh ${EVAL_TOP}
 
 
