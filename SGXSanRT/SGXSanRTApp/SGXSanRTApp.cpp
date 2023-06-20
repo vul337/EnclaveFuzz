@@ -299,12 +299,12 @@ void register_sgxsan_sigaction() {
   struct sigaction sig_act;
   memset(&sig_act, 0, sizeof(sig_act));
   sig_act.sa_sigaction = sgxsan_sigaction;
-  sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
+  sig_act.sa_flags = SA_SIGINFO;
   sigemptyset(&sig_act.sa_mask);
-  sgxsan_error(0 != sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask),
-               "Fail to get signal mask\n");
+  // sgxsan_error(0 != sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask),
+  //              "Fail to get signal mask\n");
   // make sure SIGSEGV is not blocked
-  sigdelset(&sig_act.sa_mask, SIGSEGV);
+  // sigdelset(&sig_act.sa_mask, SIGSEGV);
   // hool SIGSEGV
   sgxsan_assert(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]));
   // sgxsan_assert(0 == sigaction(SIGALRM, &sig_act, &g_old_sigact[SIGALRM]));
