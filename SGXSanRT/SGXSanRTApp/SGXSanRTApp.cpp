@@ -307,7 +307,7 @@ void register_sgxsan_sigaction() {
   sigdelset(&sig_act.sa_mask, SIGSEGV);
   // hool SIGSEGV
   sgxsan_assert(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]));
-  sgxsan_assert(0 == sigaction(SIGALRM, &sig_act, &g_old_sigact[SIGALRM]));
+  // sgxsan_assert(0 == sigaction(SIGALRM, &sig_act, &g_old_sigact[SIGALRM]));
 #ifdef KAFL_FUZZER
   sgxsan_assert(0 == sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]));
   sgxsan_assert(0 == sigaction(SIGBUS, &sig_act, &g_old_sigact[SIGBUS]));
