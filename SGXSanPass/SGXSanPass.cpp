@@ -43,10 +43,50 @@ struct SGXSanLegacyPass : public ModulePass {
   bool DefaultRenameFunc(Module &M) {
     bool changed = false;
     std::string RenamePrefix = "__hidden_in_enclave_";
-    std::vector<std::string> FuncRenameList{
-        "getpid", "getenv", "fclose", "fcntl", "fdopen",    "fflush",
-        "fileno", "fopen",  "fseek",  "ftell", "ftruncate", "fwrite",
-        "mkdir",  "mmap",   "munmap", "open",  "setenv"};
+    std::vector<std::string> FuncRenameList{"access",
+                                            "close",
+                                            "dlclose",
+                                            "dlerror",
+                                            "dlopen",
+                                            "dlsym",
+                                            "fchmod",
+                                            "fchown",
+                                            "fclose",
+                                            "fcntl",
+                                            "fcntl64",
+                                            "fdopen",
+                                            "fflush",
+                                            "fileno",
+                                            "fopen",
+                                            "fseek",
+                                            "fsync",
+                                            "ftell",
+                                            "ftruncate",
+                                            "fwrite",
+                                            "getcwd",
+                                            "getenv",
+                                            "geteuid",
+                                            "getpid",
+                                            "gettimeofday",
+                                            "localtime",
+                                            "lseek64",
+                                            "mkdir",
+                                            "mmap",
+                                            "mmap64",
+                                            "mremap",
+                                            "munmap",
+                                            "open",
+                                            "open64",
+                                            "read",
+                                            "readlink"
+                                            "rmdir",
+                                            "setenv",
+                                            "sleep",
+                                            "sysconf",
+                                            "time",
+                                            "unlink",
+                                            "utimes",
+                                            "write"};
     for (auto origName : FuncRenameList) {
       auto F = M.getFunction(origName);
       if (F) {
