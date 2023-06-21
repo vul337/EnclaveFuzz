@@ -44,6 +44,11 @@ mkdir -p "${EVAL_TOP}"
 mkdir -p "${EVAL_TOP}/result/seeds"
 mkdir -p "${EVAL_TOP}/result/crashes"
 mkdir -p "${EVAL_TOP}/result/profraw"
+# REAL_PROF_DIR=$(dirname "$(dirname "${EVAL_TOP}")")/RAMDISK/$(basename "$(dirname "${EVAL_TOP}")")/$(basename "${EVAL_TOP}")
+# echo "-- REAL_PROF_DIR=${REAL_PROF_DIR}"
+# mkdir -p ${REAL_PROF_DIR}
+# rm -rf ${EVAL_TOP}/result/profraw
+# ln -sf ${REAL_PROF_DIR} ${EVAL_TOP}/result/profraw
 
 cd ${EVAL_TOP}
 
