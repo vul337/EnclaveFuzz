@@ -1,10 +1,15 @@
 #!/bin/bash
-while true
-do
-    for f in $(find . -name "merge.sh")
+
+always_run() {
+    while true
     do
-        ${f} &
+        echo "Run $1"
+        $1
+        sleep 5
     done
-    wait
-    sleep 3
+}
+
+for f in $(find . -name "merge.sh")
+do
+    always_run ${f} &
 done

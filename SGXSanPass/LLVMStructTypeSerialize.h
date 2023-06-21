@@ -2,6 +2,7 @@
 #include "nlohmann/json.hpp"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Support/Debug.h"
 #include <regex>
 
 std::string GetTypeName(const llvm::Type *ty);
@@ -20,6 +21,11 @@ private:
 class DeSerializer {
 public:
   void init(llvm::LLVMContext *C, const nlohmann::ordered_json &TypeJson);
+  void update(const nlohmann::ordered_json &TypeJson) {
+    if (not TypeJson.is_null())
+      mTypeJson.update(TypeJson);
+  }
+  void dump() { llvm::dbgs() << mTypeJson.dump(4) << "\n"; }
   void ResolveOpaqueStruct(llvm::StructType *OpaqueStructTy);
 
 private:

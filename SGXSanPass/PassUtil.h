@@ -215,4 +215,6 @@ void dump(llvm::Value *val);
 
 std::vector<std::string> GetFileNames(std::filesystem::path dir,
                                       std::string substr);
+std::vector<std::string> RecGetFilePaths(std::filesystem::path dir,
+                                         std::string substr);
 std::string ReadFile(std::string fileName);

@@ -5,7 +5,7 @@ CUR_DIR=$(realpath $(dirname $0))
 OUTPUT_FILENAME=${CUR_DIR}/result/all.profdata
 
 # Reads the paths to prof data files from INPUT_FILENAME and then merges them into OUTPUT_FILENAME.
-TARGETS=($(find ${CUR_DIR}/result/profraw -type f -printf "%T@\t%Tc %6k KiB %p\n" | sort -n | tr -s ' ' | cut -d ' ' -f 6 | head -n -5))
+TARGETS=($(find $(realpath ${CUR_DIR}/result/profraw) -type f -printf "%T@\t%Tc %6k KiB %p\n" | sort -n | tr -s ' ' | cut -d ' ' -f 6 | head -n -5))
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
     echo "Error! No *.profraw targets to merge!"
