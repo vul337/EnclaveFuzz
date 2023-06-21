@@ -97,13 +97,15 @@ void DriverGenerator::initialize(Module &M) {
   // load json from *.sgxsan.typeinfo.json
   ordered_json TypeJson;
   mDeSerialzer.init(C, TypeJson);
-  for (std::string TypeInfoDir : ClTypeInfoDirs) {
-    std::vector<std::string> TypeJsonPaths =
-        RecGetFilePaths(TypeInfoDir, ".sgxsan.typeinfo.json");
-    for (auto TypeJsonPath : TypeJsonPaths) {
-      dbgs() << "== DriverGenerator: Load " << TypeJsonPath << " ==\n";
-      TypeJson = ordered_json::parse(ReadFile(TypeJsonPath));
-      mDeSerialzer.update(TypeJson);
+  if (not ClNaiveHarness) {
+    for (std::string TypeInfoDir : ClTypeInfoDirs) {
+      std::vector<std::string> TypeJsonPaths =
+          RecGetFilePaths(TypeInfoDir, ".sgxsan.typeinfo.json");
+      for (auto TypeJsonPath : TypeJsonPaths) {
+        dbgs() << "== DriverGenerator: Load " << TypeJsonPath << " ==\n";
+        TypeJson = ordered_json::parse(ReadFile(TypeJsonPath));
+        mDeSerialzer.update(TypeJson);
+      }
     }
   }
 }
