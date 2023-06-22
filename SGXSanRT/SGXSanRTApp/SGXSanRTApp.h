@@ -244,7 +244,7 @@ static inline int getBucketNum(size_t size) {
 }
 
 __attribute__((always_inline)) static inline EncryptStatus
-isCiphertext(uint64_t addr, uint64_t size) {
+isCiphertext(uint64_t addr, uint64_t size, void *caller_addr) {
   if (size < 0x100)
     return Unknown;
 
@@ -277,12 +277,8 @@ isCiphertext(uint64_t addr, uint64_t size) {
   }
 
   if (!is_cipher) {
-    int depth = 2;
-    void *bt_array[depth];
-    if (backtrace(bt_array, depth) == depth) {
-      std::string fname = addr2fname(bt_array[depth - 1]);
-      log_warning("[%s] Plaintext transfering...\n", fname.c_str());
-    }
+    std::string fname = addr2fname(caller_addr);
+    log_warning("[%s] Plaintext transfering...\n", fname.c_str());
   }
   return is_cipher ? Ciphertext : Plaintext;
 }
@@ -300,7 +296,7 @@ check_output_hybrid(uint64_t addr, uint64_t size) {
   std::vector<EncryptStatus> &history =
       output_history[(void *)((uptr)bt_array[depth - 1] - 1)];
 
-  EncryptStatus status = isCiphertext(addr, size);
+  EncryptStatus status = isCiphertext(addr, size, bt_array[depth - 1]);
   if (history.size() == 0) {
     history.emplace_back(status);
   } else {
