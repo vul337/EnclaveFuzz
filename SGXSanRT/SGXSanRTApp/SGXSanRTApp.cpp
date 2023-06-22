@@ -26,7 +26,6 @@
 #include <unordered_map>
 
 namespace po = boost::program_options;
-enum EncryptStatus { Unknown, Plaintext, Ciphertext };
 
 static const char *log_level_to_prefix[] = {
     "[SGXSan] ALWAYS: ", "[SGXSan] ERROR: ", "[SGXSan] WARNING: ",
@@ -38,7 +37,7 @@ bool asan_inited = false;
 std::unordered_map<void * /* callsite addr */,
                    std::vector<EncryptStatus> /* output type history */>
     output_history;
-static pthread_rwlock_t output_history_rwlock = PTHREAD_RWLOCK_INITIALIZER;
+pthread_rwlock_t output_history_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 static struct sigaction g_old_sigact[_NSIG];
 
 extern "C" __attribute__((weak)) bool DFEnableSanCheckDie();
@@ -697,88 +696,7 @@ void sgxsan_backtrace_boost(log_level ll) {
 #endif
 }
 
-void *sgxsan_backtrace_i(int idx) {
-  void *array[idx + 1];
-  int size = backtrace(array, idx + 1);
-  sgxsan_assert(size == idx + 1);
-  return array[idx];
-}
-
 /// Cipher detect
-static inline int getBucketNum(size_t size) {
-  return size >= 0x800   ? 0x100
-         : size >= 0x100 ? 0x40
-         : size >= 0x10  ? 0x4
-         : size >= 0x2   ? 0x2
-                         : 0x1;
-}
-
-static EncryptStatus isCiphertext(uint64_t addr, uint64_t size) {
-  if (size < 0x100)
-    return Unknown;
-
-  int bucket_num = getBucketNum(size);
-
-  int map[256 /* 2^8 */] = {0};
-
-  // collect byte map
-  for (uint64_t i = 0; i < size; i++) {
-    unsigned char byte = *(unsigned char *)(addr + i);
-    map[byte]++;
-  }
-
-  double CountPerBacket = (int)size / (double)bucket_num;
-  if (size >= 0x100)
-    CountPerBacket = (int)(size - map[0] /* maybe 0-padding in ciphertext */) /
-                     (double)(bucket_num - 1);
-
-  bool is_cipher = true;
-  int step = 0x100 / bucket_num;
-  log_trace("[Cipher Detect] CountPerBacket = %f \n", CountPerBacket);
-
-  for (int i = 0; i < 256; i += step) {
-    int sum = getArraySum(map + i, step);
-    if ((sum > CountPerBacket * 1.5 || sum < CountPerBacket / 2) and
-        (size >= 0x100 ? i != 0 : true)) {
-      is_cipher = false;
-      break;
-    }
-  }
-
-  if (!is_cipher) {
-    void *addr = sgxsan_backtrace_i(4);
-    std::string fname = addr2fname(addr);
-    log_warning("[%s] Plaintext transfering...\n", fname.c_str());
-  }
-  return is_cipher ? Ciphertext : Plaintext;
-}
-
-void check_output_hybrid(uint64_t addr, uint64_t size) {
-  pthread_rwlock_wrlock(&output_history_rwlock);
-
-  // get history of callsite
-  std::vector<EncryptStatus> &history =
-      output_history[(void *)((uptr)sgxsan_backtrace_i(3) - 1)];
-
-  EncryptStatus status = isCiphertext(addr, size);
-  if (history.size() == 0) {
-    history.emplace_back(status);
-  } else {
-    EncryptStatus last_known_status = Unknown;
-    for (auto it = history.rbegin(); it != history.rend(); it++) {
-      if (*it != Unknown) {
-        last_known_status = *it;
-        break;
-      }
-    }
-    history.emplace_back(status);
-
-    sgxsan_warning(last_known_status != Unknown && status != Unknown &&
-                       last_known_status != status,
-                   "Output is plaintext ciphertext hybridization\n");
-  }
-  pthread_rwlock_unlock(&output_history_rwlock);
-}
 
 void ClearPlaintextOutputHistory() {
   pthread_rwlock_wrlock(&output_history_rwlock);
