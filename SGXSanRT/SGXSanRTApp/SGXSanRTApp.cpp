@@ -209,6 +209,11 @@ __sanitizer_set_death_callback(void (*callback)(void)) {
   SetUserDieCallback(callback);
 }
 
+static void sgxsan_timeout_sigaction(int signum, siginfo_t *siginfo,
+                                     void *priv) {
+  _Exit(70);
+}
+
 /// \brief Signal handler to report illegal memory access
 static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   if (!__sanitizer_acquire_crash_state()) {
@@ -249,45 +254,8 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
 
     sgxsan_signal_safe_dump_bt();
     Die();
-  } else if (signum == SIGALRM) {
-    // no log to avoid dead lock
-    _Exit(70);
   }
-
-  // Never achieve here
-  signal(signum, SIG_DFL);
-  raise(signum);
-#if 0
-  // call previous signal handler
-  if (SIG_DFL == g_old_sigact[signum].sa_handler) {
-    signal(signum, SIG_DFL);
-    raise(signum);
-  }
-  // if there is old signal handler, we need transfer the signal to the old
-  // signal handler;
-  else {
-    // make sure signum to be masked if SA_NODEFER is not set
-    if (!(g_old_sigact[signum].sa_flags & SA_NODEFER))
-      sigaddset(&g_old_sigact[signum].sa_mask, signum);
-    // use mask of old sigact
-    sigset_t cur_set;
-    pthread_sigmask(SIG_SETMASK, &g_old_sigact[signum].sa_mask, &cur_set);
-
-    if (g_old_sigact[signum].sa_flags & SA_SIGINFO) {
-      g_old_sigact[signum].sa_sigaction(signum, siginfo, priv);
-    } else {
-      g_old_sigact[signum].sa_handler(signum);
-    }
-
-    pthread_sigmask(SIG_SETMASK, &cur_set, NULL);
-
-    // If the g_old_sigact set SA_RESETHAND, it will break the chain which means
-    // g_old_sigact->next_old_sigact will not be called. Our signal handler does
-    // not responsable for that. We just follow what os do on SA_RESETHAND.
-    if (g_old_sigact[signum].sa_flags & SA_RESETHAND)
-      g_old_sigact[signum].sa_handler = SIG_DFL;
-  }
-#endif
+  _Exit(-1);
 }
 #endif
 
@@ -300,13 +268,7 @@ void register_sgxsan_sigaction() {
   sig_act.sa_sigaction = sgxsan_sigaction;
   sig_act.sa_flags = SA_SIGINFO;
   sigemptyset(&sig_act.sa_mask);
-  // sgxsan_error(0 != sigprocmask(SIG_SETMASK, NULL, &sig_act.sa_mask),
-  //              "Fail to get signal mask\n");
-  // make sure SIGSEGV is not blocked
-  // sigdelset(&sig_act.sa_mask, SIGSEGV);
-  // hool SIGSEGV
   sgxsan_assert(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]));
-  // sgxsan_assert(0 == sigaction(SIGALRM, &sig_act, &g_old_sigact[SIGALRM]));
 #ifdef KAFL_FUZZER
   sgxsan_assert(0 == sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]));
   sgxsan_assert(0 == sigaction(SIGBUS, &sig_act, &g_old_sigact[SIGBUS]));
@@ -316,6 +278,16 @@ void register_sgxsan_sigaction() {
   sgxsan_assert(0 == sigaction(SIGTRAP, &sig_act, &g_old_sigact[SIGTRAP]));
   sgxsan_assert(0 == sigaction(SIGSYS, &sig_act, &g_old_sigact[SIGSYS]));
   sgxsan_assert(0 == sigaction(SIGUSR2, &sig_act, &g_old_sigact[SIGUSR2]));
+#else
+  // Override libFuzzer's SIGALRM Handler
+  struct sigaction sig_timeoue_act;
+  memset(&sig_timeoue_act, 0, sizeof(sig_timeoue_act));
+  sig_timeoue_act.sa_sigaction = sgxsan_timeout_sigaction;
+  sig_timeoue_act.sa_flags = SA_SIGINFO;
+  sigemptyset(&sig_timeoue_act.sa_mask);
+  // sgxsan_assert(0 ==
+  //               sigaction(SIGALRM, &sig_timeoue_act,
+  //               &g_old_sigact[SIGALRM]));
 #endif
   AlreadyRegisterSignalHandler = true;
 }
