@@ -85,7 +85,7 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir, timeout, kind)
     except subprocess.TimeoutExpired:
         print(f"\nTimeout input {crash_file}!")
         return
-    report = logs.stdout.decode("utf-8")
+    report = logs.stdout.decode("utf-8", errors="backslashreplace")
     # print(report)
 
     sgxsan_error_regex = re.compile(
