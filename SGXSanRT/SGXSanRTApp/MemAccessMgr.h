@@ -70,9 +70,8 @@ public:
     sgxsan_assert(ptr && size && sgx_is_outside_enclave(ptr, size));
     // there may be ocall and ocall return before enter first ecall, or in
     // hooked mem intrinsics
-    if (!m_active)
+    if (!m_active or !m_inited)
       return false;
-    sgxsan_assert(m_inited);
     if (used_to_cmp) {
       // it's a fetch used to compare, maybe used to 'check'
       while (m_control_fetchs.size() >= CONTROL_FETCH_QUEUE_MAX_SIZE) {
