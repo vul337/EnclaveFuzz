@@ -5,7 +5,7 @@ WORK_DIR=$(realpath .)
 BINARY_NAME="$1"
 ENCLAVE_NAME="$2"
 
-for dir in $(ls | grep Fuzzer2)
+for dir in $(ls | grep Fuzzer2 | grep -v "Result")
 do
 #     Assue directory is like:
 #     EnclaveApp      

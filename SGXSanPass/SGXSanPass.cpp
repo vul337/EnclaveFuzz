@@ -77,7 +77,6 @@ struct SGXSanLegacyPass : public ModulePass {
                                             "munmap",
                                             "open",
                                             "open64",
-                                            "read",
                                             "readlink"
                                             "rmdir",
                                             "setenv",

@@ -91,13 +91,16 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir, timeout):
         )
     except subprocess.TimeoutExpired:
         print(f"\nTimeout input {crash_file}!")
-        return
+        return "TIMEOUT"
     report = logs.stdout.decode("utf-8", errors="backslashreplace")
     # print(report)
     return report
 
 
-def process_report(report, crash_file, pbar):
+def process_report(report: str, crash_file, pbar):
+    if report == "TIMEOUT":
+        pbar.update()
+        return
     sgxsan_error_regex = re.compile(
         r"\[SGXSan\] ERROR:.*"
         r"|\[SGXSan\] WARNING:\s*?Detect Double-Fetch Situation, and modify it with fuzz data"
@@ -131,7 +134,7 @@ def process_report(report, crash_file, pbar):
         update2dict(bt_str, error_tag, pc_value, crash_file, True)
     finally:
         report_update_lock.release()
-    pbar.update()
+        pbar.update()
 
 
 def filter_crashes(binary, crashes_dir, extra_opt, test_dir, timeout, kind):
