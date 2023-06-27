@@ -27,5 +27,5 @@ do
         EXTRA_FLAG+=" --cb_enable_san_check_die=false"
     fi
     echo ${EXTRA_FLAG}
-    nohup ${CUR_DIR}/AnalyzeFuzzer2.sh ${BINARY_NAME} ${EXTRA_FLAG} &
+    nohup ${CUR_DIR}/AnalyzeFuzzer2Step1.sh ${BINARY_NAME} ${EXTRA_FLAG} &
 done

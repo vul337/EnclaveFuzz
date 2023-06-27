@@ -9,5 +9,6 @@ EXTRA_FLAG="${@:2}"
 ${CUR_DIR}/CountEnterECall.py libFuzzerTemp.FuzzWithFork* > ECall.log
 ${CUR_DIR}/CountEnterECall.py libFuzzerTemp.FuzzWithFork* --kind Try >> ECall.log
 ./show_cov.sh >> ECall.log
+
 echo "${CUR_DIR}/filter_crashes.py -b ${BINARY_NAME} -c ./result/crashes --extra-opt \"${EXTRA_FLAG}\""
-${CUR_DIR}/filter_crashes.py -b ${BINARY_NAME} -c ./result/crashes --extra-opt "\"${EXTRA_FLAG}\""
+${CUR_DIR}/filter_crashes.py -b ${BINARY_NAME} -c ./result/crashes --extra-opt "${EXTRA_FLAG}"
