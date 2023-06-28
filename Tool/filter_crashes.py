@@ -119,7 +119,7 @@ def process_report(report: str, crash_file, pbar):
     )
 
     pc_regex = re.compile(r"ERROR:.*?\bpc\s+(0x[A-Fa-f0-9]*)", re.DOTALL)
-    res = re.search(pc_regex, report)
+    res = re.findall(pc_regex, report)
     pc_value = "Unknown"
     if res:
         pc_value = res[-1]

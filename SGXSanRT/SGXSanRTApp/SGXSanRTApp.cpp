@@ -508,9 +508,11 @@ void ReportError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
       (DFEnableSanCheckDie and DFEnableSanCheckDie()))
     Die();
 }
+
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, bool fatal, const char *msg, ...) {
-  if (L1F(*(uint8_t *)MEM_TO_SHADOW(addr)) == kAsanHeapFreeMagic) {
+  if (AddrIsInMem(addr) and
+      L1F(*(uint8_t *)MEM_TO_SHADOW(addr)) == kAsanHeapFreeMagic) {
     ReportUseAfterFree(pc, bp, sp, addr);
     return;
   }
@@ -537,7 +539,8 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
              "0x%lx)\n\n",
              pc, (is_write ? "write" : "read"), addr, access_size, bp, sp);
   sgxsan_backtrace(ll);
-  PrintShadowMap(ll, addr);
+  if (AddrIsInMem(addr))
+    PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");
   if (fatal and (not DFEnableSanCheckDie or
                  (DFEnableSanCheckDie and DFEnableSanCheckDie())))

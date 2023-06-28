@@ -187,7 +187,8 @@ void FREE(void *ptr) {
     goto fallback;
   }
 
-  if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
+  if (AddrIsInMem(user_beg) and
+      L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
     GET_CALLER_PC_BP_SP;
     ReportDoubleFree(pc, bp, sp, user_beg);
   }
@@ -292,7 +293,8 @@ void ClearHeapObject() {
       abort();
     }
 
-    if (L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
+    if (AddrIsInMem(user_beg) and
+        L1F(*(uint8_t *)MEM_TO_SHADOW(user_beg)) == kAsanHeapFreeMagic) {
       GET_CALLER_PC_BP_SP;
       ReportDoubleFree(pc, bp, sp, user_beg);
     }
