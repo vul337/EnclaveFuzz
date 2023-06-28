@@ -23,12 +23,14 @@ def Update(ECallCnt: dict, pbar):
         pbar.update()
 
 
-def Count(log_abs, kind) -> dict:
+def Count(log_abs, word, kind) -> dict:
     pECallCnt = {}
     with open(log_abs, errors="backslashreplace") as log_file:
         lines = log_file.readlines()
         for line in lines:
-            match = re.search(kind + r"\s+(\w+)", line)
+            match = re.search(
+                word + (r"\s+(\w+)" if kind == "EnclaveFuzz" else r"\s+(\w+.*)"), line
+            )
             if match:
                 ECallName = match.group(1)
                 if ECallName in pECallCnt.keys():
@@ -43,7 +45,8 @@ def main():
         description="Analyse all *.log in <log_dir> to count Enter ECall_XXX"
     )
     parser.add_argument("log_dir")
-    parser.add_argument("--kind", default="Enter")
+    parser.add_argument("--word", default="Enter")
+    parser.add_argument("--kind", default="EnclaveFuzz")
     args = parser.parse_args()
 
     pool = multiprocessing.Pool()
@@ -51,7 +54,7 @@ def main():
     pbar = tqdm(total=len(log_files))
     cb = functools.partial(Update, pbar=pbar)
     for log in log_files:
-        if not log.endswith(r".log"):
+        if args.kind == "EnclaveFuzz" and not log.endswith(r".log"):
             pbar.update
             continue
         log_abs = os.path.join(args.log_dir, log)
@@ -60,7 +63,7 @@ def main():
             continue
         pool.apply_async(
             Count,
-            args=(log_abs, args.kind),
+            args=(log_abs, args.word, args.kind),
             callback=cb,
             error_callback=lambda x: print(x),
         )
@@ -68,7 +71,7 @@ def main():
     pool.join()
     pbar.close()
     for ECallName in gECallCnt.keys():
-        print(str(gECallCnt[ECallName]) + " " + args.kind + " " + ECallName)
+        print(str(gECallCnt[ECallName]) + " " + args.word + " " + ECallName)
 
 
 if __name__ == "__main__":
