@@ -49,7 +49,9 @@ def main():
     parser.add_argument("--kind", default="EnclaveFuzz")
     args = parser.parse_args()
 
-    pool = multiprocessing.Pool()
+    pool = multiprocessing.Pool(
+        processes=min(len(os.sched_getaffinity(0)), os.cpu_count() / 4 * 3)
+    )
     log_files = sorted(os.listdir(args.log_dir))
     pbar = tqdm(total=len(log_files))
     cb = functools.partial(Update, pbar=pbar)
