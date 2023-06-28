@@ -562,9 +562,13 @@ void *__asan_memcpy(void *dst, const void *src, uptr size) {
     return dst;
   if (LIKELY(asan_inited)) {
     if (dst != src) {
-      sgxsan_error(
-          RangesOverlap((const char *)dst, size, (const char *)src, size),
-          "%p:%lu overlap with %p:%lu\n", dst, size, src, size);
+      if (RangesOverlap((const char *)dst, size, (const char *)src, size)) {
+        GET_CALLER_PC_BP_SP;
+        sgxsan_error(
+            true,
+            "%p:%lu overlap with %p:%lu at pc %p (bp = 0x%lx sp = 0x%lx)\n",
+            dst, size, src, size, pc, bp, sp);
+      }
     }
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
@@ -612,10 +616,13 @@ errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
     return 0;
   if (LIKELY(asan_inited)) {
     if (dst != src) {
-      sgxsan_error(
-          RangesOverlap((const char *)dst, dstSize, (const char *)src, count),
-          "[%s] %p:%lu overlap with %p:%lu\n", "memcpy_s", dst, dstSize, src,
-          count);
+      if (RangesOverlap((const char *)dst, dstSize, (const char *)src, count)) {
+        GET_CALLER_PC_BP_SP;
+        sgxsan_error(true,
+                     "[%s] %p:%lu overlap with %p:%lu at pc %p (bp = 0x%lx sp "
+                     "= 0x%lx)\n",
+                     "memcpy_s", dst, dstSize, src, count, pc, bp, sp);
+      }
     }
     InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
     uptr srcPoisonedAddr, dstPoisonedAddr;
