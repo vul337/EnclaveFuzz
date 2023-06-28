@@ -319,10 +319,7 @@ void RegionInOutEnclaveStatusAndPoisonStatus(
     uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
     PoisonStatus &regionPoisonStatus, uint8_t filter) {
   // Early error
-  if (beg == 0) {
-    regionInOutEnclaveStatus = OutEnclave;
-    regionPoisonStatus = IsPoisoned;
-  } else if (size == 0) {
+  if (size == 0) {
     regionInOutEnclaveStatus = UnknownInOutEnclaveStatus;
     regionPoisonStatus = UnknownPoisonStatus;
   } else {
