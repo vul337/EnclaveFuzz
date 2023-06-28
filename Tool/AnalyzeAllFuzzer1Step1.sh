@@ -28,5 +28,5 @@ do
     # fi
     # echo ${EXTRA_FLAG}
     # nohup ${CUR_DIR}/AnalyzeFuzzer2Step1.sh ${BINARY_NAME} ${EXTRA_FLAG} &
-    nohup ${CUR_DIR}/AnalyzeFuzzer2Step1.sh &
+    nohup ${CUR_DIR}/AnalyzeFuzzer1Step1.sh &
 done
