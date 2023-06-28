@@ -26,7 +26,8 @@ def check_aslr():
 
 
 def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
-    if do_simple and "ERROR: Host" in error_tag:
+    host_error_match = re.search(r"\[SGXSan\] ERROR: Host[^|]*$", error_tag)
+    if do_simple and host_error_match:
         error_tag = "Don't care host error"
         bt_str = ""
         pc_value = ""
@@ -118,7 +119,7 @@ def process_report(report: str, crash_file, pbar):
         bt_list
     )
 
-    pc_regex = re.compile(r"ERROR:.*?\bpc\s+(0x[A-Fa-f0-9]*)", re.DOTALL)
+    pc_regex = re.compile(r"ERROR:[^|]*?\bpc\s+(0x[A-Fa-f0-9]*)[^|]*$", re.DOTALL)
     res = re.findall(pc_regex, report)
     pc_value = "Unknown"
     if res:
