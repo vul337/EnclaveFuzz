@@ -122,7 +122,7 @@ def process_report(report: str, crash_file, pbar):
     res = re.search(pc_regex, report)
     pc_value = "Unknown"
     if res:
-        pc_value = res[1]
+        pc_value = res[-1]
 
     if "NOTE: fuzzing was not performed, you have only" in report:
         error_tag = ""
