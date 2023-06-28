@@ -50,7 +50,7 @@ def main():
     args = parser.parse_args()
 
     pool = multiprocessing.Pool(
-        processes=min(len(os.sched_getaffinity(0)), os.cpu_count() / 2)
+        processes=min(len(os.sched_getaffinity(0)), int(os.cpu_count() / 2))
     )
     log_files = sorted(os.listdir(args.log_dir))
     pbar = tqdm(total=len(log_files))
