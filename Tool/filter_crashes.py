@@ -149,9 +149,7 @@ def filter_crashes(binary, crashes_dir, extra_opt, test_dir, timeout, kind):
         print(f"Test directory {test_dir} not found!")
         return
 
-    pool = multiprocessing.Pool(
-        processes=min(len(os.sched_getaffinity(0)), int(os.cpu_count() / 2))
-    )
+    pool = multiprocessing.Pool()
     crash_files = sorted(os.listdir(crashes_dir))
     pbar = tqdm(total=len(crash_files))
     for f in crash_files:
