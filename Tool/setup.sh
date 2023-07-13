@@ -84,10 +84,10 @@ EOF
 chmod +x fuzz.sh
 
 echo "Copy stop.sh"
-cp ${CUR_DIR}/stop.sh ${EVAL_TOP}
+cp ${CUR_DIR}/stop.sh .
 
 echo "Copy merge.sh"
-cp ${CUR_DIR}/merge.sh ${EVAL_TOP}
+cp ${CUR_DIR}/merge.sh .
 
 
 

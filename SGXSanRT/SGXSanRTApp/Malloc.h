@@ -9,7 +9,7 @@
 #include <sys/resource.h>
 #include <unordered_map>
 
-#define DEBUG_COLLECT_STACK 0
+#define DEBUG_COLLECT_STACK 1
 
 #define FRONT_END(sym) sym
 #define BACK_END(sym) back_end_##sym
