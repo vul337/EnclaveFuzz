@@ -18,11 +18,13 @@ MODE=${MODE:="RELEASE"}
 FUZZER=${FUZZER:="LIBFUZZER"}
 SILENT=${SILENT:="TRUE"}
 SDK_VER=${SDK_VER:="2_19"}
+INST_COV=${INST_COV:="TRUE"}
 
 echo "-- MODE: ${MODE}"
 echo "-- FUZZER: ${FUZZER}"
 echo "-- SILENT: ${SILENT}"
 echo "-- SDK_VER: ${SDK_VER}"
+echo "-- INST_COV (LIBFUZZER ONLY): ${INST_COV}"
 
 PREFIX="${PREFIX:-${SGXSAN_DIR}/install_dir/${MODE}-${FUZZER}-install}"
 echo "-- PREFIX: ${PREFIX}"
@@ -50,7 +52,7 @@ then
     ADD_MAKE_FLAGS+=" DEBUG=1"
 fi
 
-if [[ "${FUZZER}" = "LIBFUZZER" ]]
+if [[ "${FUZZER}" = "LIBFUZZER" && "${INST_COV}" = "TRUE" ]]
 then
     HOST_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp -fprofile-instr-generate -fcoverage-mapping -fuse-ld=${LD}"
     ENCLAVE_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp -fprofile-instr-generate -fcoverage-mapping -fuse-ld=${LD}"
@@ -211,7 +213,7 @@ ${CP} sgx_sign ${PREFIX}/bin/x64
 echo "== Get Intel SGXSSL =="
 cd ${SGXSAN_DIR}/intel-sgx-ssl
 ./clean.sh
-./build.sh MODE=${MODE} FUZZER=${FUZZER}
+./build.sh MODE=${MODE} FUZZER=${FUZZER} INST_COV=${INST_COV}
 ${CP} -rf ${SGXSAN_DIR}/intel-sgx-ssl/Linux/package/* ${PREFIX}/sgxssl/
 cd ${PREFIX}/sgxssl/lib64
 if [[ ! -f libsgx_tsgxssl.a && -f libsgx_tsgxssld.a ]]; then ${LN} -sf libsgx_tsgxssld.a libsgx_tsgxssl.a; fi
