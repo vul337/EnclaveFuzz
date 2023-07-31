@@ -42,45 +42,74 @@ ASAN_REPORT_ERROR_N(store, true)
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                      \
   extern "C" __attribute__((noinline)) void __asan_##type##size(               \
       uptr addr, bool toCmp, char *funcName) {                                 \
-    uptr shadowMapPtr = MEM_TO_SHADOW(addr), shadowByte, inEnclaveFlag;        \
-    if (size <= SHADOW_GRANULARITY) {                                          \
-      shadowByte = *(uint8_t *)shadowMapPtr;                                   \
-      inEnclaveFlag = kSGXSanInEnclaveMagic;                                   \
-    } else {                                                                   \
-      shadowByte = *(uint16_t *)shadowMapPtr;                                  \
-      inEnclaveFlag = (kSGXSanInEnclaveMagic << 8) + kSGXSanInEnclaveMagic;    \
-    }                                                                          \
-    if (shadowByte == inEnclaveFlag) {                                         \
+    uptr shadowMapPtr = MEM_TO_SHADOW(addr), shadowByte;                       \
+    shadowByte = *(uint8_t *)shadowMapPtr;                                     \
+                                                                               \
+    if (shadowByte == kSGXSanInEnclaveMagic) {                                 \
       MemAccessMgrInEnclaveAccess();                                           \
     } else if (shadowByte == 0) {                                              \
       MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp,        \
                                    funcName);                                  \
     } else {                                                                   \
+      if (shadowByte & kSGXSanInEnclaveMagic) {                                \
+        MemAccessMgrInEnclaveAccess();                                         \
+        shadowByte &= kL1Filter;                                               \
+        if (UNLIKELY(shadowByte)) {                                            \
+          if (UNLIKELY((int8_t)((addr & (SHADOW_GRANULARITY - 1)) + size -     \
+                                1) >= (int8_t)shadowByte)) {                   \
+            GET_CALLER_PC_BP_SP;                                               \
+            ReportGenericError(pc, bp, sp, addr, is_write, size, true,         \
+                               "Enclave out of bound");                        \
+          }                                                                    \
+        }                                                                      \
+      } else {                                                                 \
+        MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp,      \
+                                     funcName);                                \
+        shadowByte &= kL1Filter;                                               \
+        if (UNLIKELY(shadowByte)) {                                            \
+          if (UNLIKELY((int8_t)((addr & (SHADOW_GRANULARITY - 1)) + size -     \
+                                1) >= (int8_t)shadowByte)) {                   \
+            GET_CALLER_PC_BP_SP;                                               \
+            ReportGenericError(pc, bp, sp, addr, is_write, size, true,         \
+                               "Host out of bound");                           \
+          }                                                                    \
+        }                                                                      \
+      }                                                                        \
+    }                                                                          \
+  }
+
+#define ASAN_MEMORY_ACCESS_CALLBACK_16(type, is_write)                         \
+  extern "C" __attribute__((noinline)) void __asan_##type##16(                 \
+      uptr addr, bool toCmp, char *funcName) {                                 \
+    uptr shadowMapPtr = MEM_TO_SHADOW(addr), shadowByte, inEnclaveFlag;        \
+    shadowByte = *(uint16_t *)shadowMapPtr;                                    \
+    inEnclaveFlag = (kSGXSanInEnclaveMagic << 8) + kSGXSanInEnclaveMagic;      \
+    if (shadowByte == inEnclaveFlag) {                                         \
+      MemAccessMgrInEnclaveAccess();                                           \
+    } else if (shadowByte == 0) {                                              \
+      MemAccessMgrOutEnclaveAccess((void *)addr, 16, is_write, toCmp,          \
+                                   funcName);                                  \
+    } else {                                                                   \
       uptr IsInEnclave = shadowByte & inEnclaveFlag;                           \
       if (IsInEnclave == inEnclaveFlag) {                                      \
         MemAccessMgrInEnclaveAccess();                                         \
+        if (UNLIKELY(shadowByte & ((kL1Filter << 8) + kL1Filter))) {           \
+          GET_CALLER_PC_BP_SP;                                                 \
+          ReportGenericError(pc, bp, sp, addr, is_write, 16, true,             \
+                             "Enclave out of bound");                          \
+        }                                                                      \
       } else if (IsInEnclave == 0) {                                           \
-        MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp,      \
+        MemAccessMgrOutEnclaveAccess((void *)addr, 16, is_write, toCmp,        \
                                      funcName);                                \
+        if (UNLIKELY(shadowByte & ((kL1Filter << 8) + kL1Filter))) {           \
+          GET_CALLER_PC_BP_SP;                                                 \
+          ReportGenericError(pc, bp, sp, addr, is_write, 16, true,             \
+                             "Host out of bound");                             \
+        }                                                                      \
       } else {                                                                 \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, addr, is_write, size, true,             \
+        ReportGenericError(pc, bp, sp, addr, is_write, 16, true,               \
                            "Mixed Access");                                    \
-      }                                                                        \
-      uptr filter = size <= SHADOW_GRANULARITY                                 \
-                        ? kL1Filter                                            \
-                        : ((kL1Filter << 8) + kL1Filter);                      \
-      shadowByte &= filter;                                                    \
-      if (UNLIKELY(shadowByte)) {                                              \
-        if (UNLIKELY(size >= SHADOW_GRANULARITY ||                             \
-                     (int8_t)((addr & (SHADOW_GRANULARITY - 1)) + size - 1) >= \
-                         (int8_t)shadowByte)) {                                \
-          GET_CALLER_PC_BP_SP;                                                 \
-          ReportGenericError(pc, bp, sp, addr, is_write, size, true,           \
-                             IsInEnclave == inEnclaveFlag                      \
-                                 ? "Enclave out of bound"                      \
-                                 : "Host out of bound");                       \
-        }                                                                      \
       }                                                                        \
     }                                                                          \
   }
@@ -89,12 +118,12 @@ ASAN_MEMORY_ACCESS_CALLBACK(load, false, 1)
 ASAN_MEMORY_ACCESS_CALLBACK(load, false, 2)
 ASAN_MEMORY_ACCESS_CALLBACK(load, false, 4)
 ASAN_MEMORY_ACCESS_CALLBACK(load, false, 8)
-ASAN_MEMORY_ACCESS_CALLBACK(load, false, 16)
+ASAN_MEMORY_ACCESS_CALLBACK_16(load, false)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 1)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 2)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 4)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 8)
-ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
+ASAN_MEMORY_ACCESS_CALLBACK_16(store, true)
 
 #define ASAN_MEMORY_ACCESS_CALLBACK_N(type, is_write)                          \
   extern "C" __attribute__((noinline)) void __asan_##type##N(                  \
