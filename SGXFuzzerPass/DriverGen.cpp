@@ -202,7 +202,7 @@ bool DriverGenerator::EnableFuzzInput(json::json_pointer jsonPtr) {
 Value *DriverGenerator::createParamContent(
     SmallVector<Type *> types, json::json_pointer jsonPtr,
     std::map<uint64_t, Value *> *paramPtrs, Instruction *insertPt,
-    size_t recursion_depth, Value *buffer) {
+    size_t recursion_depth, Value *buffer, bool hasByValAttr) {
   recursion_depth++;
   // get index from json pointer
   size_t idx =
@@ -366,7 +366,7 @@ Value *DriverGenerator::createParamContent(
       }
       IRB.SetInsertPoint(insertPt);
       IRB.CreateStore(IRB.CreatePointerCast(contentPtr, pointerTy), typePtr);
-      if (feedRandom) {
+      if (feedRandom and not hasByValAttr) {
         // we call function to query whether fill pointer with meaningful
         // address or not
         Instruction *term = SplitBlockAndInsertIfThen(
@@ -534,7 +534,8 @@ Function *DriverGenerator::createEcallFuzzWrapperFunc(std::string ecallName) {
       // it's a parameter declareted at edl file
       json::json_pointer jsonPtr = json::json_pointer("/trusted") / ecallName /
                                    "parameter" / edlParamNo++;
-      createParamContent(paramTypes, jsonPtr, &preparedParamPtrs, retVoidI);
+      createParamContent(paramTypes, jsonPtr, &preparedParamPtrs, retVoidI, 0,
+                         nullptr, arg.hasByValAttr());
     }
   }
   // 3. prepare Enclave ID parameter

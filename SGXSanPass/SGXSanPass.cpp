@@ -1,7 +1,7 @@
 #include "AddressSanitizer.h"
 #include "AdjustUSP.hpp"
 #include "FuncRenamePass.h"
-#include "SensitiveLeakSan.hpp"
+#include "SensitiveLeakSanitizer.h"
 #include "nlohmann/json.hpp"
 #include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -57,9 +57,8 @@ struct SGXSanLegacyPass : public ModulePass {
     // run SLSan Pass
     if (ClEnableSLSan) {
       dbgs() << "== SLSan Pass: " << M.getName().str() << " ==\n";
-      CFLSteensAAResult &AAResult =
-          getAnalysis<CFLSteensAAWrapperPass>().getResult();
-      SensitiveLeakSan SLSan(M, AAResult);
+      SensitiveLeakSanitizer SLSan(
+          M, getAnalysis<CFLSteensAAWrapperPass>().getResult());
       Changed |= SLSan.runOnModule();
     }
 
@@ -97,12 +96,8 @@ struct SGXSanLegacyPass : public ModulePass {
 } // end of anonymous namespace
 
 char SGXSanLegacyPass::ID = 0;
-static RegisterPass<SGXSanLegacyPass>
-    register_sgxsan_pass("SGXSanLegacyPass", "SGXSanLegacyPass",
-                         false /* Only looks at CFG */,
-                         false /* Analysis Pass */);
 
-static RegisterStandardPasses lto_register_std_pass(
+static RegisterStandardPasses register_lto_pass(
     PassManagerBuilder::EP_FullLinkTimeOptimizationEarly,
     [](const PassManagerBuilder &Builder, legacy::PassManagerBase &PM) {
       PM.add(new SGXSanLegacyPass());

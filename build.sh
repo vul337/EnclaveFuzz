@@ -44,6 +44,7 @@ fi
 if [ ! -f Tool/sgx_edger8r ]
 then
     cd edger8r
+    eval $(opam env)
     dune build
     cd ..
     cp edger8r/_build/default/linux/Edger8r.bc Tool/sgx_edger8r

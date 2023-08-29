@@ -5,7 +5,7 @@ sources_list_dir="/etc/apt/sources.list.d"
 script_dir=$(realpath $(dirname $0))
 linux_sgx_src_dir="$(realpath ${script_dir}/../linux-sgx)"
 
-sudo rm -f /usr/local/bin/{as,ld,ld.gold,objdump}
+sudo rm -f /usr/local/bin/{ar,as,ld,ld.gold,objcopy,objdump,ranlib}
 sudo rm -f ${sources_list_dir}/intel-sgx.list
 
 cd ${linux_sgx_src_dir}

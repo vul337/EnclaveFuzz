@@ -3006,7 +3006,8 @@ bool AddressSanitizer::instrumentFunction(Function &F,
             ("sgx_" /* ecall wrapper prefix */ + callee_name.str())) {
           // it's an ecall wrapper
           RealEcallInsts.push_back(CI);
-        } else if (callee_name == "sgx_ocall") {
+        } else if (callee_name == "sgx_ocall" or
+                   callee_name == "sgx_ocall_switchless") {
           SGXOcallInsts.push_back(CI);
         } else if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
                    callee_name == "memmove_s") {
@@ -3839,10 +3840,10 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   IRBuilder<> IRB(*C);
 
   // TD ECall Manager
-  TDECallConstructor = M.getOrInsertFunction(
-      "EnclaveTLSConstructorAtTBridgeBegin", IRB.getVoidTy());
-  TDECallDestructor = M.getOrInsertFunction(
-      "EnclaveTLSDestructorAtTBridgeEnd", IRB.getVoidTy());
+  TDECallConstructor =
+      M.getOrInsertFunction("TDECallConstructor", IRB.getVoidTy());
+  TDECallDestructor =
+      M.getOrInsertFunction("TDECallDestructor", IRB.getVoidTy());
 
   // MemAccessMgr functions
   MemAccessMgrActive =
@@ -3856,13 +3857,13 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
       M.getOrInsertFunction("MemAccessMgrInEnclaveAccess", IRB.getVoidTy());
 
   // Hooked security version memory intrinsics
-  SGXSanMemcpyS = M.getOrInsertFunction("sgxsan_memcpy_s", IRB.getInt32Ty(),
+  SGXSanMemcpyS = M.getOrInsertFunction("__sgxsan_memcpy_s", IRB.getInt32Ty(),
                                         IRB.getInt8PtrTy(), IRB.getInt64Ty(),
                                         IRB.getInt8PtrTy(), IRB.getInt64Ty());
-  SGXSanMemsetS = M.getOrInsertFunction("sgxsan_memset_s", IRB.getInt32Ty(),
+  SGXSanMemsetS = M.getOrInsertFunction("__sgxsan_memset_s", IRB.getInt32Ty(),
                                         IRB.getInt8PtrTy(), IRB.getInt64Ty(),
                                         IRB.getInt32Ty(), IRB.getInt64Ty());
-  SGXSanMemmoveS = M.getOrInsertFunction("sgxsan_memmove_s", IRB.getInt32Ty(),
+  SGXSanMemmoveS = M.getOrInsertFunction("__sgxsan_memmove_s", IRB.getInt32Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty());
 }

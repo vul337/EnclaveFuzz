@@ -7,6 +7,11 @@
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                      \
   extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(            \
       uptr addr, bool used_to_cmp, char *parent_func) {                        \
+    if (UNLIKELY(not AddrIsInMem(addr))) {                                     \
+      GET_CALLER_PC_BP_SP;                                                     \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
+                         "Invalid address");                                   \
+    }                                                                          \
     uptr smp = MEM_TO_SHADOW(addr);                                            \
     uptr s = size <= SHADOW_GRANULARITY                                        \
                  ? ((*reinterpret_cast<u8 *>(smp)) & (kL1Filter))              \
@@ -42,6 +47,11 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 #define ASAN_MEMORY_ACCESS_CALLBACK_N(type, is_write)                          \
   extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##N(               \
       uptr addr, uptr size, bool used_to_cmp, char *parent_func) {             \
+    if (UNLIKELY(not AddrIsInMem(addr))) {                                     \
+      GET_CALLER_PC_BP_SP;                                                     \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
+                         "Invalid address");                                   \
+    }                                                                          \
     if (sgxsan_region_is_poisoned(addr, size)) {                               \
       GET_CALLER_PC_BP_SP;                                                     \
       ReportGenericError(pc, bp, sp, addr, is_write, size, true);              \

@@ -5,17 +5,17 @@ import subprocess
 from tqdm.auto import tqdm
 import re
 import json
-import multiprocessing as mp
+import multiprocessing
 import datetime
 import hashlib
-
-# Script Settings
-MAX_WORKERS = 16
-CHUNK_SIZE = 5
+import shutil
+import functools
+import threading
 
 
 crash_report = {}
 crash_report_simple = {}
+report_update_lock = threading.Lock()
 
 
 def check_aslr():
@@ -26,7 +26,8 @@ def check_aslr():
 
 
 def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
-    if do_simple and "ERROR: Host" in error_tag:
+    host_error_match = re.search(r"\[SGXSan\] ERROR: Host[^|]*$", error_tag)
+    if do_simple and host_error_match:
         error_tag = "Don't care host error"
         bt_str = ""
         pc_value = ""
@@ -59,6 +60,13 @@ def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
         or not dict[filter1][filter2][filter3]["inputs"]
     ):
         dict[filter1][filter2][filter3]["inputs"].append(os.path.basename(crash_file))
+        filtered_crashes_dir = os.path.join(
+            os.path.dirname(os.path.dirname(crash_file)), "filtered_crashes"
+        )
+        os.makedirs(filtered_crashes_dir, exist_ok=True)
+        shutil.copyfile(
+            crash_file, os.path.join(filtered_crashes_dir, os.path.basename(crash_file))
+        )
 
     if "hash2bt" not in dict:
         dict["hash2bt"] = {}
@@ -66,7 +74,7 @@ def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
         dict["hash2bt"][bt_hash] = bt_str.split("\n")
 
 
-def get_crash_info(binary, crash_file, extra_opt: list, test_dir, timeout, kind):
+def get_crash_info(binary, crash_file, extra_opt: list, test_dir, timeout):
     cmd: str = binary + " " + crash_file
     if extra_opt:
         cmd = cmd + " " + " ".join(extra_opt)
@@ -84,10 +92,16 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir, timeout, kind)
         )
     except subprocess.TimeoutExpired:
         print(f"\nTimeout input {crash_file}!")
-        return
-    report = logs.stdout.decode("utf-8")
+        return "TIMEOUT"
+    report = logs.stdout.decode("utf-8", errors="backslashreplace")
     # print(report)
+    return report
 
+
+def process_report(report: str, crash_file, pbar):
+    if report == "TIMEOUT":
+        pbar.update()
+        return
     sgxsan_error_regex = re.compile(
         r"\[SGXSan\] ERROR:.*"
         r"|\[SGXSan\] WARNING:\s*?Detect Double-Fetch Situation, and modify it with fuzz data"
@@ -105,23 +119,26 @@ def get_crash_info(binary, crash_file, extra_opt: list, test_dir, timeout, kind)
         bt_list
     )
 
-    pc_regex = re.compile(r"ERROR:.*?\bpc\s+(0x[A-Fa-f0-9]*)", re.DOTALL)
-    res = re.search(pc_regex, report)
+    pc_regex = re.compile(r"ERROR:[^|]*?\bpc\s+(0x[A-Fa-f0-9]*)[^|]*$", re.DOTALL)
+    res = re.findall(pc_regex, report)
     pc_value = "Unknown"
     if res:
-        pc_value = res[1]
+        pc_value = res[-1]
 
     if "NOTE: fuzzing was not performed, you have only" in report:
         error_tag = ""
         bt_str = ""
 
-    update2dict(bt_str, error_tag, pc_value, crash_file, False)
-    update2dict(bt_str, error_tag, pc_value, crash_file, True)
+    report_update_lock.acquire()
+    try:
+        update2dict(bt_str, error_tag, pc_value, crash_file, False)
+        update2dict(bt_str, error_tag, pc_value, crash_file, True)
+    finally:
+        report_update_lock.release()
+        pbar.update()
 
 
-def filter_crashes(
-    binary, crashes_dir, extra_opt, test_dir, timeout, kind, result_file
-):
+def filter_crashes(binary, crashes_dir, extra_opt, test_dir, timeout, kind):
     if not os.path.isfile(binary):
         print(f"Fuzzer binary {binary} not found!")
         return
@@ -132,14 +149,30 @@ def filter_crashes(
         print(f"Test directory {test_dir} not found!")
         return
 
-    for f in tqdm(sorted(os.listdir(crashes_dir))):
+    pool = multiprocessing.Pool()
+    crash_files = sorted(os.listdir(crashes_dir))
+    pbar = tqdm(total=len(crash_files))
+    for f in crash_files:
         if kind != "KAFL" and not f.startswith("crash-"):
             continue
         crash_file = os.path.join(crashes_dir, f)
         # print(crash_file)
-        get_crash_info(binary, crash_file, extra_opt, test_dir, timeout, kind)
-        json.dump(crash_report, open(result_file, "w"), indent=4)
-        json.dump(crash_report_simple, open("simple-" + result_file, "w"), indent=4)
+        cb = functools.partial(process_report, crash_file=crash_file, pbar=pbar)
+        pool.apply_async(
+            get_crash_info,
+            args=(
+                binary,
+                crash_file,
+                extra_opt,
+                test_dir,
+                timeout,
+            ),
+            callback=cb,
+            error_callback=lambda x: print(x),
+        )
+    pool.close()
+    pool.join()
+    pbar.close()
 
 
 def main():
@@ -177,10 +210,16 @@ def main():
         os.path.abspath(args.test_dir),
         int(args.timeout),
         args.kind,
-        result_file,
     )
 
     # print(crash_report)
+    json.dump(crash_report, open(result_file, "w"), indent=4, sort_keys=True)
+    json.dump(
+        crash_report_simple,
+        open("simple-" + result_file, "w"),
+        indent=4,
+        sort_keys=True,
+    )
 
     print(f"Saved result to {result_file}")
 

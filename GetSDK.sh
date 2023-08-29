@@ -49,7 +49,7 @@ then
     ADD_MAKE_FLAGS+=" DEBUG=1"
 fi
 
-if [[ "${HOST_ASAN}" = "TRUE" ]]
+if [[ "${FUZZER}" = "LIBFUZZER" && "${HOST_ASAN}" = "TRUE" ]]
 then
     HOST_COMPILE_FLAGS+=" -fsanitize=address"
 fi

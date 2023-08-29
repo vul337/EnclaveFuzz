@@ -13,7 +13,7 @@
 // In order to check safe memory operations:
 // If we do not instrument sgxsdk, we should replace memcpy used in memcpy_s
 // with __asan_memcpy(weak symbol) by hand. (Current) Or replace memcpy_s with
-// sgxsan_memcpy_s If we need to instrument sgxsdk, we needn't extra check, as
+// __sgxsan_memcpy_s If we need to instrument sgxsdk, we needn't extra check, as
 // memcpy will be replaced with __asan_memcpy by llvm pass
 
 #define RANGE_CHECK(beg, size, is_write, begIsInEnclave)                       \
@@ -102,8 +102,8 @@ void *__asan_memmove(void *dst, const void *src, uptr size) {
   return memmove(dst, src, size);
 }
 
-errno_t sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
-                        size_t count) {
+errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
+                          size_t count) {
   if (dstSize == 0 or count == 0) {
     return 0;
   }
@@ -129,7 +129,7 @@ errno_t sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
   return memcpy_s(dst, dstSize, src, count);
 }
 
-errno_t sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t count) {
+errno_t __sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t count) {
   if (dstSize == 0 or count == 0) {
     return 0;
   }
@@ -147,7 +147,8 @@ errno_t sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t count) {
   return memset_s(dst, dstSize, c, count);
 }
 
-int sgxsan_memmove_s(void *dst, size_t dstSize, const void *src, size_t count) {
+int __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
+                       size_t count) {
   if (dstSize == 0 or count == 0) {
     return 0;
   }

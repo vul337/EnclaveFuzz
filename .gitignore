@@ -1,6 +1,10 @@
 *.o
 *.a
 *.so
-*-build
-*install
+build_dir
+install_dir
+install
+sgx_edger8r
+vtune
 .vscode/settings.json
+.vscode/c_cpp_properties.json

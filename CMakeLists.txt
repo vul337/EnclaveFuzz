@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
+set(LINUX_SGX_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/linux-sgx")
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(KAFL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kAFL")
-set(KAFL_EXAMPLES_DIR "${KAFL_DIR}/kafl/examples")
+set(KAFL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/kAFL)
+set(KAFL_EXAMPLES_DIR ${KAFL_DIR}/kafl/examples)
 configure_file(SGXSanConfig.h.in SGXSanConfig.h @ONLY)
 
 # get LLVM_DIR
@@ -38,6 +39,7 @@ install(TARGETS
         GetOCallTable
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
+
 if(KAFL_FUZZER)
 install(TARGETS
         nyx_agent
@@ -47,12 +49,11 @@ install(TARGETS
         ARCHIVE DESTINATION lib64)
 
 install(DIRECTORY kAFLUSpaceUtil/initrd/
-USE_SOURCE_PERMISSIONS
-DESTINATION initrd)
+        USE_SOURCE_PERMISSIONS
+        DESTINATION initrd)
 
 install(FILES Tool/rand_file
-DESTINATION .)
-
+        DESTINATION .)
 endif()
 
 install(FILES SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl
@@ -62,19 +63,18 @@ install(FILES Tool/sgx_edger8r
         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
         DESTINATION bin/x64)
 
-install(DIRECTORY linux-sgx/common/inc/
-        DESTINATION include
-        PATTERN "linux-sgx/common/inc/internal" EXCLUDE)
+install(DIRECTORY ${LINUX_SGX_SRC_DIR}/common/inc/ DESTINATION include
+        PATTERN common/inc/internal EXCLUDE)
 
-install(DIRECTORY linux-sgx/sdk/tlibcxx/include/
+install(DIRECTORY ${LINUX_SGX_SRC_DIR}/sdk/tlibcxx/include/
         DESTINATION include/libcxx)
 
-install(DIRECTORY linux-sgx/external/ippcp_internal/inc/
+install(DIRECTORY ${LINUX_SGX_SRC_DIR}/external/ippcp_internal/inc/
         DESTINATION include/ipp
         PATTERN "ippcp20u3.patch" EXCLUDE)
 
-install(DIRECTORY linux-sgx/external/dcap_source/QuoteGeneration/pce_wrapper/inc/
+install(DIRECTORY ${LINUX_SGX_SRC_DIR}/external/dcap_source/QuoteGeneration/pce_wrapper/inc/
         DESTINATION include)
 
-install(FILES linux-sgx/common/buildenv.mk
+install(FILES ${LINUX_SGX_SRC_DIR}/common/buildenv.mk
         DESTINATION .)

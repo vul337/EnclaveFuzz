@@ -56,7 +56,8 @@ size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
 int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
-bool ClEnableNaiveHarness;
+bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack,
+    ClCmpFuncNameInTOCTOU;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER, TEST_SPEED };
@@ -133,10 +134,12 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
 #endif
 }
 
-// DataFactory Util
 #ifndef KAFL_FUZZER
+// libFuzzer API
 extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 #endif
+extern "C" __attribute__((weak)) bool AddrIsInHeapQuarantine(uint64_t addr);
+// DataFactory Util
 class FuzzDataFactory {
 public:
   /// @brief fill random data in memory pointed by \p dst
@@ -163,12 +166,7 @@ public:
   }
 #endif
 
-  uint8_t *getBytes(uint8_t *dst, size_t bytesNum, FuzzDataTy dataTy,
-                    std::string ParamID = "") {
-    if (mSpecDataID2Type.count(ParamID)) {
-      // Override DataType by user specified
-      dataTy = mSpecDataID2Type[ParamID];
-    }
+  uint8_t *getBytes(uint8_t *dst, size_t bytesNum, FuzzDataTy dataTy) {
     if (bytesNum == 0 and dataTy != FUZZ_STRING and dataTy != FUZZ_WSTRING) {
       // Do nothing
       return dst;
@@ -332,6 +330,10 @@ public:
     // Don't delete provider here, since later sgx_destroy_enclave may use it
     for (auto memArea : allocatedMemAreas) {
       // log_debug("free %p\n", memArea);
+      if (AddrIsInHeapQuarantine && AddrIsInHeapQuarantine((uint64_t)memArea)) {
+        // It may be freed by ECall
+        continue;
+      }
       free(memArea);
     }
     allocatedMemAreas.clear();
@@ -378,10 +380,6 @@ public:
     mNotModifyOCallRetSpecs.emplace(ID);
   }
 
-  void AddDataID2TypeSpecs(std::string ID, FuzzDataTy ty) {
-    mSpecDataID2Type[ID] = ty;
-  }
-
   bool EnableModifyOCallRet(char *cParamID) {
     std::string ParamID(cParamID);
     if (mNotModifyOCallRetSpecs.count(ParamID)) {
@@ -397,12 +395,13 @@ public:
   }
   size_t GetExpectedFuzzDataSize() { return mExpectedFuzzDataSize; }
 
+  bool EnableSanCheckDie() { return ClEnableSanCheckDie; }
+
 private:
   FuzzedDataProvider *provider = nullptr;
   std::vector<uint8_t *> allocatedMemAreas;
   size_t mExpectedFuzzDataSize, mRandPoolBytesOffset = 0;
   std::unordered_set<std::string> mNotModifyOCallRetSpecs;
-  std::unordered_map<std::string, FuzzDataTy> mSpecDataID2Type;
 };
 FuzzDataFactory data_factory;
 
@@ -451,10 +450,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_return0_prob",
           po::value<double>(&ClReturn0Prob)->default_value(0.01),
           "Probability to return all 0 in OCall return");
-  add_opt("cb_data_type", po::value<std::string>(),
-          "Feed data with specified type (override default), ID=FUZZ_XXX[, "
-          "...] , e.g. "
-          "/untrusted/ocall_current_time/parameter/0=FUZZ_P_DOUBLE[,...]");
   add_opt("cb_ocall_ret_through", po::value<std::string>(),
           "Not modify OCall return value specified by ID, ID[,...] , e.g. "
           "/untrusted/ocall_current_time/parameter/0[,...]");
@@ -473,9 +468,18 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_max_payload_size",
           po::value<size_t>(&ClMaxPayloadSize)->default_value(10000000),
           "Allocate buffer with cb_max_payload_size, to prepare fuzz data");
+  add_opt("cb_enable_san_check_die",
+          po::value<bool>(&ClEnableSanCheckDie)->default_value(true),
+          "Enable Die when sanitizer check");
   add_opt("cb_naive_harness",
           po::value<bool>(&ClEnableNaiveHarness)->default_value(false),
           "Enable naive harness");
+  add_opt("cb_enable_collect_stack",
+          po::value<bool>(&ClEnableCollectStack)->default_value(false),
+          "Enable collect stack");
+  add_opt("cb_cmp_func_name_in_toctou",
+          po::value<bool>(&ClCmpFuncNameInTOCTOU)->default_value(false),
+          "Compare function name when checking TOCTOU");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -543,25 +547,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
     log_always_np("\n");
   }
 
-  if (vm.count("cb_data_type")) {
-    std::string dataTySpecList = vm["cb_data_type"].as<std::string>();
-    std::vector<std::string> dataTySpecVec;
-    boost::split(dataTySpecVec, dataTySpecList,
-                 [](char c) { return c == ','; });
-
-    for (auto dataTySpec : dataTySpecVec) {
-      boost::trim(dataTySpec);
-      if (dataTySpec != "") {
-        std::vector<std::string> pair;
-        boost::split(pair, dataTySpec, [](char c) { return c == '='; });
-        auto dataType = magic_enum::enum_cast<FuzzDataTy>(pair[1]);
-        if (dataType.has_value()) {
-          data_factory.AddDataID2TypeSpecs(pair[0], dataType.value());
-        }
-      }
-    }
-  }
-
   if (vm.count("cb_ocall_ret_through")) {
     std::string NotModifyOCallRetSpecList =
         vm["cb_ocall_ret_through"].as<std::string>();
@@ -589,10 +574,14 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
   return data_factory.mutate(Data, Size, MaxSize);
 }
 
-extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
 extern "C" void libFuzzerCrashCallback() {
-  sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid);
+  // Destroy Enclave
+  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
+                    SGX_SUCCESS,
+                "[FAIL] Enclave destroy");
 }
+
+extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
 #endif
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   log_always("Start LLVMFuzzerTestOneInput\n");
@@ -611,8 +600,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
                            SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
                            NULL, &__hidden_sgxfuzzer_harness_global_eid, NULL);
   sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
-#endif
 
+#endif
   // Test body
   if (gFuzzMode == TEST_SPEED) {
     struct timeval tval_before, tval_after, tval_result;
@@ -664,9 +653,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 #endif
 
   // Destroy Enclave
-  ret = sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid);
-  sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave destroy");
-
+  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
+                    SGX_SUCCESS,
+                "[FAIL] Enclave destroy");
   data_factory.clear();
   return 0;
 }
@@ -683,7 +672,7 @@ extern "C" uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen,
 
 extern "C" uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen,
                                char *cStrAsParamID, FuzzDataTy dataType) {
-  return data_factory.getBytes(ptr, byteArrLen, dataType, cStrAsParamID);
+  return data_factory.getBytes(ptr, byteArrLen, dataType);
 }
 
 extern "C" bool DFEnableSetNull(char *cStrAsParamID) {
@@ -725,8 +714,14 @@ extern "C" int DFGetInt32() { return data_factory.getInterger<int>(); }
 
 extern "C" const char *DFGetEnclaveName() { return ClEnclaveFileName.c_str(); }
 
-#ifdef KAFL_FUZZER
+extern "C" bool DFEnableSanCheckDie() {
+  return data_factory.EnableSanCheckDie();
+}
 
+extern "C" bool DFEnableCollectStack() { return ClEnableCollectStack; }
+extern "C" bool DFCmpFuncNameInTOCTOU() { return ClCmpFuncNameInTOCTOU; }
+
+#ifdef KAFL_FUZZER
 extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }
 extern "C" void FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv) {
   ucontext_t *uc = (ucontext_t *)priv;
@@ -795,6 +790,7 @@ int agent_init(int verbose) {
 
   return 0;
 }
+
 extern "C" sgx_status_t sgxsan_ecall_get_enclave_range(sgx_enclave_id_t eid,
                                                        uintptr_t *enclave_base,
                                                        size_t *enclave_size);
@@ -816,6 +812,8 @@ int main(int argc, char **argv) {
     assert(pid != -1);
 
     if (!pid) {
+      log_always("Start FuzzerTestOneInput\n");
+
       // Initialize Enclave
       sgx_status_t ret = sgx_create_enclave(
           ClEnclaveFileName.c_str(),
@@ -823,12 +821,13 @@ int main(int argc, char **argv) {
           &__hidden_sgxfuzzer_harness_global_eid, NULL);
       sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
 
-      uintptr_t EnclaveStart, EnclaveSize;
+      uintptr_t EnclaveStart, EnclaveSize, EnclaveEnd;
       sgxsan_ecall_get_enclave_range(__hidden_sgxfuzzer_harness_global_eid,
                                      &EnclaveStart, &EnclaveSize);
-      hrange_submit(0, EnclaveStart, EnclaveStart + EnclaveSize);
+      EnclaveEnd = EnclaveStart + EnclaveSize;
+      hrange_submit(0, EnclaveStart, EnclaveEnd);
       hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
-              EnclaveStart + EnclaveSize);
+              EnclaveEnd);
 
       kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
       log_always("Data %p %d\n", pbuf->data, pbuf->size);

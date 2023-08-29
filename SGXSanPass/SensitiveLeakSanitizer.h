@@ -19,13 +19,14 @@
 #include "DDA/DDAClient.h"
 #include "Graphs/SVFG.h"
 #include "MemoryModel/ConditionalPT.h"
-#include "PassUtil.h"
 #include "SABER/LeakChecker.h"
 #include "SVF-FE/LLVMUtil.h"
 #include "SVF-FE/SVFIRBuilder.h"
 #include "Util/DPItem.h"
 #include "Util/config.h"
 #include "WPA/Andersen.h"
+
+#include "PassUtil.h"
 
 #include <regex>
 #include <unordered_map>
@@ -35,10 +36,10 @@ namespace llvm {
 enum SensitiveLevel { NOT_SENSITIVE = 0, MAY_BE_SENSITIVE, IS_SENSITIVE };
 enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };
 
-class SensitiveLeakSan {
+class SensitiveLeakSanitizer {
 public:
-  SensitiveLeakSan(Module &M, CFLSteensAAResult &AAResult);
-  ~SensitiveLeakSan();
+  SensitiveLeakSanitizer(Module &M, CFLSteensAAResult &AAResult);
+  ~SensitiveLeakSanitizer();
   void includeThreadFuncArgShadow();
   void includeSGXSanCheck();
   void initSVF();

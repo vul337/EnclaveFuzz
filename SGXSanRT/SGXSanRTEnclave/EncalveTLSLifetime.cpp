@@ -5,7 +5,7 @@
 
 __thread int64_t TLS_init_count;
 
-void EnclaveTLSConstructorAtTBridgeBegin() {
+void TDECallConstructor() {
   if (TLS_init_count == 0) {
     // root ecall
     MemAccessMgrInit();
@@ -15,7 +15,7 @@ void EnclaveTLSConstructorAtTBridgeBegin() {
   sgxsan_assert(TLS_init_count < 1024);
 }
 
-void EnclaveTLSDestructorAtTBridgeEnd() {
+void TDECallDestructor() {
   if (TLS_init_count == 1) {
     // root ecall
     MemAccessMgrDestroy();

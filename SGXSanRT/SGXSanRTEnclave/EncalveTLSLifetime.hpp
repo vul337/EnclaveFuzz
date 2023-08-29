@@ -3,8 +3,8 @@
 #if defined(__cplusplus)
 extern "C" {
 #endif
-void EnclaveTLSConstructorAtTBridgeBegin();
-void EnclaveTLSDestructorAtTBridgeEnd();
+void TDECallConstructor();
+void TDECallDestructor();
 #if defined(__cplusplus)
 }
 #endif

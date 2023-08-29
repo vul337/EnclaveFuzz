@@ -43,18 +43,24 @@ from java.awt import Color
 import json
 import os
 import re
+import time
+import sys
 # Important: Modify enclave_base
-enclave_base = 0x7ffff6a37000
+enclave_base = 0x00555555654000
 GenModuleCovInfo = True
 bad_addr = 0xffffffffffffffff
-target_dir=os.path.dirname(getCurrentProgram().getExecutablePath())
+target_dir = os.path.dirname(getCurrentProgram().getExecutablePath())
+layout_json_path = os.path.join(target_dir, 'layout.json')
+if GenModuleCovInfo:
+    layout_json_file = open(layout_json_path)
+    layout_json = json.load(layout_json_file)
 
 # print list of missing/uncovered functions?
 print_missing = True
 # report blocks that are only reached implicitly (unconditional jmp/call)
 print_implicit = True
 # ignore funcitons with less than n blocks?
-ignore_threshold = 4
+ignore_threshold = 0
 # detailed log of edge scanning
 verbose = False
 
@@ -84,7 +90,7 @@ def read_edges(tracefile):
         for line in trace.readlines():
             src,dst,num = line.rstrip().split(',')
             #print "edge: < 0x%s, 0x%s, %s >" % (src,dst,num)
-            if not GenModuleCovInfo:
+            if False:
                 addr_src = addr.getAddress("0x%s" % src)
                 addr_dst = addr.getAddress("0x%s" % dst)
             else:
@@ -339,17 +345,19 @@ def main():
     ## Summarize blocks reached/missed by function
     ##
     def getModule(funcName):
-        with open(os.path.join(target_dir, 'layout.json')) as json_file:
-            layout = json.load(json_file)
-            for obj in layout.keys():
-                for sym in layout[obj]:
-                    if re.match(
-                            r"(^|[^a-zA-z0-9_])" + re.escape(funcName) +
-                            r"([^a-zA-z0-9_]|$)", sym):
-                        return obj
+        for obj in layout_json.keys():
+            for sym in layout_json[obj]:
+                if re.search(r"\b" + re.escape(funcName) + r"\b", sym):
+                    return obj
         return ""
+
     if GenModuleCovInfo:
-        csv_file = open(os.path.join(target_dir, 'result.csv'), 'w')
+        cov_dir = os.path.join(target_dir, "coverage")
+        if not os.path.exists(cov_dir):
+            os.makedirs(cov_dir)
+        result_csv = os.path.join(cov_dir, 'result'+time.strftime("-%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))+'.csv')
+        # print("result="+result_csv)
+        csv_file = open(result_csv, 'w')
         csv_file.write("Blocks,Total,Func,Module\n")
     print
     total_blocks_reachable=0
@@ -358,11 +366,12 @@ def main():
         percent = blocks * 100 / total
         total_blocks_reachable += total
         if total > ignore_threshold:
-            print "Reached: %3d from %3d blocks (%3d%%) in %s" % (blocks, total, percent, func)
             if GenModuleCovInfo:
                 csv_file.write(
                     str(blocks) + "," + str(total) + ",\"" + func + "\",\"" +
                     getModule(func) + "\"\n")
+            else:
+                print "Reached: %3d from %3d blocks (%3d%%) in %s" % (blocks, total, percent, func)
 
     print
     if print_missing:
@@ -371,10 +380,11 @@ def main():
                 print "Ignore: %3d blocks in %s" % (blocks, func)
                 continue
             if func not in reached_map and blocks > ignore_threshold:
-                print "Missed: %3d blocks in %s" % (blocks, func)
                 if GenModuleCovInfo:
                     csv_file.write("0," + str(blocks) + ",\"" + func + "\",\"" +
                                 getModule(func) + "\"\n")
+                else:
+                    print "Missed: %3d blocks in %s" % (blocks, func)
     if GenModuleCovInfo:
         csv_file.close()
 
@@ -406,7 +416,7 @@ def main():
     print "Total reached funcs:  %6d / %6d (%d%%)" % (len(reached_map), len(blocks_map), func_cov)
     print "Total reached blocks: %6d / %6d (%d%%)" % (reached_blocks, filtered_blocks, block_cov)
     print " ..in reached funcs:  %6d / %6d (%d%%)" % (reached_blocks, total_blocks_reachable,
-                                                      100*reached_blocks/total_blocks_reachable)
+                                                      100*reached_blocks/total_blocks_reachable if total_blocks_reachable else 0)
     print "  Blocks not reached: %6d" % missing_blocks
     print
 

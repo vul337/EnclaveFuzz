@@ -13,7 +13,7 @@ cd ${linux_sgx_src_dir}
 # rule "sdk_install_pkg" depends on rule "sdk", so skip rule "sdk"
 make sdk_install_pkg ${FLAGS} -j$(nproc) -Orecurse -s
 
-sudo apt-get install build-essential python -y
+sudo apt-get install build-essential python-is-python3 -y
 
 # install sgxsdk
 sudo ./linux/installer/bin/sgx_linux_x64_sdk_*.bin <<EOF

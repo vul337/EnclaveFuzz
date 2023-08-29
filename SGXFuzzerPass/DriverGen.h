@@ -21,7 +21,7 @@ public:
                             nlohmann::json::json_pointer jsonPtr,
                             std::map<uint64_t, Value *> *paramPtrs,
                             Instruction *insertPt, size_t recursion_depth = 0,
-                            Value *buffer = nullptr);
+                            Value *buffer = nullptr, bool hasByValAttr = false);
   void fillAtOnce(Value *dstPtr, nlohmann::json::json_pointer jsonPtr,
                   Value *jsonPtrAsID, Instruction *insertPt,
                   Type *type = nullptr, Value *arrCnt = nullptr,
