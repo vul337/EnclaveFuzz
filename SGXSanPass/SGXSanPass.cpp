@@ -48,11 +48,72 @@ struct SGXSanLegacyPass : public ModulePass {
     }
   }
 
+  bool DefaultRenameFunc(Module &M) {
+    bool changed = false;
+    std::string RenamePrefix = "__hidden_in_enclave_";
+    std::vector<std::string> FuncRenameList{"access",
+                                            "close",
+                                            "dlclose",
+                                            "dlerror",
+                                            "dlopen",
+                                            "dlsym",
+                                            "dl_iterate_phdr",
+                                            "fchmod",
+                                            "fchown",
+                                            "fclose",
+                                            "fcntl",
+                                            "fcntl64",
+                                            "fdopen",
+                                            "fflush",
+                                            "fileno",
+                                            "fopen",
+                                            "fseek",
+                                            "fsync",
+                                            "ftell",
+                                            "ftruncate",
+                                            "fwrite",
+                                            "getcwd",
+                                            "getenv",
+                                            "geteuid",
+                                            "getpid",
+                                            "gettimeofday",
+                                            "localtime",
+                                            "lseek64",
+                                            "mkdir",
+                                            "mmap",
+                                            "mmap64",
+                                            "mremap",
+                                            "munmap",
+                                            "open",
+                                            "open64",
+                                            "readlink"
+                                            "rmdir",
+                                            "setenv",
+                                            "sleep",
+                                            "sysconf",
+                                            "time",
+                                            "unlink",
+                                            "utimes",
+                                            "write"};
+    for (auto origName : FuncRenameList) {
+      auto F = M.getFunction(origName);
+      if (F) {
+        std::string newName = RenamePrefix + origName;
+        dbgs() << "== FuncRename: " << M.getName() << ": " << origName << " => "
+               << newName << " ==\n";
+        F->setName(newName);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   bool runOnModule(Module &M) override {
     bool Changed = false;
 
     DumpModuleStructs(M);
     Changed |= RenameFuncSym(M);
+    Changed |= DefaultRenameFunc(M);
 
     // run SLSan Pass
     if (ClEnableSLSan) {

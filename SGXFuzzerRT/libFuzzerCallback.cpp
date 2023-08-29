@@ -58,9 +58,10 @@ double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
 bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack,
     ClCmpFuncNameInTOCTOU;
+static bool gInTest = false;
 
 // Fuzz sequence
-enum FuzzMode { TEST_RANDOM, TEST_USER, TEST_SPEED };
+enum FuzzMode { TEST_RANDOM, TEST_USER };
 static std::vector<int> gFuzzerSeq;
 static std::vector<int> gFilterOutIndices;
 static FuzzMode gFuzzMode;
@@ -381,6 +382,9 @@ public:
   }
 
   bool EnableModifyOCallRet(char *cParamID) {
+    if (not gInTest) {
+      return false;
+    }
     std::string ParamID(cParamID);
     if (mNotModifyOCallRetSpecs.count(ParamID)) {
       return false;
@@ -603,43 +607,28 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
 #endif
   // Test body
-  if (gFuzzMode == TEST_SPEED) {
-    struct timeval tval_before, tval_after, tval_result;
-    gettimeofday(&tval_before, NULL);
-    for (size_t i = 0; i < 1000000; i++) {
-      ret = gFuzzECallArray[0]();
-      sgxfuzz_error(ret != SGX_SUCCESS and
-                        ret != SGX_ERROR_INVALID_PARAMETER and
-                        ret != SGX_ERROR_ECALL_NOT_ALLOWED,
-                    "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
-    }
-    gettimeofday(&tval_after, NULL);
-    timersub(&tval_after, &tval_before, &tval_result);
-    log_always("Time elapsed(ECALL): %ld.%06ld seconds\n",
-               (long int)tval_result.tv_sec, (long int)tval_result.tv_usec);
+  gInTest = true;
+  std::vector<int> callSeq;
+  if (gFuzzMode == TEST_USER) {
+    callSeq = gFuzzerSeq;
   } else {
-    std::vector<int> callSeq;
-    if (gFuzzMode == TEST_USER) {
-      callSeq = gFuzzerSeq;
-    } else {
-      data_factory.getCallSequence(callSeq, gFuzzECallNum);
-    }
-    for (int i : callSeq) {
-      sgxfuzz_assert(i < gFuzzECallNum);
-      if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
-          gFilterOutIndices.end()) {
-        // Filter it out
-        continue;
-      }
-
-      log_always("Try %s\n", gFuzzECallNameArray[i]);
-      ret = gFuzzECallArray[i]();
-      sgxfuzz_error(ret != SGX_SUCCESS and
-                        ret != SGX_ERROR_INVALID_PARAMETER and
-                        ret != SGX_ERROR_ECALL_NOT_ALLOWED,
-                    "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
-    }
+    data_factory.getCallSequence(callSeq, gFuzzECallNum);
   }
+  for (int i : callSeq) {
+    sgxfuzz_assert(i < gFuzzECallNum);
+    if (std::find(gFilterOutIndices.begin(), gFilterOutIndices.end(), i) !=
+        gFilterOutIndices.end()) {
+      // Filter it out
+      continue;
+    }
+
+    log_always("Try %s\n", gFuzzECallNameArray[i]);
+    ret = gFuzzECallArray[i]();
+    sgxfuzz_error(ret != SGX_SUCCESS and ret != SGX_ERROR_INVALID_PARAMETER and
+                      ret != SGX_ERROR_ECALL_NOT_ALLOWED,
+                  "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
+  }
+  gInTest = false;
 
 #ifdef KAFL_FUZZER
   bool isStarve = false;

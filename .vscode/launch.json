@@ -8,14 +8,14 @@
             "name": "(libFuzzer) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/media/leone/Data/Fuzzer1.0-WAMR-HW-DBG-T0-2023-06-12/iwasm",
+            "program": "/mnt/data/EnclaveFuzzData/TALOS/Fuzzer1-HW-T0-2023-08-30/FuzzTaLoS.debug",
             "args": [
-                "--cb_enclave=enclave.signed.so",
+                "--cb_enclave=enclave.signed.so.debug",
                 "-max_len=10000000",
-                "./result/crashes/crash-0dee2b5e2e12d1b9c0dde526d0712e42197b1bf1"
+                "./result/crashes/crash-7f73b5e784ddc972aab0206a88e3036cc647c84e"
             ],
             "stopAtEntry": false,
-            "cwd": "/media/leone/Data/Fuzzer1.0-WAMR-HW-DBG-T0-2023-06-12",
+            "cwd": "/mnt/data/EnclaveFuzzData/TALOS/Fuzzer1-HW-T0-2023-08-30",
             "environment": [],
             "externalConsole": false,
             // "MIMode": "gdb",
@@ -30,6 +30,9 @@
                     "description": "Set Disassembly Flavor to Intel",
                     "text": "-gdb-set disassembly-flavor intel",
                     "ignoreFailures": true
+                },
+                {
+                    "text": "-gdb-set substitute-path /libunwind /home/chenliheng/Fuzzer1.0/linux-sgx/sdk/cpprt/linux/libunwind",
                 }
             ]
         },
