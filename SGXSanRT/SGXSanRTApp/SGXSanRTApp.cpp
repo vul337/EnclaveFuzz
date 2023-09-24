@@ -644,11 +644,19 @@ std::string addr2fname(void *addr) {
   if (dladdr(addr, &info) != 0) {
     fname = _addr2fname(
         (uptr)addr -
-            ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
+            ((uptr)info.dli_fbase <= 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
         info.dli_fname);
     fname.erase(std::remove(fname.begin(), fname.end(), '\n'), fname.end());
   }
   return fname;
+}
+
+bool is_shared_object(const char *fileName) {
+  std::stringstream cmd;
+  cmd << "file $(realpath " << fileName << ")";
+  std::string cmd_str = cmd.str();
+  std::string ret = sgxsan_exec(cmd_str.c_str());
+  return ret.find("shared object") == ret.npos ? false : true;
 }
 
 void sgxsan_dump_bt_buf(void **array, size_t size) {
@@ -658,7 +666,8 @@ void sgxsan_dump_bt_buf(void **array, size_t size) {
     if (dladdr(array[i], &info) != 0) {
       std::string str = addr2line(
           (uptr)array[i] -
-              ((uptr)info.dli_fbase == 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
+              (!is_shared_object(info.dli_fname) ? 0 : (uptr)info.dli_fbase) -
+              1,
           info.dli_fname);
       log_always_np(str.c_str());
     }
@@ -666,13 +675,18 @@ void sgxsan_dump_bt_buf(void **array, size_t size) {
   log_always_np("== SGXSan Backtrace END ==\n");
 }
 
+extern "C" __attribute__((weak)) bool DFUseAddr2line();
 void sgxsan_backtrace(log_level ll) {
 #if (DUMP_STACK_TRACE)
   if (ll > USED_LOG_LEVEL)
     return;
-  void *array[20];
-  size_t size = backtrace(array, 20);
-  sgxsan_dump_bt_buf(array, size);
+  if (DFUseAddr2line and DFUseAddr2line()) {
+    void *array[20];
+    size_t size = backtrace(array, 20);
+    sgxsan_dump_bt_buf(array, size);
+  } else {
+    sgxsan_signal_safe_dump_bt();
+  }
 #endif
 }
 

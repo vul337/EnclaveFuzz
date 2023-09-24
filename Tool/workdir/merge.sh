@@ -12,7 +12,7 @@ merge_cov() {
         echo "${#PROFRAWS[@]} new profraw"
 
         if [ ! -f "$ALL_PROFDATA" ]; then
-            if llvm-profdata-13 merge -sparse -o=${ALL_PROFDATA} ${PROFRAWS[0]}; then
+            if llvm-profdata-13 merge -sparse -j=$(nproc) -o=${ALL_PROFDATA} ${PROFRAWS[0]}; then
                 echo "Create ${ALL_PROFDATA}"
             else
                 echo "Wrong profraw: ${PROFRAWS[0]}"
@@ -21,7 +21,7 @@ merge_cov() {
             unset PROFRAWS[0]
         fi
         for raw in "${PROFRAWS[@]}"; do
-            if llvm-profdata-13 merge -sparse -o=${ALL_PROFDATA}.tmp ${raw} ${ALL_PROFDATA}; then
+            if llvm-profdata-13 merge -sparse -j=$(nproc) -o=${ALL_PROFDATA}.tmp ${raw} ${ALL_PROFDATA}; then
                 mv ${ALL_PROFDATA}.tmp ${ALL_PROFDATA}
             else
                 echo "Wrong profraw: ${raw}"
@@ -33,12 +33,13 @@ merge_cov() {
     fi
 }
 
-parse_cov() {
+log_cov() {
+    AllBB=$1
+    CovBB=$2
+    DevAllBB=$3
+    DevCovBB=$4
     mkdir -p ${TARGET_DIR}/coverage
     LOG_FILE="${TARGET_DIR}/coverage/cov_$(date +%Y\_%m\_%d\_%H\_%M\_%S)"
-    COV_INFO=$(${TARGET_DIR}/show_cov.sh|grep -v Filename|grep -v TOTAL|grep -v "\-\-\-\-\-"|grep -v "Files which contain no functions"|grep -v "^$"|tr -s " ")
-    read -r AllBB CovBB <<< $(echo "${COV_INFO}"|awk '{ col2_sum += $2; col3_sum += $3 } END { printf "%d %d", col2_sum, col2_sum-col3_sum }')
-    read -r DevAllBB DevCovBB <<< $(echo "${COV_INFO}"|grep -v "_t[.]c"|grep -v "_t[.]h"|grep -v "linux-sgx/"|awk '{ col2_sum += $2; col3_sum += $3 } END { printf "%d %d", col2_sum, col2_sum-col3_sum }')
 
     echo -en "EnclaveCoverage:\t\t" > ${LOG_FILE}
     if [ ${AllBB} -gt 0 ]; then
@@ -62,11 +63,30 @@ parse_cov() {
     fi
 }
 
+parse_cov() {
+    COV_INFO=$(${TARGET_DIR}/show_cov.sh|grep -v Filename|grep -v TOTAL|grep -v "\-\-\-\-\-"|grep -v "Files which contain no functions"|grep -v "^$"|tr -s " ")
+    read -r AllBB CovBB <<< $(echo "${COV_INFO}"|awk '{ col2_sum += $2; col3_sum += $3 } END { printf "%d %d", col2_sum, col2_sum-col3_sum }')
+    read -r DevAllBB DevCovBB <<< $(echo "${COV_INFO}"|grep -v "_t[.]c"|grep -v "_t[.]h"|grep -Pv 'linux-sgx(?!/psw/ae)'|awk '{ col2_sum += $2; col3_sum += $3 } END { printf "%d %d", col2_sum, col2_sum-col3_sum }')
+    log_cov ${AllBB} ${CovBB} ${DevAllBB} ${DevCovBB}
+}
+
+last_round=0
 while true
 do
     merge_cov
     if [ -f "$ALL_PROFDATA" ]; then
         parse_cov
+    else
+        log_cov 0 0 0 0
     fi
-    sleep 10
+    if [[ "last_round" -eq "0" ]]; then
+        if $(cat fuzz.pid|xargs kill -0); then
+            sleep 5
+        else
+            echo "Fuzzer already stopped"
+            last_round=1
+        fi
+    else
+        exit
+    fi
 done

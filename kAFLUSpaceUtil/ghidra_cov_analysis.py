@@ -290,7 +290,7 @@ def main():
 
     base_addr = int(args.base_addr, 0)
     layout_json={}
-    if args.dump_dir and args.layout:
+    if args.layout:
         with open(args.layout) as layout_json_file:
             try:
                 layout_json = json.load(layout_json_file)
@@ -372,7 +372,7 @@ def main():
         if total > ignore_threshold:
             cov_data.append((blocks, total, func, getModule(func)))
             if not args.dump_dir:
-                print "Reached: %3d from %3d blocks (%3d%%) in %s" % (blocks, total, percent, func)
+                print "Reached: %3d from %3d blocks (%3d%%) in %s (%s)" % (blocks, total, percent, func, getModule(func))
 
     print
     if print_missing:
@@ -383,14 +383,14 @@ def main():
             if func not in reached_map and blocks > ignore_threshold:
                 cov_data.append((0, blocks, func, getModule(func)))
                 if not args.dump_dir:
-                    print "Missed: %3d blocks in %s" % (blocks, func)
+                    print "Missed: %3d blocks in %s (%s)" % (blocks, func, getModule(func))
     if args.dump_dir:
         enclave_cov_bb = 0
         enclave_all_bb = 0
         interest_cov_bb = 0
         interest_all_bb = 0
         for blocks, total, func, module in cov_data:
-            if ("libsgx" not in module) and ("_t.o" not in module):
+            if module and ("libsgx" not in module or "libsgx_tsgxssl" in module) and ("_t.o" not in module):
                 interest_cov_bb += blocks
                 interest_all_bb += total
             enclave_cov_bb += blocks

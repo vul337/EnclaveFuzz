@@ -57,6 +57,9 @@ def main():
         if args.kind == "EnclaveFuzz" and not log.endswith(r".log"):
             pbar.update
             continue
+        if args.kind == "SGXFuzz" and not log.startswith("hprint_log_"):
+            pbar.update
+            continue
         log_abs = os.path.join(args.log_dir, log)
         if not os.path.exists(log_abs):
             pbar.update

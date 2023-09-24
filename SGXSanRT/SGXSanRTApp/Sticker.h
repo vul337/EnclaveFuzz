@@ -20,8 +20,8 @@ int dlItCBGetEnclaveDSO(struct dl_phdr_info *info, size_t size, void *data);
 void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start, uint8_t *Stop);
 void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
                                       const uintptr_t *pcs_end);
-uintptr_t GetOffsetIfEnclave(uintptr_t pc);
 #endif
+uintptr_t GetOffsetIfEnclave(uintptr_t pc);
 #if defined(__cplusplus)
 }
 #endif

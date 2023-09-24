@@ -82,7 +82,6 @@ struct SGXSanLegacyPass : public ModulePass {
                                             "rmdir",
                                             "setenv",
                                             "sleep",
-                                            "sysconf",
                                             "time",
                                             "unlink",
                                             "utimes",

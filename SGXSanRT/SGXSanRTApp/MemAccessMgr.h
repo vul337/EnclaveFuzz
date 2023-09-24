@@ -115,12 +115,10 @@ public:
 
   static void add_in_enclave_access_cnt() {
     if (RunInEnclave) {
-#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
       if (m_active) {
         sgxsan_assert(m_inited);
         m_in_enclave_access_cnt++;
       }
-#endif
     }
   }
 

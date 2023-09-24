@@ -47,7 +47,9 @@ void MemAccessMgrActive() { MemAccessMgr::active(); }
 void MemAccessMgrDeactive() { MemAccessMgr::deactive(); }
 
 void MemAccessMgrInEnclaveAccess() {
+#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
   MemAccessMgr::add_in_enclave_access_cnt();
+#endif
 }
 
 void MemAccessMgrClear() { MemAccessMgr::clear(); }
