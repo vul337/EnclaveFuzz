@@ -34,11 +34,11 @@ fi
 # build sgx_edger8r
 if [ ! -f Tool/sgx_edger8r ]
 then
-    cd edger8r
+    cd ThirdParty/edger8r
     eval $(opam env)
     dune build
-    cd ..
-    cp edger8r/_build/default/linux/Edger8r.bc Tool/sgx_edger8r
+    cd ../..
+    cp ThirdParty/edger8r/_build/default/linux/Edger8r.bc Tool/sgx_edger8r
 fi
 # build
 CC="clang-13" CXX="clang++-13" cmake ${CMAKE_FLAGS} -B build_dir/${MODE}-${FUZZER}-build -DCMAKE_INSTALL_PREFIX=$(pwd)/install_dir/${MODE}-${FUZZER}-install

@@ -11,7 +11,7 @@ done
 PWD=$(pwd)
 SGXSAN_DIR="$(realpath ${PWD})"
 PATCH_DIR="$(realpath ${SGXSAN_DIR}/patch/)"
-LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/linux-sgx)
+LINUX_SGX_SRC_DIR=$(realpath ${SGXSAN_DIR}/ThirdParty/linux-sgx)
 LINUX_SGX_DCAP_SRC_DIR=$(realpath ${LINUX_SGX_SRC_DIR}/external/dcap_source)
 
 MODE=${MODE:="RELEASE"}
@@ -211,10 +211,10 @@ ${MAKE} -j${Jobs} ${ADD_MAKE_FLAGS}
 ${CP} sgx_sign ${PREFIX}/bin/x64
 
 echo "== Get Intel SGXSSL =="
-cd ${SGXSAN_DIR}/intel-sgx-ssl
+cd ${SGXSAN_DIR}/ThirdParty/intel-sgx-ssl
 ./clean.sh
 ./build.sh MODE=${MODE} FUZZER=${FUZZER} INST_COV=${INST_COV}
-${CP} -rf ${SGXSAN_DIR}/intel-sgx-ssl/Linux/package/* ${PREFIX}/sgxssl/
+${CP} -rf ${SGXSAN_DIR}/ThirdParty/intel-sgx-ssl/Linux/package/* ${PREFIX}/sgxssl/
 cd ${PREFIX}/sgxssl/lib64
 if [[ ! -f libsgx_tsgxssl.a && -f libsgx_tsgxssld.a ]]; then ${LN} -sf libsgx_tsgxssld.a libsgx_tsgxssl.a; fi
 if [[ ! -f libsgx_tsgxssl_crypto.a && -f libsgx_tsgxssl_cryptod.a ]]; then ${LN} -sf libsgx_tsgxssl_cryptod.a libsgx_tsgxssl_crypto.a; fi

@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
-cd linux-sgx
+cd ThirdParty/linux-sgx
 make preparation

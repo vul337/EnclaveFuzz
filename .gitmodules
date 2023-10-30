@@ -1,27 +1,30 @@
-[submodule "SVF"]
-	path = SVF
+[submodule "ThirdParty/SVF"]
+	path = ThirdParty/SVF
 	url = git@github.com:SVF-tools/SVF.git
-[submodule "plthook"]
-	path = plthook
+[submodule "ThirdParty/plthook"]
+	path = ThirdParty/plthook
 	url = git@github.com:kubo/plthook.git
-[submodule "edger8r"]
-	path = edger8r
+[submodule "ThirdParty/edger8r"]
+	path = ThirdParty/edger8r
 	url = git@github.com:LeoneChen/edger8r.git
-[submodule "json"]
-	path = json
+[submodule "ThirdParty/json"]
+	path = ThirdParty/json
 	url = git@github.com:nlohmann/json.git
-[submodule "SGXFuzzerRT/libFuzzer"]
-	path = SGXFuzzerRT/libFuzzer
+[submodule "ThirdParty/libFuzzer"]
+	path = ThirdParty/libFuzzer
 	url = git@github.com:LeoneChen/libFuzzer.git
-[submodule "magic_enum"]
-	path = magic_enum
+[submodule "ThirdParty/magic_enum"]
+	path = ThirdParty/magic_enum
 	url = git@github.com:Neargye/magic_enum.git
-[submodule "linux-sgx"]
-	path = linux-sgx
+[submodule "ThirdParty/linux-sgx"]
+	path = ThirdParty/linux-sgx
 	url = git@github.com:intel/linux-sgx.git
 [submodule "kAFL"]
 	path = kAFL
 	url = git@github.com:IntelLabs/kAFL.git
-[submodule "intel-sgx-ssl"]
-	path = intel-sgx-ssl
+[submodule "ThirdParty/intel-sgx-ssl"]
+	path = ThirdParty/intel-sgx-ssl
 	url = git@github.com:LeoneChen/intel-sgx-ssl.git
+[submodule "ThirdParty/linux-sgx-build-scripts"]
+	path = ThirdParty/linux-sgx-build-scripts
+	url = git@github.com:LeoneChen/linux-sgx-build-scripts.git

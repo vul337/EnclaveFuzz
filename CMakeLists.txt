@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
-set(LINUX_SGX_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/linux-sgx")
+set(LINUX_SGX_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/linux-sgx")
 set(LINUX_SGX_MINI "${CMAKE_CURRENT_SOURCE_DIR}/SGXSanRT/linux-sgx-mini/")
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(KAFL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/kAFL)

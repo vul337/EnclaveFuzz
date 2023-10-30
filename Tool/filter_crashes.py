@@ -60,13 +60,13 @@ def update2dict(bt_str, error_tag, pc_value, crash_file, do_simple):
         or not dict[filter1][filter2][filter3]["inputs"]
     ):
         dict[filter1][filter2][filter3]["inputs"].append(os.path.basename(crash_file))
-        filtered_crashes_dir = os.path.join(
-            os.path.dirname(os.path.dirname(crash_file)), "filtered_crashes"
-        )
-        os.makedirs(filtered_crashes_dir, exist_ok=True)
-        shutil.copyfile(
-            crash_file, os.path.join(filtered_crashes_dir, os.path.basename(crash_file))
-        )
+        # filtered_crashes_dir = os.path.join(
+        #     os.path.dirname(os.path.dirname(crash_file)), "filtered_crashes"
+        # )
+        # os.makedirs(filtered_crashes_dir, exist_ok=True)
+        # shutil.copyfile(
+        #     crash_file, os.path.join(filtered_crashes_dir, os.path.basename(crash_file))
+        # )
 
     if "hash2bt" not in dict:
         dict["hash2bt"] = {}
